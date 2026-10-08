@@ -1,0 +1,368 @@
+// Stands in for Home Assistant so the real panel can be driven in a browser.
+//
+// It answers the five websocket commands the integration registers, backed by
+// a small in-memory store that mirrors store.py's operations and schedule.py's
+// date maths. Those are already covered on the Python side;
+// what this exists to exercise is the panel — that a tap reaches the right
+// command, that stock and history update, that nothing throws.
+
+import '../../custom_components/elmer/frontend/elmer-panel.js';
+
+/* ------------------------------------------------------- schedule maths -- */
+
+function parseDay(iso) {
+  if (!iso) return null;
+  const [y, m, d] = String(iso).split('-').map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 12, 0, 0, 0);
+}
+function toDay(date) {
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${m}-${d}`;
+}
+function today() { return toDay(new Date()); }
+function addInterval(iso, count, unit) {
+  const d = parseDay(iso);
+  if (!d) return null;
+  const n = Number(count) || 0;
+  if (unit === 'days') d.setDate(d.getDate() + n);
+  else if (unit === 'weeks') d.setDate(d.getDate() + n * 7);
+  else if (unit === 'years') d.setFullYear(d.getFullYear() + n);
+  else {
+    const target = d.getDate();
+    d.setDate(1);
+    d.setMonth(d.getMonth() + n);
+    const last = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+    d.setDate(Math.min(target, last));
+  }
+  return toDay(d);
+}
+function daysBetween(a, b) {
+  const x = parseDay(a); const y = parseDay(b);
+  if (!x || !y) return 0;
+  return Math.round((y - x) / 86400000);
+}
+function taskState(task, soon = 14) {
+  if (!task || !task.lastDone) {
+    return { due: null, daysLeft: null, status: 'new', progress: 0, cycle: null };
+  }
+  const due = addInterval(task.lastDone, task.intervalCount, task.intervalUnit);
+  const now = today();
+  const daysLeft = daysBetween(now, due);
+  const cycle = Math.max(1, daysBetween(task.lastDone, due));
+  const elapsed = daysBetween(task.lastDone, now);
+  const progress = Math.max(0, Math.min(1, elapsed / cycle));
+  let status = 'ok';
+  if (daysLeft < 0) status = 'overdue';
+  else if (daysLeft <= soon) status = 'due';
+  return { due, daysLeft, status, progress, cycle };
+}
+function stockStatus(s) {
+  const q = Number(s.quantity) || 0;
+  const f = Number(s.reorderAt) || 0;
+  if (q <= 0) return 'out';
+  if (q <= f) return 'low';
+  return 'ok';
+}
+
+/* ----------------------------------------------------------------- data -- */
+
+const ago = (days) => addInterval(today(), -days, 'days');
+
+// Kept aside so the preview can swap between a furnished house and a fresh
+// install — the empty states are a real screen and deserve to be looked at.
+const SEED = {
+  equipment: [
+    { id: 'eq1', name: 'Furnace / Air Conditioner', location: 'Basement', category: 'hvac',
+      brand: 'Trane', model: 'XR80 / 4TTR3036', serial: '12345A / 67890B', partNumber: '20x25x1',
+      installedOn: '2019-04-11', purchasedFrom: 'Midwest Heating & Air',
+      phone: '(555) 123-4567', email: 'service@midwest.example',
+      notes: 'Furnace filter is behind the lower panel. The condensate line runs to the floor drain.',
+      icon: 'furnace',
+      parts: [{ label: 'Filter on Amazon', url: 'amazon.com/dp/B000' }, { url: 'trane.com/manual' }] },
+    { id: 'eq2', name: 'Kitchen Refrigerator', location: 'Kitchen', category: 'appliance',
+      brand: 'LG', model: 'LFXS26973S', partNumber: 'LT1000P', icon: 'refrigerator', parts: [] },
+    { id: 'eq3', name: 'Water Softener', location: 'Basement', category: 'water',
+      brand: 'Culligan', icon: 'water', parts: [] },
+    { id: 'eq4', name: 'Smoke Alarms', location: 'Hallway', category: 'safety',
+      icon: 'alarm', parts: [] },
+    { id: 'eq5', name: 'Riding Mower', location: 'Garage', category: 'vehicle',
+      brand: 'John Deere', model: 'S140', icon: 'mower', parts: [] },
+  ],
+  tasks: [
+    { id: 't1', equipmentId: 'eq1', name: 'Replace Furnace Filter', lastDone: ago(122),
+      intervalCount: 3, intervalUnit: 'months', partsUsed: [{ supplyId: 's1', quantity: 1 }] },
+    { id: 't2', equipmentId: 'eq1', name: 'Professional Service', lastDone: ago(400),
+      intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
+    { id: 't3', equipmentId: 'eq1', name: 'Clear Condensate Drain Line', lastDone: ago(170),
+      intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
+    { id: 't4', equipmentId: 'eq2', name: 'Replace Water Filter', lastDone: ago(175),
+      intervalCount: 6, intervalUnit: 'months', partsUsed: [{ supplyId: 's2', quantity: 1 }] },
+    { id: 't5', equipmentId: 'eq2', name: 'Clean Condenser Coils', lastDone: ago(40),
+      intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
+    { id: 't6', equipmentId: 'eq3', name: 'Add Salt', lastDone: ago(26),
+      intervalCount: 1, intervalUnit: 'months', partsUsed: [{ supplyId: 's3', quantity: 2 }] },
+    { id: 't7', equipmentId: 'eq4', name: 'Test Alarm', lastDone: ago(200),
+      intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
+    { id: 't8', equipmentId: 'eq4', name: 'Replace Battery', lastDone: null,
+      intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
+    { id: 't9', equipmentId: 'eq5', name: 'Oil Change', lastDone: ago(14),
+      intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
+    { id: 't10', equipmentId: 'eq5', name: 'Sharpen Blades', lastDone: ago(95),
+      intervalCount: 3, intervalUnit: 'months', partsUsed: [] },
+  ],
+  supplies: [
+    { id: 's1', name: '20x25x1 MERV 11', quantity: 3, reorderAt: 2, partNumber: 'MPR 1200',
+      purchasedFrom: 'Home Depot' },
+    { id: 's2', name: 'LG LT1000P', quantity: 0, reorderAt: 1, partNumber: 'LT1000P' },
+    { id: 's3', name: 'Softener Salt (40 lb)', quantity: 2, reorderAt: 2 },
+    { id: 's4', name: '9V Battery', quantity: 8, reorderAt: 2 },
+  ],
+  log: [
+    { id: 'l1', taskId: 't5', equipmentId: 'eq2', taskName: 'Clean Condenser Coils',
+      doneOn: ago(40), notes: 'Vacuumed the coils and the drip pan.', cost: '',
+      recordedAt: Date.now() - 4e9, previousLastDone: ago(220), usedParts: [] },
+    { id: 'l2', taskId: 't9', equipmentId: 'eq5', taskName: 'Oil Change',
+      doneOn: ago(14), notes: '', cost: '34.50', recordedAt: Date.now() - 1e9,
+      previousLastDone: ago(200), usedParts: [] },
+  ],
+  settings: { theme: 'system', showLocations: true, dueSoonDays: 14, notifyOverdue: true },
+};
+
+/* ---------------------------------------------------------------- store -- */
+
+// Everything below mutates `data`; SEED stays as the pristine copy to reset to.
+const data = JSON.parse(JSON.stringify(SEED));
+
+const listeners = new Set();
+let logSeq = 100;
+
+function upsert(list, record) {
+  const i = list.findIndex((r) => r.id === record.id);
+  if (i === -1) list.push({ ...record });
+  else list[i] = { ...list[i], ...record };
+}
+
+function applyOp(kind, p) {
+  if (kind === 'equipment.put') upsert(data.equipment, p);
+  else if (kind === 'equipment.delete') {
+    data.equipment = data.equipment.filter((e) => e.id !== p.id);
+    data.tasks = data.tasks.filter((t) => t.equipmentId !== p.id);
+  } else if (kind === 'routine.put') upsert(data.tasks, p);
+  else if (kind === 'routine.delete') data.tasks = data.tasks.filter((t) => t.id !== p.id);
+  else if (kind === 'routine.lastDone') {
+    const t = data.tasks.find((x) => x.id === p.id);
+    if (t) t.lastDone = p.doneOn;
+  } else if (kind === 'part.put') upsert(data.supplies, p);
+  else if (kind === 'part.delete') data.supplies = data.supplies.filter((s) => s.id !== p.id);
+  else if (kind === 'part.adjust') {
+    const s = data.supplies.find((x) => x.id === p.id);
+    if (s) s.quantity = Math.max(0, (Number(s.quantity) || 0) + Number(p.delta));
+  } else if (kind === 'log.append') {
+    if (!data.log.some((l) => l.id === p.id)) data.log.unshift(p);
+  } else if (kind === 'log.remove') data.log = data.log.filter((l) => l.id !== p.id);
+  else if (kind === 'settings.put') Object.assign(data.settings, p);
+}
+
+function snapshot() {
+  const soon = data.settings.dueSoonDays || 14;
+  const states = {};
+  for (const t of data.tasks) states[t.id] = taskState(t, soon);
+  const stock = {};
+  for (const s of data.supplies) stock[s.id] = stockStatus(s);
+  const vals = Object.values(states);
+  return {
+    equipment: data.equipment,
+    tasks: data.tasks,
+    supplies: data.supplies,
+    log: data.log,
+    settings: data.settings,
+    computed: {
+      today: today(),
+      dueSoonDays: soon,
+      states,
+      stock,
+      counts: {
+        overdue: vals.filter((s) => s.status === 'overdue').length,
+        due: vals.filter((s) => s.status === 'due').length,
+        new: vals.filter((s) => s.status === 'new').length,
+        ok: vals.filter((s) => s.status === 'ok').length,
+        lowStock: Object.values(stock).filter((s) => s !== 'ok').length,
+        equipment: data.equipment.length,
+      },
+    },
+  };
+}
+
+function notify() {
+  for (const cb of listeners) cb(snapshot());
+}
+
+/* -------------------------------------------------------------- the hass -- */
+
+// Visible to the test so it can assert on what the panel actually sent.
+window.__sent = [];
+
+const connection = {
+  async sendMessagePromise(msg) {
+    window.__sent.push(msg);
+    // A real connection is never instant; a tick here is what surfaces a
+    // double-tap or a missing busy guard.
+    await new Promise((r) => setTimeout(r, 12));
+
+    if (msg.type === 'elmer/apply') {
+      for (const op of msg.ops) applyOp(op.kind, op.payload);
+      notify();
+      return { ok: true };
+    }
+    if (msg.type === 'elmer/complete') {
+      const task = data.tasks.find((t) => t.id === msg.taskId);
+      if (!task) throw { code: 'not_found', message: 'No such routine' };
+      const wanted = msg.used && msg.used.length ? msg.used : (task.partsUsed || []);
+      const taken = [];
+      for (const u of wanted) {
+        const s = data.supplies.find((x) => x.id === u.supplyId);
+        if (!s) continue;
+        const qty = Math.min(Math.max(0, Number(u.quantity) || 0), Math.max(0, Number(s.quantity) || 0));
+        if (qty > 0) taken.push({ supplyId: u.supplyId, quantity: qty });
+      }
+      const doneOn = msg.doneOn || today();
+      const entry = {
+        id: `log_${logSeq += 1}`,
+        taskId: msg.taskId,
+        equipmentId: task.equipmentId,
+        taskName: task.name,
+        doneOn,
+        notes: msg.notes || '',
+        cost: msg.cost || '',
+        recordedAt: Date.now(),
+        previousLastDone: task.lastDone || null,
+        usedParts: taken,
+      };
+      applyOp('routine.lastDone', { id: msg.taskId, doneOn });
+      for (const u of taken) applyOp('part.adjust', { id: u.supplyId, delta: -u.quantity });
+      applyOp('log.append', entry);
+      notify();
+      return { entry };
+    }
+    if (msg.type === 'elmer/import') {
+      const incoming = msg.data || {};
+      const take = (k) => (Array.isArray(incoming[k]) ? incoming[k] : []);
+      if (!msg.merge) {
+        data.equipment = take('equipment');
+        data.tasks = take('tasks');
+        data.supplies = take('supplies');
+        data.log = take('log');
+        if (incoming.settings) Object.assign(data.settings, incoming.settings);
+      } else {
+        if (incoming.settings) applyOp('settings.put', incoming.settings);
+        for (const e of take('equipment')) applyOp('equipment.put', e);
+        for (const t of take('tasks')) applyOp('routine.put', t);
+        for (const s of take('supplies')) applyOp('part.put', s);
+        for (const l of [...take('log')].reverse()) applyOp('log.append', l);
+      }
+      notify();
+      return {
+        counts: {
+          equipment: take('equipment').length,
+          routines: take('tasks').length,
+          parts: take('supplies').length,
+          history: take('log').length,
+        },
+      };
+    }
+    if (msg.type === 'elmer/undo') {
+      const entry = data.log.find((l) => l.id === msg.logId);
+      if (!entry) throw { code: 'not_found', message: 'No such history entry' };
+      applyOp('routine.lastDone', { id: entry.taskId, doneOn: entry.previousLastDone });
+      for (const u of entry.usedParts || []) applyOp('part.adjust', { id: u.supplyId, delta: u.quantity });
+      applyOp('log.remove', { id: msg.logId });
+      notify();
+      return { ok: true };
+    }
+    throw { code: 'unknown', message: `unexpected ${msg.type}` };
+  },
+
+  subscribeMessage(cb, msg) {
+    if (msg.type !== 'elmer/subscribe') return Promise.reject(new Error('bad subscribe'));
+    listeners.add(cb);
+    setTimeout(() => cb(snapshot()), 0);
+    return Promise.resolve(() => listeners.delete(cb));
+  },
+};
+
+const params = new URLSearchParams(location.search);
+
+/**
+ * Home Assistant does not only report its mode on `hass.themes` — it paints a
+ * set of custom properties onto the document, and the panel reads them so it
+ * sits inside whatever theme is running. Leaving them out made the harness
+ * kinder than the real thing: every one of Elmer's own fallbacks applied,
+ * which is not what happens in Home Assistant, where they are all supplied.
+ * These are HA's default light and dark values.
+ */
+const HA_THEME = {
+  light: {
+    '--primary-background-color': '#fafafa',
+    '--card-background-color': '#ffffff',
+    '--secondary-background-color': '#e5e5e5',
+    '--primary-text-color': '#212121',
+    '--secondary-text-color': '#727272',
+    '--divider-color': 'rgba(0, 0, 0, 0.12)',
+  },
+  dark: {
+    '--primary-background-color': '#111111',
+    '--card-background-color': '#1c1c1c',
+    '--secondary-background-color': '#202020',
+    '--primary-text-color': '#e1e1e1',
+    '--secondary-text-color': '#9b9b9b',
+    '--divider-color': 'rgba(225, 225, 225, 0.12)',
+  },
+};
+
+window.__setHaTheme = (mode) => {
+  const vars = HA_THEME[mode] || HA_THEME.light;
+  for (const [k, v] of Object.entries(vars)) document.documentElement.style.setProperty(k, v);
+  document.body.style.background = vars['--primary-background-color'];
+};
+window.__setHaTheme(params.get('dark') === '1' ? 'dark' : 'light');
+
+const panel = document.createElement('elmer-panel');
+panel.hass = {
+  connection,
+  themes: { darkMode: params.get('dark') === '1' },
+  language: 'en',
+  user: { is_admin: true, name: 'Phil' },
+};
+panel.narrow = params.get('narrow') === '1';
+panel.panel = { config: { version: '1.0.0' } };
+document.body.appendChild(panel);
+
+// Handles the panel's request to open Home Assistant's sidebar, which proves
+// the event is actually dispatched and composed past the shadow boundary.
+window.__menuToggles = 0;
+window.addEventListener('hass-toggle-menu', () => { window.__menuToggles += 1; });
+
+window.__panel = panel;
+window.__snapshot = snapshot;
+
+/**
+ * Swap the whole data set, for looking at what a fresh install shows.
+ * 'empty' is what somebody sees the first time they open the panel.
+ */
+window.__setData = (mode) => {
+  const next = mode === 'empty'
+    ? { equipment: [], tasks: [], supplies: [], log: [], settings: { ...SEED.settings } }
+    : JSON.parse(JSON.stringify(SEED));
+  data.equipment = next.equipment;
+  data.tasks = next.tasks;
+  data.supplies = next.supplies;
+  data.log = next.log;
+  data.settings = next.settings;
+  notify();
+};
+
+if (params.get('empty') === '1') window.__setData('empty');
+
+window.__ready = true;

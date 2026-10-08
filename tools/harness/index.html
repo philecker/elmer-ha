@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Elmer panel harness</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #e9ecea; }
+  /* Home Assistant gives a panel the whole content area, so the harness does
+     too — anything smaller would hide a layout problem rather than show it. */
+  elmer-panel { display: block; height: 100%; }
+</style>
+</head>
+<body>
+<script type="module">
+// A stand-in for Home Assistant: the same two websocket calls the panel makes,
+// answered by a mini store that implements the integration's operations and
+// schedule maths in the browser. The point is to drive the real panel code,
+// not to re-test the Python.
+import './fake-hass.js';
+</script>
+</body>
+</html>

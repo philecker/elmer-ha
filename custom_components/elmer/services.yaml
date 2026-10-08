@@ -1,0 +1,112 @@
+complete:
+  name: Mark a routine done
+  description: >-
+    Records a routine as completed today, draws down any parts it consumes, and
+    adds a history entry. The same thing the tick in the panel does.
+  fields:
+    routine:
+      name: Routine
+      description: >-
+        The routine's name. If two routines share a name, qualify it with the
+        equipment — "Furnace: Replace filter".
+      required: true
+      example: "Furnace: Replace filter"
+      selector:
+        text:
+    done_on:
+      name: Done on
+      description: The date it was done. Defaults to today.
+      required: false
+      example: "2026-10-07"
+      selector:
+        date:
+    notes:
+      name: Notes
+      description: Anything worth remembering about this service.
+      required: false
+      selector:
+        text:
+          multiline: true
+    cost:
+      name: Cost
+      description: What it cost, recorded as text so any currency works.
+      required: false
+      selector:
+        text:
+
+undo:
+  name: Undo a completion
+  description: >-
+    Reverses the most recent completion, restoring the previous due date and
+    putting back exactly the parts that completion took.
+  fields:
+    routine:
+      name: Routine
+      description: >-
+        Undo the latest completion of this routine. Leave empty to undo the most
+        recent completion of anything.
+      required: false
+      example: "Furnace: Replace filter"
+      selector:
+        text:
+
+adjust_stock:
+  name: Adjust part stock
+  description: Add to or take from the quantity on hand. Never goes below zero.
+  fields:
+    part:
+      name: Part
+      description: The part's name, exactly as it appears in the Parts list.
+      required: true
+      example: "20x25x1 MERV 11"
+      selector:
+        text:
+    delta:
+      name: Change
+      description: Positive to add, negative to remove.
+      required: true
+      example: -1
+      selector:
+        number:
+          min: -999
+          max: 999
+          mode: box
+
+import_json:
+  name: Import from a file
+  description: >-
+    Reads an elmer.json backup. The file must be inside your Home Assistant
+    config folder.
+  fields:
+    path:
+      name: Path
+      description: Relative to your config folder, or an absolute path inside it.
+      required: true
+      example: elmer.json
+      selector:
+        text:
+    merge:
+      name: Merge
+      description: >-
+        On, records are matched by id and updated in place, so nothing already
+        here is lost. Off, the import replaces everything.
+      required: false
+      default: true
+      selector:
+        boolean:
+
+export_json:
+  name: Export to a file
+  description: >-
+    Writes everything out as JSON. With no path, returns the data in the
+    response instead of writing a file.
+  fields:
+    path:
+      name: Path
+      description: >-
+        Relative to your config folder, or an absolute path inside it. Leave
+        empty to get the data back in the response.
+      required: false
+      example: backups/elmer.json
+      selector:
+        text:

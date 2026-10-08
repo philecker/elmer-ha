@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Elmer",
+        "description": "Adds Elmer to your sidebar. Nothing to configure — everything else is set inside the panel."
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Elmer is already set up."
+    }
+  },
+  "services": {
+    "complete": { "name": "Mark a routine done", "description": "Records a routine as completed, draws down any parts it consumes, and adds a history entry." },
+    "undo": { "name": "Undo a completion", "description": "Reverses the most recent completion and puts back the parts it took." },
+    "adjust_stock": { "name": "Adjust part stock", "description": "Adds to or takes from the quantity on hand." },
+    "import_json": { "name": "Import from a file", "description": "Reads an elmer.json backup." },
+    "export_json": { "name": "Export to a file", "description": "Writes everything out as JSON." }
+  }
+}
