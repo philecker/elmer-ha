@@ -78,6 +78,16 @@ export const CSS = `
   --ui-user: 1;
   --ui-scale: calc(var(--ui-base) * var(--ui-user));
 
+  /* The tab row sits one step above everything else. These are the five places
+     you navigate from and they are read at a glance, not studied, so at the
+     body's size they came out looking like a caption. 1.12 is exactly the
+     "large" step of the text-size setting below, so the tabs now start where
+     large used to put them — and because the step is folded into the tabs' own
+     --ui-scale rather than written into a font-size, the label, the icon, the
+     badge and the 46px tap target all move together, and every step of the
+     setting still moves them from there. */
+  --tab-bump: 1.12;
+
   --gutter: 14px;
   --content: 820px;
   /* A tab's own padding, which must stay at or below --gutter: the tab row is
@@ -164,7 +174,24 @@ export const CSS = `
    ============================================================ */
 
 .app {
-  height: 100%;
+  /* The app has to end where the window does, or nothing inside it scrolls.
+     height:100% only works when whatever holds the panel has a height of its
+     own, and Home Assistant does not always give a custom panel one; when it
+     does not, 100% computes to auto, the app grows to the length of the list,
+     and the *document* scrolls instead, taking the header and tabs with it.
+
+     So the height is measured from the window rather than inherited: the panel
+     records its own distance from the top of the window in --panel-t and the
+     rest is what is left. It lives here rather than on :host because a rule in
+     the document that targets the host element wins over :host regardless of
+     specificity — and both Home Assistant and the harness set a height on the
+     panel that way. Nothing outside the shadow root can reach .app.
+
+     max-height keeps it honest when the panel *is* given a height: a
+     percentage against an auto-height host resolves to none, so it only binds
+     in the case where there is a real height to be bound by. */
+  height: calc(100dvh - var(--panel-t, 0px));
+  max-height: 100%;
   display: grid;
   /* minmax(0, 1fr), not 1fr: a grid item floors at its min-content width, so
      the scrolling tab row would otherwise widen the whole column to fit every
@@ -275,6 +302,9 @@ export const CSS = `
 .tabsinner::-webkit-scrollbar { display: none; }
 
 .tab {
+  /* Everything inside a tab is measured against this, so the step up applies
+     once, here, instead of being written into each size separately. */
+  --ui-scale: calc(var(--ui-base) * var(--ui-user) * var(--tab-bump));
   flex: 0 0 auto;
   position: relative;
   display: flex;
@@ -340,6 +370,16 @@ export const CSS = `
   overscroll-behavior-y: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
+  /* Hold the scrollbar's width whether or not there is anything to scroll.
+     Without it the track appears only on the long tabs, and every move between
+     a long list and a short one shifts the content sideways by its width.
+
+     both-edges, not plain stable: the content column is centred, so reserving
+     the gutter on one side only moves the centre line half a scrollbar to the
+     left and the content stops lining up with the header and the tab row above
+     it, which do not have a gutter. Reserving it on both sides keeps the centre
+     where it was. */
+  scrollbar-gutter: stable both-edges;
 }
 .scroll::-webkit-scrollbar { width: 9px; }
 .scroll::-webkit-scrollbar-track { background: transparent; }
@@ -664,6 +704,21 @@ export const CSS = `
 }
 .btn:hover { background: var(--surface-2); }
 .btn:active { transform: scale(0.985); }
+/* A .btn is usually a <button>; the one in Support is a link out, and a link
+   arrives underlined. */
+a.btn { text-decoration: none; }
+
+/* Prose in a card. Not .note, which is pre-wrap for text somebody typed and
+   would keep this block's own source indentation. */
+.support { padding: 2px 12px 14px; }
+.support p {
+  margin: 10px 0 0;
+  font-size: calc(13px * var(--ui-scale));
+  color: var(--ink-2);
+  line-height: 1.55;
+}
+.support .btn { margin-top: 14px; }
+
 .btn[data-variant="primary"] {
   background: var(--accent);
   border-color: var(--accent);

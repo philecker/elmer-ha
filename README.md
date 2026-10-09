@@ -181,6 +181,29 @@ actions:
 ```
 
 ```yaml
+# Order parts before the routine that needs them comes round.
+triggers:
+  - trigger: numeric_state
+    entity_id: sensor.elmer_parts_short
+    above: 0
+actions:
+  - action: notify.mobile_app_phone
+    data:
+      title: Order parts
+      message: >-
+        {{ state_attr('sensor.elmer_parts_short', 'names') | join(', ') }}
+```
+
+`sensor.elmer_parts_short` answers a different question from
+`sensor.elmer_parts_to_reorder`. The reorder sensor watches each part against
+its own threshold. This one adds up what every routine due inside the warning
+window actually needs — two routines sharing a filter are counted together —
+and reports the parts where that total comes to more than is on the shelf. A
+part can sit comfortably above its reorder point and still be one short of
+what next week needs, and only this sensor sees it. Its `parts` attribute
+carries `needed`, `on_hand`, `short` and the routines asking for each one.
+
+```yaml
 # Mark the furnace filter done from a dashboard button.
 actions:
   - action: elmer.complete
@@ -265,3 +288,17 @@ alongside Home Assistant's own `hassfest` and the HACS action.
   through Home Assistant's authenticated proxy, which is
   [hacs/integration#5223](https://github.com/hacs/integration/issues/5223),
   open at the time of writing.
+
+---
+
+## Support
+
+Elmer is built and maintained by **Phil Ecker**. It is free and open source,
+and everything it records stays on your own Home Assistant — no account, no
+tracking, nothing sent anywhere.
+
+If it has saved you a forgotten filter change or two, you are very welcome to
+[buy me a coffee](https://buymeacoffee.com/philecker).
+
+Bug reports and ideas are just as welcome, over on
+[the issue tracker](https://github.com/philecker/elmer-ha/issues).

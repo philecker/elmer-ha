@@ -233,6 +233,59 @@ class ElmerStore:
         out.sort(key=schedule.sort_key)
         return out
 
+    def parts_short(self) -> list[dict]:
+        """Parts the routines coming up need more of than are on the shelf.
+
+        This is a different question from the reorder point, which is a standing
+        threshold on a part and knows nothing about the schedule: not which
+        routines use the part, nor how many each takes, nor when they are next
+        due. A part can sit comfortably above its threshold and still be one
+        short of what next week actually needs — and two routines sharing a
+        filter are counted together here, which a per-part threshold cannot see
+        at all.
+
+        Overdue routines count: still undone, still needing the part. A routine
+        that has never been done has no due date, so nothing is coming up for it
+        and it is left out rather than counted as needed now.
+        """
+        soon = self.due_soon_days
+        needed: dict[str, int] = {}
+        wanted_by: dict[str, list[str]] = {}
+
+        for t in self.data["tasks"]:
+            if schedule.task_state(t, soon)["status"] not in ("overdue", "due"):
+                continue
+            for u in t.get("partsUsed") or []:
+                supply_id = u.get("supplyId")
+                qty = max(0, _int(u.get("quantity"), 0))
+                if not supply_id or qty <= 0:
+                    continue
+                needed[supply_id] = needed.get(supply_id, 0) + qty
+                wanted_by.setdefault(supply_id, []).append(t.get("name") or "")
+
+        out = []
+        for supply_id, want in needed.items():
+            supply = self.supply(supply_id)
+            if not supply:
+                continue                      # the part was deleted out from under it
+            have = max(0, _int(supply.get("quantity"), 0))
+            if want <= have:
+                continue
+            out.append(
+                {
+                    "name": supply.get("name"),
+                    "needed": want,
+                    "on_hand": have,
+                    "short": want - have,
+                    "routines": sorted(n for n in wanted_by.get(supply_id, []) if n),
+                }
+            )
+
+        # Worst shortfall first, so a notification that truncates keeps the
+        # thing most worth ordering.
+        out.sort(key=lambda r: (-r["short"], str(r["name"] or "").lower()))
+        return out
+
     def counts(self) -> dict[str, int]:
         rows = self.rows()
         return {
@@ -243,6 +296,7 @@ class ElmerStore:
             "lowStock": sum(
                 1 for s in self.data["supplies"] if schedule.stock_status(s) != "ok"
             ),
+            "partsShort": len(self.parts_short()),
             "equipment": len(self.data["equipment"]),
         }
 

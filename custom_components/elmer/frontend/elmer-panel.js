@@ -92,6 +92,7 @@ class ElmerPanel extends HTMLElement {
     this._onChange = this._onChange.bind(this);
     this._onBlur = this._onBlur.bind(this);
     this._onThemeChange = this._onThemeChange.bind(this);
+    this._onResize = () => this._measurePanel();
   }
 
   /* ---------------------------------------------------------- lifecycle -- */
@@ -158,7 +159,17 @@ class ElmerPanel extends HTMLElement {
     if (typeof ResizeObserver === 'function') {
       this._resize = new ResizeObserver(() => this._measurePanel());
       this._resize.observe(this);
+      // The host is not the only thing that moves the panel. Home Assistant can
+      // put a toolbar above it, which shifts the panel down without changing
+      // its size at all — and a ResizeObserver on the host alone never hears
+      // about that, leaving the measured top stale and the app too tall by the
+      // height of the toolbar. Watching the document catches it.
+      this._resize.observe(document.documentElement);
     }
+    window.addEventListener('resize', this._onResize);
+    // One more after layout settles: at connect time the panel may not yet be
+    // where it will end up, and a wrong top is a wrong height.
+    requestAnimationFrame(() => this._measurePanel());
 
     this._render();
     if (this._hass && !this._unsub) this._connect();
@@ -172,26 +183,38 @@ class ElmerPanel extends HTMLElement {
     window.removeEventListener('keydown', this._onKeydown, true);
     if (this._media) this._media.removeEventListener('change', this._onThemeChange);
     if (this._resize) { this._resize.disconnect(); this._resize = null; }
+    window.removeEventListener('resize', this._onResize);
     if (this._toastTimer) clearTimeout(this._toastTimer);
     this._unsubscribe();
   }
 
   /**
-   * Record how far the panel sits from each edge of the window, so a sheet
-   * fixed to the window can still be centred on the panel. Writing a custom
-   * property changes nothing about the host's own box, so this cannot feed back
-   * into the ResizeObserver that calls it.
+   * Record where the panel sits in the window: the left and right offsets so a
+   * sheet fixed to the window can still be centred on the panel, and the top so
+   * the panel can be exactly as tall as the space below it.
+   *
+   * The top is taken relative to the document, not the viewport, so that it
+   * means the same thing whether or not the page happens to be scrolled — which
+   * matters because an unscrollable panel is precisely what this is fixing, and
+   * a viewport-relative reading would move as the page scrolled and feed the
+   * height back into itself.
+   *
+   * Writing custom properties changes nothing about the host's own position, so
+   * the ResizeObserver that calls this cannot loop through it; the height does
+   * change, which is why the early return on an unchanged key matters.
    */
   _measurePanel() {
     const box = this.getBoundingClientRect();
     if (!box.width) return;                 // hidden; whatever is set still holds
     const left = Math.max(0, Math.round(box.left));
     const right = Math.max(0, Math.round(window.innerWidth - box.right));
-    const key = `${left}:${right}`;
+    const top = Math.max(0, Math.round(box.top + (window.scrollY || 0)));
+    const key = `${left}:${right}:${top}`;
     if (key === this._panelBox) return;
     this._panelBox = key;
     this.style.setProperty('--panel-l', `${left}px`);
     this.style.setProperty('--panel-r', `${right}px`);
+    this.style.setProperty('--panel-t', `${top}px`);
   }
 
   _unsubscribe() {

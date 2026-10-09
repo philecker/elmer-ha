@@ -299,13 +299,73 @@ async def main() -> int:
         },
         merge=False,
     )
-    check("counts", s.counts(), {"overdue": 1, "due": 1, "new": 1, "ok": 1, "lowStock": 2, "equipment": 0})
+    check("counts", s.counts(), {"overdue": 1, "due": 1, "new": 1, "ok": 1, "lowStock": 2,
+                                 "partsShort": 0, "equipment": 0})
     # Never-done ranks ahead of fine: STATUS_RANK puts 'new' at 2 and 'ok' at 3,
     # because a routine with no date needs attention more than one that is fine.
     check("urgency order", [r["task"]["id"] for r in s.rows()], ["a", "b", "d", "c"])
     check("out of stock", schedule.stock_status({"quantity": 0, "reorderAt": 0}), "out")
     check("at the reorder point is low", schedule.stock_status({"quantity": 2, "reorderAt": 2}), "low")
     check("above it is fine", schedule.stock_status({"quantity": 3, "reorderAt": 2}), "ok")
+
+    # --- parts the coming routines will be short of -----------------------
+    # A different question from the reorder point: not "is this part below its
+    # own threshold" but "can the schedule actually be carried out". The two
+    # disagree in both directions, which is the whole reason for it.
+    s = new_store()
+    await s.async_load()
+    today = schedule.today()
+    await s.async_replace(
+        {
+            "tasks": [
+                # Both due soon and both wanting the same filter: 2 + 1 = 3.
+                {"id": "a", "name": "furnace filter", "lastDone": schedule.add_interval(today, -60, "days"),
+                 "intervalCount": 1, "intervalUnit": "months",
+                 "partsUsed": [{"supplyId": "filter", "quantity": 2}]},
+                {"id": "b", "name": "second filter", "lastDone": schedule.add_interval(today, -25, "days"),
+                 "intervalCount": 1, "intervalUnit": "months",
+                 "partsUsed": [{"supplyId": "filter", "quantity": 1}]},
+                # Not due for a year: its parts are not needed yet.
+                {"id": "c", "name": "far off", "lastDone": today,
+                 "intervalCount": 1, "intervalUnit": "years",
+                 "partsUsed": [{"supplyId": "belt", "quantity": 5}]},
+                # Never done, so nothing is scheduled and nothing is needed.
+                {"id": "d", "name": "never done", "lastDone": None,
+                 "intervalCount": 1, "intervalUnit": "months",
+                 "partsUsed": [{"supplyId": "gasket", "quantity": 4}]},
+            ],
+            "supplies": [
+                # Two on the shelf and well above its reorder point, yet three
+                # are needed: a threshold alone would call this fine.
+                {"id": "filter", "name": "Filter", "quantity": 2, "reorderAt": 0},
+                {"id": "belt", "name": "Belt", "quantity": 1, "reorderAt": 0},
+                {"id": "gasket", "name": "Gasket", "quantity": 0, "reorderAt": 0},
+            ],
+        },
+        merge=False,
+    )
+    short = s.parts_short()
+    check("only the part the schedule actually needs is short",
+          [r["name"] for r in short], ["Filter"])
+    check("two routines sharing a part are added together", short[0]["needed"], 3)
+    check("against what is on the shelf", short[0]["on_hand"], 2)
+    check("leaving the shortfall", short[0]["short"], 1)
+    check("and it names the routines that want it",
+          short[0]["routines"], ["furnace filter", "second filter"])
+    check("the count follows", s.counts()["partsShort"], 1)
+    # And the gap itself: the part that is short reads perfectly healthy by the
+    # reorder point, because two on the shelf is above a threshold of zero.
+    # Nothing but this check would have noticed.
+    check("while the short part's own reorder point calls it fine",
+          schedule.stock_status(s.supply("filter")), "ok")
+
+    # Enough on the shelf and the shortfall goes away.
+    await s.async_apply([("part.adjust", {"id": "filter", "delta": 1})])
+    check("topping it up clears it", s.parts_short(), [])
+
+    # A part deleted out from under a routine must not raise.
+    await s.async_apply([("part.delete", {"id": "filter"})])
+    check("a routine pointing at a deleted part is skipped", s.parts_short(), [])
 
     # --- listeners fire once per batch ------------------------------------
     hits = [0]

@@ -422,6 +422,14 @@ The same import and export below are available as the elmer.import_json and elme
       <dt>Version</dt><dd>${state.version}</dd>
       <dt>Today</dt><dd>${formatDay(state.computed.today, state.computed.today)}</dd>
     </dl></div>
+
+    <div class="label">Support</div>
+    <div class="card"><div class="support">
+      <p>Elmer is built and maintained by Phil Ecker. It is free and open source, and everything it records stays on your own Home Assistant — no account, no tracking, nothing sent anywhere.</p>
+      <p>If it has saved you a forgotten filter change or two, you are very welcome to buy me a coffee.</p>
+      <a class="btn" data-variant="primary" href="https://buymeacoffee.com/philecker"
+        target="_blank" rel="noopener noreferrer">${raw(icon('link', 16))}Buy me a coffee</a>
+    </div></div>
   </div></div>`;
 }
 

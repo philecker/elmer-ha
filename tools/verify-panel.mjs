@@ -816,9 +816,99 @@ async function main() {
   check('the preference round-trips',
     await page.evaluate(() => window.__snapshot().settings.textSize), 'default');
 
+  // --- the tab row sits one step above the rest --------------------------
+  // The tabs start at the size the "large" setting used to give them, and
+  // nothing else moved. The step is folded into the tabs' own --ui-scale, so
+  // the check is that the tabs' scale is 1.12x the panel's at every setting:
+  // that says both that the step is applied and that the setting still
+  // multiplies on top of it, which a fixed pixel size would not.
+  const steps = {};
+  for (const size of ['small', 'default', 'large', 'larger']) {
+    await page.click(el('.tab[data-value="settings"]'));
+    await page.waitForTimeout(70);
+    await page.selectOption(el('select[data-act="set-text"]'), size);
+    await page.waitForTimeout(160);
+    await page.click(el('.tab[data-value="routines"]'));
+    await page.waitForTimeout(90);
+    steps[size] = await page.evaluate(() => {
+      const host = document.querySelector('elmer-panel');
+      const root = host.shadowRoot;
+      const tab = root.querySelector('.tab');
+      const px = (el2, prop) => parseFloat(getComputedStyle(el2)[prop]);
+      return {
+        tab: px(tab, 'fontSize'),
+        tabIcon: px(tab.querySelector('.ic'), 'width'),
+        tabTap: px(tab, 'minHeight'),
+        body: px(root.querySelector('.row .title'), 'fontSize'),
+        hint: px(root.querySelector('.alert span') || root.querySelector('.row .sub'), 'fontSize'),
+        // --ui-scale is a calc() expression, and an unregistered custom
+        // property is not evaluated, so read the two numbers it multiplies.
+        scale: parseFloat(getComputedStyle(host).getPropertyValue('--ui-base'))
+          * parseFloat(getComputedStyle(host).getPropertyValue('--ui-user')),
+      };
+    });
+  }
+  const ratio = (s) => Math.round((steps[s].tab / steps[s].body) * 1000) / 1000;
+  check('the tabs keep the same step above the body at every setting',
+    [...new Set(['small', 'default', 'large', 'larger'].map(ratio))].length, 1);
+  // Against the body rather than against another tab reading: comparing the
+  // default tab to the large one only restates the setting's own multiplier
+  // and holds whether or not the step exists at all. 11.5 and 14.5 are the
+  // declared bases of a tab label and a row title.
+  ok('the tabs at the default setting are the size large used to make them',
+    Math.abs(ratio('default') - (11.5 * 1.12) / 14.5) < 0.005,
+    `tab/body is ${ratio('default')}, unstepped would be ${Math.round((11.5 / 14.5) * 1000) / 1000}`);
+  ok('the tab icon took the step too', steps.default.tabIcon > 20,
+    `${steps.default.tabIcon}px, up from 20`);
+  ok('and the tap target with it', steps.default.tabTap > 46,
+    `${steps.default.tabTap}px, up from 46`);
+  // Nothing outside the tab row moved: the body is still its own base size
+  // times the panel's scale, with no trace of the tabs' step in it. The scale
+  // is read rather than assumed because a phone adds a step of its own.
+  ok('the body text carries no part of the tab step',
+    Math.abs(steps.default.body - 14.5 * steps.default.scale) < 0.02,
+    `${steps.default.body} vs ${14.5 * steps.default.scale}`);
+  for (const [a, b] of [['small', 'default'], ['default', 'large'], ['large', 'larger']]) {
+    ok(`${a} -> ${b} still moves the tabs`, steps[b].tab > steps[a].tab,
+      `${steps[a].tab} -> ${steps[b].tab}`);
+    ok(`${a} -> ${b} still moves the body`, steps[b].body > steps[a].body,
+      `${steps[a].body} -> ${steps[b].body}`);
+  }
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(70);
+  await page.selectOption(el('select[data-act="set-text"]'), 'default');
+  await page.waitForTimeout(160);
+
   const sections = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
   check('settings sections read in order', sections,
-    ['Appearance', 'Scheduling', 'Where your data lives', 'Data export', 'About']);
+    ['Appearance', 'Scheduling', 'Where your data lives', 'Data export', 'About', 'Support']);
+
+  // The support link leaves Home Assistant, so it opens in a new tab and must
+  // not hand the opener over with it.
+  const support = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const a = root.querySelector('.support a.btn');
+    if (!a) return null;
+    return {
+      href: a.getAttribute('href'),
+      target: a.getAttribute('target'),
+      rel: a.getAttribute('rel'),
+      underlined: getComputedStyle(a).textDecorationLine,
+      paras: root.querySelectorAll('.support p').length,
+      // .note is pre-wrap and would keep the source indentation of a block
+      // written inside a template literal; this one must not be.
+      wrap: getComputedStyle(root.querySelector('.support p')).whiteSpace,
+    };
+  });
+  ok('settings has a support section', support !== null);
+  check('pointing at the right place', support.href, 'https://buymeacoffee.com/philecker');
+  check('opening away from Home Assistant', support.target, '_blank');
+  ok('without handing over the opener',
+    /noopener/.test(support.rel || '') && /noreferrer/.test(support.rel || ''), support.rel);
+  check('the link does not arrive underlined', support.underlined, 'none');
+  check('and the blurb is there', support.paras, 2);
+  check('set as prose, not preformatted', support.wrap, 'normal');
 
   check('due-soon window saved',
     await page.evaluate(() => window.__snapshot().settings.dueSoonDays), 30);
@@ -1354,6 +1444,85 @@ async function main() {
     return getComputedStyle(host).getPropertyValue('--panel-l').trim();
   });
   check('and the panel notices when it is given the width back', recentred, '0px');
+
+  // --- only the body scrolls, and only when it has to --------------------
+  // Home Assistant does not always give a custom panel a height of its own.
+  // When it does not, height:100% computes to auto, the app grows to the
+  // length of the list, and the document scrolls instead — carrying the header
+  // and the tabs off the top of the screen. The height is therefore measured
+  // from the window. Each case below is a shape Home Assistant can present.
+  for (const [label, css, tab, shouldScroll] of [
+    ['a parent with a height', '', 'routines', true],
+    ['a parent with no height at all', 'html,body{height:auto!important}', 'routines', true],
+    ['a toolbar above the panel', 'html,body{height:auto!important} body{padding-top:64px}', 'routines', true],
+    ['content too short to scroll', 'html,body{height:auto!important}', 'history', false],
+    ['a parent shorter than the window', 'html,body{height:auto!important} elmer-panel{height:400px!important}', 'routines', true],
+  ]) {
+    // A window short enough that the routines list genuinely overflows it;
+    // on a tall desktop it fits, and the case would prove nothing.
+    const probe = await open({ narrow: false, viewport: { width: 1280, height: 680 } });
+    if (css) await probe.page.addStyleTag({ content: css });
+    await probe.page.click(`.tab[data-value="${tab}"]`);
+    await probe.page.waitForTimeout(320);
+    const fit = await probe.page.evaluate(() => {
+      const host = document.querySelector('elmer-panel');
+      const root = host.shadowRoot;
+      const sc = root.querySelector('.scroll');
+      const headAt = () => Math.round(root.querySelector('.header').getBoundingClientRect().top);
+      const tabsAt = () => Math.round(root.querySelector('.tabs').getBoundingClientRect().top);
+      const before = [headAt(), tabsAt()];
+      sc.scrollTop = 99999;                     // as far down as it will go
+      const after = [headAt(), tabsAt()];
+      return {
+        appBottomOverrun: Math.round(
+          root.querySelector('.app').getBoundingClientRect().bottom - window.innerHeight),
+        bodyScrolls: sc.scrollHeight > sc.clientHeight + 1,
+        docScrolls: document.documentElement.scrollHeight > window.innerHeight + 1,
+        chromeMoved: after[0] !== before[0] || after[1] !== before[1],
+      };
+    });
+    ok(`${label}: the app stops at the bottom of the window`,
+      fit.appBottomOverrun <= 0, `${fit.appBottomOverrun}px past it`);
+    ok(`${label}: the document itself never scrolls`, !fit.docScrolls);
+    check(`${label}: the body scrolls only if it has to`, fit.bodyScrolls, shouldScroll);
+    ok(`${label}: and the header and tabs stay put while it does`, !fit.chromeMoved);
+    await probe.ctx.close();
+  }
+
+  // The scrollbar's width is held whether or not there is anything to scroll,
+  // so moving between a long tab and a short one cannot shift the content
+  // sideways by the width of a scrollbar that has just appeared.
+  //
+  // The shift itself cannot be reproduced here: this Chromium draws scrollbars
+  // as an overlay and reports them as zero pixels wide, with or without the
+  // flags that are supposed to turn that off, so a scrolling tab and a short
+  // one measure identically whatever the stylesheet says. What is checked is
+  // that the declaration survives on every tab, and the invariant it exists to
+  // protect — the content column lining up with the header above it, which is
+  // what visibly breaks when the gutter is reserved on one side only.
+  ({ ctx, page } = await open({ narrow: false, viewport: { width: 1280, height: 680 } }));
+  const edges = {};
+  for (const tab of ['routines', 'history', 'parts', 'settings']) {
+    await page.click(el(`.tab[data-value="${tab}"]`));
+    await page.waitForTimeout(140);
+    edges[tab] = await page.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const sc = root.querySelector('.scroll');
+      return {
+        gutter: getComputedStyle(sc).scrollbarGutter,
+        offset: Math.round(root.querySelector('.pad').getBoundingClientRect().left
+          - root.querySelector('.headerinner').getBoundingClientRect().left),
+        scrolls: sc.scrollHeight > sc.clientHeight + 1,
+      };
+    });
+  }
+  ok('the comparison covers a tab that scrolls and one that does not',
+    [...new Set(Object.values(edges).map((e) => e.scrolls))].length === 2,
+    JSON.stringify(edges));
+  check('the gutter is held on both edges, on every tab',
+    [...new Set(Object.values(edges).map((e) => e.gutter))], ['stable both-edges']);
+  check('so the content stays under the header whether it scrolls or not',
+    [...new Set(Object.values(edges).map((e) => e.offset))], [0]);
 
   // --- the subscription is released on teardown -------------------------
   const leaked = await page.evaluate(async () => {

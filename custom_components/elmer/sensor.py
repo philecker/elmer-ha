@@ -47,6 +47,7 @@ async def async_setup_entry(
             ElmerCountSensor(store, entry, "overdue", "Overdue", "mdi:alert-circle"),
             ElmerCountSensor(store, entry, "due", "Due soon", "mdi:clock-alert-outline"),
             ElmerCountSensor(store, entry, "lowStock", "Parts to reorder", "mdi:package-variant"),
+            ElmerCountSensor(store, entry, "partsShort", "Parts short", "mdi:cart-alert"),
             ElmerNextDueSensor(store, entry),
         ]
     )
@@ -122,6 +123,15 @@ class ElmerCountSensor(ElmerEntity):
                 if schedule.stock_status(s) != "ok"
             ]
             return {"parts": items, "names": [i["name"] for i in items]}
+
+        if self._key == "partsShort":
+            items = self._store.parts_short()
+            return {
+                "parts": items,
+                # Ready to drop into a notification without a template:
+                # "2 × 20x25x1 MERV 11".
+                "names": [f"{i['short']} × {i['name']}" for i in items],
+            }
 
         rows = [r for r in self._store.rows() if r["state"]["status"] == self._key]
         items = [
