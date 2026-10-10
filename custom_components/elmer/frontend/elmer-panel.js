@@ -19,7 +19,7 @@ import {
 import {
   routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
   equipmentForm, routineForm, partForm, logForm, logDetail, importForm,
-  partRow, partOptions, linkRow,
+  partRow, partOptions, linkRow, groupForm,
 } from './views.js';
 
 const TABS = [
@@ -585,6 +585,11 @@ class ElmerPanel extends HTMLElement {
         return { title: 'History entry', body: logDetail(state, s.id) };
       case 'templates':
         return { title: 'Suggested routines', body: this._templateBody(state, s.id) };
+      case 'group-form':
+        return {
+          title: `Rename ${s.value}`,
+          body: groupForm(state, s.field, s.value),
+        };
       case 'import':
         return { title: 'Import a backup', body: importForm(state, s.file) };
       default:
@@ -725,6 +730,15 @@ class ElmerPanel extends HTMLElement {
         this.range = el.dataset.value;
         this._render();
         return;
+      case 'rename-group':
+        this._openSheet({ kind: 'group-form', field: el.dataset.field, value: el.dataset.value });
+        return;
+      case 'save-group':
+        this._saveGroup(el.dataset.field, el.dataset.value);
+        return;
+      case 'clear-group':
+        this._clearGroup(el.dataset.field, el.dataset.value, el.dataset.label);
+        return;
       case 'add-link':
         this._addLink();
         return;
@@ -839,6 +853,52 @@ class ElmerPanel extends HTMLElement {
    * rebuild every field and throw away whatever else is half-typed in the form.
    * The picker then drops the option, so the same part cannot be added twice.
    */
+  /**
+   * Every piece of equipment carrying a given location or category.
+   *
+   * Neither is a record of its own: they are whatever the equipment says they
+   * are. So renaming one is a bulk edit of everything that carries it, and
+   * removing one clears the field on each — there is nothing else to delete.
+   */
+  _equipmentWith(field, value) {
+    return this.data.equipment.filter((eq) => (eq[field] || '').trim() === value);
+  }
+
+  async _saveGroup(field, value) {
+    const next = titleCase((this._fields().groupName || '').trim());
+    if (!next) return this._flash('Give it a name first.', 'error');
+    if (next === value) { this._closeSheet(); return undefined; }
+
+    const affected = this._equipmentWith(field, value);
+    const ok = await this._apply(affected.map((eq) => ({
+      kind: 'equipment.put',
+      payload: { ...eq, [field]: next },
+    })));
+    if (!ok) return undefined;
+    this._closeSheet();
+    return this._flash(`Renamed on ${affected.length} ${affected.length === 1 ? 'piece' : 'pieces'}`);
+  }
+
+  async _clearGroup(field, value, label) {
+    const affected = this._equipmentWith(field, value);
+    const what = field === 'location' ? 'location' : 'category';
+    const n = `${affected.length} ${affected.length === 1 ? 'piece' : 'pieces'} of equipment`;
+    // Spelled out: it is a bulk edit, and nothing else says how far it reaches
+    // until after it has happened.
+    if (!window.confirm(
+      `Remove the ${what} "${label || value}"?\n\n`
+      + `It is cleared from ${n}. No equipment is deleted — they simply stop `
+      + `having a ${what}.`,
+    )) return undefined;
+
+    const ok = await this._apply(affected.map((eq) => ({
+      kind: 'equipment.put',
+      payload: { ...eq, [field]: '' },
+    })));
+    if (!ok) return undefined;
+    return this._flash(`Removed from ${n}`);
+  }
+
   /** Another empty link row, focused so you can start typing in it. */
   _addLink() {
     const list = this.shadowRoot.querySelector('.sheet .linklist');

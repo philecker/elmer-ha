@@ -30,18 +30,6 @@ Equipment" — so a control whose action changes with the screen still tells you
 what it will do before you press it. Screens with nothing to add leave it out,
 and because it is last in the row nothing else moves.
 
-The header, the tab row and the list all share one column, so their edges line
-up at every width.
-
-Surfaces, text, dividers and card geometry come from Home Assistant's own theme
-variables, so Elmer sits inside whatever theme you run rather than painting its
-own panel on top of it. Status colours stay Elmer's, because overdue has to mean
-the same thing in every theme. A theme can override them:
-`--elmer-accent`, `--elmer-overdue-color`, `--elmer-due-color`.
-
-Tap targets clear 44px and safe-area insets are honoured, so it works held in
-one hand.
-
 <p>
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/routines-dark.png" alt="The Routines screen on a dark theme" width="250">
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/log-service-dark.png" alt="Logging a service, with the parts it uses" width="250">
@@ -232,49 +220,6 @@ Assistant already has open to your browser, so Nabu Casa and a VPN both work
 with no extra configuration, and nothing new is exposed to your network.
 
 ---
-
-## Working on it
-
-```bash
-npm install --no-save playwright@1.49.1 esbuild@0.24.2
-npx playwright install chromium
-
-python3 tools/verify-package.py     # repository structure, manifest, brand sizes
-python3 tools/verify-schedule.py    # the date maths against its reference
-python3 tools/verify-store.py       # imports, stock, undo, ordering
-node    tools/verify-panel.mjs      # the panel, in a real browser
-
-pip install --no-deps homeassistant
-python3 tools/verify-imports.py     # every Home Assistant API this uses still exists
-```
-
-Three build steps produce committed files, so re-run the relevant one after a
-change rather than editing its output:
-
-```bash
-node tools/build-brand.mjs        # the integration's icon and logo
-node tools/build-screenshots.mjs  # the images in this README
-node tools/build-preview.mjs      # a standalone preview page, no install needed
-```
-
-`verify-schedule.py` runs about 82,000 inputs through both the Python and the
-reference implementation in `tools/reference/`, and fails on any divergence —
-month-end clamping, leap days, negative intervals and malformed dates included.
-Date arithmetic fails quietly, so it is compared rather than trusted.
-
-`verify-panel.mjs` drives the real panel in Chromium: it completes a routine and
-checks the stock drew down, undoes it and checks the stock came back exactly,
-triple-taps to prove a double tap cannot log twice, types into a form and pushes
-an outside change to prove the form is not wiped, feeds markup through every
-text field to prove it is escaped, and measures tap targets, alignment and
-colour contrast at phone and desktop widths.
-
-`verify-imports.py` reads Home Assistant's source rather than importing it, so
-it runs without the full dependency tree. It is the check that catches an API
-being renamed or removed under you.
-
-Everything above runs on every push through `.github/workflows/validate.yml`,
-alongside Home Assistant's own `hassfest` and the HACS action.
 
 ## Known limits
 

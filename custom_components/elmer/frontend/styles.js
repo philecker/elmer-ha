@@ -1122,6 +1122,18 @@ a.btn { text-decoration: none; }
   text-align: center;
 }
 
+/* A location or category in the Settings list. The row itself is not a link —
+   the two buttons on it are the only things that do anything — so it keeps the
+   divider that separates it from the next one but not the cursor or the hover
+   tint that would promise a page behind it. */
+.row.groprow {
+  cursor: default;
+  gap: 6px;
+  min-height: calc(52px * var(--ui-scale));
+}
+.row.groprow:hover, .row.groprow:active { background: none; }
+.row.groprow .title { font-size: calc(14px * var(--ui-scale)); }
+
 .iconpick {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(46px, 1fr));

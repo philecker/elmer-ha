@@ -608,6 +608,68 @@ export function historyView(state) {
 
 /* --------------------------------------------------------------- settings -- */
 
+/**
+ * The locations and categories in use, with what uses them.
+ *
+ * Neither is a record of its own: they are whatever the equipment says they
+ * are. So renaming one rewrites every piece that carries it, and removing one
+ * clears the field on each — there is nothing else to delete. The count is
+ * shown because both actions touch that many pieces at once.
+ */
+export function groupsInUse(state, field) {
+  const counts = new Map();
+  for (const eq of state.equipment) {
+    const value = (eq[field] || '').trim();
+    if (!value) continue;
+    counts.set(value, (counts.get(value) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([value, count]) => {
+      // A category is either one of Elmer's own — which carries an icon and a
+      // name of its own, and is not ours to rename — or free text somebody
+      // typed, which is. A location is always free text.
+      const built = field === 'category' ? categoryLabel(value) : null;
+      return { value, count, label: built || value, builtIn: !!built };
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function groupCard(state, field, empty) {
+  const rows = groupsInUse(state, field);
+  if (!rows.length) return html`<div class="card"><div class="note">${empty}</div></div>`;
+
+  return html`<div class="card">${rows.map((g) => {
+    const tally = `${g.count} ${g.count === 1 ? 'piece' : 'pieces'} of equipment`;
+    return html`<div class="row groprow">
+    <div class="body">
+      <div class="title">${g.label}</div>
+      <div class="sub"><span class="txt">${raw(g.builtIn ? `${esc(tally)} &middot; built in` : esc(tally))}</span></div>
+    </div>
+    ${raw(g.builtIn ? '' : html`<button class="iconbtn" data-act="rename-group" data-field="${field}" data-value="${g.value}"
+      aria-label="Rename ${g.label}">${raw(icon('edit', 16))}</button>`)}
+    <button class="iconbtn" data-act="clear-group" data-field="${field}" data-value="${g.value}"
+      data-label="${g.label}" aria-label="Remove ${g.label}">${raw(icon('trash', 16))}</button>
+  </div>`;
+  })}</div>`;
+}
+
+/** Renaming one of them, in a form rather than a browser prompt. */
+export function groupForm(state, field, value) {
+  const found = groupsInUse(state, field).find((g) => g.value === value) || { count: 0 };
+  const n = found.count;
+  const what = field === 'location' ? 'location' : 'category';
+  return html`<div class="field">
+      <label for="f-group">Name</label>
+      <input id="f-group" name="groupName" value="${value}" data-titlecase autocomplete="off">
+      <div class="hint">Renaming changes it on ${n} ${raw(n === 1 ? 'piece' : 'pieces')} of equipment. A ${what} is not stored on its own — it is whatever the equipment says it is.</div>
+    </div>
+    <div class="btnrow">
+      <button class="btn" data-act="close">Cancel</button>
+      <button class="btn" data-variant="primary" data-act="save-group"
+        data-field="${field}" data-value="${value}">Save</button>
+    </div>`;
+}
+
 export function settingsView(state) {
   const s = state.settings;
   const themes = [['system', 'Follow Home Assistant'], ['light', 'Light'], ['dark', 'Dark']];
@@ -639,6 +701,12 @@ export function settingsView(state) {
         </select>
       </div>
     </div></div>
+
+    <div class="label">Locations</div>
+    ${raw(groupCard(state, 'location', 'No locations yet. They appear here once a piece of equipment has one.'))}
+
+    <div class="label">Categories</div>
+    ${raw(groupCard(state, 'category', 'No categories yet. They appear here once a piece of equipment has one.'))}
 
     <div class="label">Scheduling</div>
     <div class="card"><div style="padding:4px 12px 14px">

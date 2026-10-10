@@ -1424,7 +1424,8 @@ async function main() {
 
   const sections = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
   check('settings sections read in order', sections,
-    ['Appearance', 'Scheduling', 'Where your data lives', 'Data export', 'About', 'Support']);
+    ['Appearance', 'Locations', 'Categories', 'Scheduling', 'Where your data lives',
+      'Data export', 'About', 'Support']);
 
   // The support link leaves Home Assistant, so it opens in a new tab and must
   // not hand the opener over with it.
@@ -1567,7 +1568,9 @@ async function main() {
   const painted = () => page.evaluate(() => {
     const host = document.querySelector('elmer-panel');
     const root = host.shadowRoot;
-    const card = root.querySelector('.row') || root.querySelector('.app');
+    // A .card, not the first .row: a row paints nothing of its own, and
+    // Settings grew rows that made this read as transparent.
+    const card = root.querySelector('.card') || root.querySelector('.app');
     return {
       paper: getComputedStyle(host).backgroundColor,
       surface: getComputedStyle(card).backgroundColor,
@@ -1693,6 +1696,143 @@ async function main() {
   check('its routines went too', afterDelete.tasks, 0);
   ok('its history was kept', afterDelete.log);
   ok('returned to the list', await page.$(el('.addbtn[data-act="add-equipment"]')) !== null);
+
+  await ctx.close();
+
+  /* ----------------------------------- locations and categories, edited -- */
+  // Neither is a record of its own: they are whatever the equipment says they
+  // are. So the Settings list is derived, renaming is a bulk edit of everything
+  // carrying the old value, and removing one clears a field rather than
+  // deleting anything. Each of those is a chance to lose equipment, so each is
+  // checked against the store rather than against the screen.
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+
+  const groupRows = async () => page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const labels = [...root.querySelectorAll('.pad .label')];
+    const read = (heading) => {
+      const label = labels.find((n) => n.textContent.trim() === heading);
+      const card = label && label.nextElementSibling;
+      return [...card.querySelectorAll('.groprow')].map((r) => ({
+        title: r.querySelector('.title').textContent.trim(),
+        sub: r.querySelector('.sub .txt').textContent.trim(),
+        value: (r.querySelector('[data-act="clear-group"]') || {}).dataset?.value,
+        rename: !!r.querySelector('[data-act="rename-group"]'),
+      }));
+    };
+    return { locations: read('Locations'), categories: read('Categories') };
+  });
+
+  const groups = await groupRows();
+  check('every location in use is listed, alphabetically',
+    groups.locations.map((r) => r.title), ['Basement', 'Garage', 'Hallway', 'Kitchen']);
+  // The count is the whole reason both actions are safe to offer: it says how
+  // far the bulk edit behind each button reaches before it is pressed.
+  check('with what carries it', groups.locations.map((r) => r.sub), [
+    '2 pieces of equipment', '1 piece of equipment',
+    '1 piece of equipment', '1 piece of equipment',
+  ]);
+  ok('and each can be renamed', groups.locations.every((r) => r.rename));
+
+  // A category is stored as Elmer's own slug when it is one of Elmer's own, and
+  // that slug is not a name anybody typed — showing it raw would offer to
+  // rename "hvac".
+  ok('no category is listed by its internal slug',
+    groups.categories.every((r) => !/^[a-z]+$/.test(r.title)),
+    JSON.stringify(groups.categories.map((r) => r.title)));
+  check("Elmer's own categories read by their proper names",
+    groups.categories.map((r) => r.title).sort(),
+    ['Appliance', 'Heating & Cooling', 'Safety', 'Vehicle', 'Water']);
+  ok('each says so', groups.categories.every((r) => /built in$/.test(r.sub)),
+    JSON.stringify(groups.categories.map((r) => r.sub)));
+  // They carry an icon and a name of Elmer's choosing, so renaming one would
+  // quietly turn it into free text and lose both. Clearing it is still fair.
+  ok('and offers no rename, only removal',
+    groups.categories.every((r) => !r.rename));
+
+  // The row itself does nothing — the two buttons on it are the only things
+  // that do — so it must not look like a link to a page that isn't there.
+  const groprow = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const row = root.querySelector('.groprow');
+    const before = getComputedStyle(row).backgroundColor;
+    return { cursor: getComputedStyle(row).cursor, before };
+  });
+  check('a location row is not dressed as a link', groprow.cursor, 'default');
+
+  // --- renaming ---------------------------------------------------------
+  await page.click(el('.groprow [data-act="rename-group"][data-value="Basement"]'));
+  await page.waitForSelector(el('.sheet input[name="groupName"]'));
+  check('the form opens on the name as stored',
+    await page.inputValue(el('.sheet input[name="groupName"]')), 'Basement');
+  const beforeRename = await page.evaluate(() => window.__snapshot().equipment.length);
+  await page.fill(el('.sheet input[name="groupName"]'), 'Cellar');
+  await page.click(el('.sheet [data-act="save-group"]'));
+  await page.waitForTimeout(240);
+
+  const renamed = await page.evaluate(() => {
+    const eq = window.__snapshot().equipment;
+    return {
+      total: eq.length,
+      cellar: eq.filter((e) => e.location === 'Cellar').map((e) => e.id).sort(),
+      basement: eq.filter((e) => e.location === 'Basement').length,
+    };
+  });
+  check('renaming loses no equipment', renamed.total, beforeRename);
+  check('every piece that carried it was rewritten', renamed.cellar, ['eq1', 'eq3']);
+  check('and none still carries the old name', renamed.basement, 0);
+  check('the sheet closed behind it', await page.$(el('.sheet')), null);
+  check('the list shows the new name',
+    (await groupRows()).locations.map((r) => r.title),
+    ['Cellar', 'Garage', 'Hallway', 'Kitchen']);
+
+  // Equipment groups by location, so a rename that only reached Settings would
+  // leave the two lists disagreeing about the same house.
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(90);
+  const eqHeadings = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
+  ok('the Equipment list regrouped under it',
+    eqHeadings.some((h) => /^Cellar/.test(h)) && !eqHeadings.some((h) => /^Basement/.test(h)),
+    JSON.stringify(eqHeadings));
+
+  // --- removing ---------------------------------------------------------
+  // Nothing is deleted: the field is cleared on everything that carried it.
+  // Getting this wrong deletes equipment, so the count is checked first.
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  page.on('dialog', (d) => d.accept());
+  // A built-in category comes off the equipment the same way, by slug. Done
+  // first, and on a piece in a different room from the location cleared below,
+  // so neither of these two can mask the other.
+  await page.click(el('.groprow [data-act="clear-group"][data-value="safety"]'));
+  await page.waitForTimeout(240);
+  const noSafety = await page.evaluate(() => {
+    const eq = window.__snapshot().equipment;
+    return { total: eq.length, safety: eq.filter((e) => e.category === 'safety').length };
+  });
+  check('removing a category deletes no equipment', noSafety.total, beforeRename);
+  check('and clears it by slug, not by label', noSafety.safety, 0);
+  check('it has left the category list',
+    (await groupRows()).categories.some((r) => r.title === 'Safety'), false);
+
+  await page.click(el('.groprow [data-act="clear-group"][data-value="Garage"]'));
+  await page.waitForTimeout(240);
+
+  const clearedLoc = await page.evaluate(() => {
+    const eq = window.__snapshot().equipment;
+    return {
+      total: eq.length,
+      garage: eq.filter((e) => (e.location || '') === 'Garage').length,
+      blank: eq.filter((e) => !(e.location || '').trim()).length,
+    };
+  });
+  check('removing a location deletes no equipment', clearedLoc.total, beforeRename);
+  check('nothing still carries it', clearedLoc.garage, 0);
+  ok('they simply stopped having one', clearedLoc.blank >= 1);
+  check('and it has left the list',
+    (await groupRows()).locations.map((r) => r.title), ['Cellar', 'Hallway', 'Kitchen']);
 
   await ctx.close();
 
