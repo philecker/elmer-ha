@@ -1056,6 +1056,42 @@ a.btn { text-decoration: none; }
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .two .field { margin-top: 12px; }
 
+/* The replacement-part links on the equipment form: a label and an address
+   per row, with the way to remove one beside it. */
+.linklist { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+.linklist:empty { display: none; }
+.row.linkrow {
+  align-items: center;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 8px 8px 8px 10px;
+  gap: 8px;
+  min-height: 0;
+  cursor: default;
+}
+.row.linkrow:hover, .row.linkrow:active { background: var(--surface); }
+.linkfields { flex: 1 1 auto; min-width: 0; display: grid; gap: 6px; }
+.linkfields input {
+  width: 100%;
+  min-width: 0;
+  height: calc(34px * var(--ui-scale));
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  /* 15px or more, or iOS Safari zooms the page when it takes focus. */
+  font-size: calc(15px * var(--ui-scale));
+}
+.linkfields input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+.linkfields .linkurl { font-family: var(--mono); font-size: calc(13px * var(--ui-scale)); }
+
 /* The parts a routine uses sit under the picker that adds them, so a part
    appears where you are looking after you choose it. Each one is its own card
    rather than a flush table row: in a form full of edge-to-edge inputs, a

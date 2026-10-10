@@ -124,7 +124,7 @@ export function categoryLabel(value) {
 /**
  * Capitalise names the way you would write them, leaving anything that already
  * carries capitals or digits alone — so "kitchen refrigerator" becomes "Kitchen
- * Refrigerator" while LT1000P, 20x25x1 and MERV survive untouched. Applied on
+ * Refrigerator" while WF-100, 20x25x1 and MERV survive untouched. Applied on
  * blur to names only, never to notes, models or serials.
  */
 export function titleCase(value) {

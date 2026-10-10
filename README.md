@@ -1,4 +1,9 @@
-<img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/logo.png" alt="Elmer" height="64">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/dark_logo.png">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/logo.png" alt="Elmer" height="48">
+</picture>
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=philecker&repository=elmer-ha&category=integration)
 
 Home maintenance tracking in the Home Assistant sidebar. Filters, flushes,
 batteries and services — what was last done, what is due, and what parts you
@@ -48,7 +53,9 @@ one hand.
 
 On a wider screen the same layout stretches; nothing is rearranged.
 
-![Elmer on a desktop browser](https://raw.githubusercontent.com/philecker/elmer-ha/main/images/desktop.png)
+<p>
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/desktop.png" alt="Elmer on a desktop browser" width="820">
+</p>
 
 **Entities, so the rest of Home Assistant can act on it.**
 
@@ -79,6 +86,10 @@ because it is what a condition wants to compare: `below: 0` is overdue,
 > checks those URLs are well formed, not that they lead anywhere.
 
 ### Through HACS
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=philecker&repository=elmer-ha&category=integration)
+
+That button opens this repository in your own Home Assistant. By hand instead:
 
 1. HACS ▸ ⋮ ▸ **Custom repositories**
 2. Add this repository's URL, type **Integration**
@@ -291,6 +302,13 @@ alongside Home Assistant's own `hassfest` and the HACS action.
 
 ---
 
+## Contributions
+
+Thanks to [@adamnorth](https://github.com/adamnorth) for the feedback that
+made Elmer better.
+
+---
+
 ## Support
 
 Elmer is built and maintained by **Phil Ecker**. It is free and open source,
@@ -302,3 +320,7 @@ If it has saved you a forgotten filter change or two, you are very welcome to
 
 Bug reports and ideas are just as welcome, over on
 [the issue tracker](https://github.com/philecker/elmer-ha/issues).
+
+---
+
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=philecker&repository=elmer-ha&category=integration)

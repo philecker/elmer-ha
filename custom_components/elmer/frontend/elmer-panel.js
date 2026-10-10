@@ -19,7 +19,7 @@ import {
 import {
   routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
   equipmentForm, routineForm, partForm, logForm, logDetail, importForm,
-  partRow, partOptions,
+  partRow, partOptions, linkRow,
 } from './views.js';
 
 const TABS = [
@@ -502,8 +502,13 @@ class ElmerPanel extends HTMLElement {
       const badge = key === 'routines' && overdue > 0
         ? `<span class="badge">${overdue > 99 ? '99+' : overdue}</span>`
         : '';
+      // A detail page is still inside its section, so its tab stays selected.
+      // It used to deselect, which made sense when opening one replaced the
+      // header with a back arrow and the page felt like somewhere else; now
+      // the header does not move and the breadcrumb reads "Parts < Water Filter",
+      // so dropping the underline just lost your place.
       return html`<button class="tab" role="tab" data-act="tab" data-value="${key}"
-        aria-selected="${this.tab === key && !this.detail}">
+        aria-selected="${this.tab === key}">
         ${raw(icon(ic, 18))}<span>${label}</span>${raw(badge)}
       </button>`;
     })}</div></nav>`;
@@ -675,9 +680,10 @@ class ElmerPanel extends HTMLElement {
       this._applyTextSize();
     } else if (act === 'pick-part') {
       this._pickPart(el);
-    } else if (act === 'pick-location') {
-      // Reveal the new-location box only when there is a new location to type.
-      const box = el.parentElement.querySelector('input[name="locationNew"]');
+    } else if (act === 'pick-or-new') {
+      // Reveal the box only when there is something new to type into it. The
+      // select names its own box, so Located and Category share this.
+      const box = el.parentElement.querySelector(`input[name="${el.dataset.for}"]`);
       if (box) {
         const adding = el.value === '__new__';
         box.style.display = adding ? '' : 'none';
@@ -718,6 +724,14 @@ class ElmerPanel extends HTMLElement {
       case 'range':
         this.range = el.dataset.value;
         this._render();
+        return;
+      case 'add-link':
+        this._addLink();
+        return;
+      case 'unlink':
+        // Straight out of the DOM. A re-render here would throw away every
+        // other half-typed field in the form.
+        el.closest('.linkrow')?.remove();
         return;
       case 'search-clear':
         this.query = '';
@@ -825,6 +839,32 @@ class ElmerPanel extends HTMLElement {
    * rebuild every field and throw away whatever else is half-typed in the form.
    * The picker then drops the option, so the same part cannot be added twice.
    */
+  /** Another empty link row, focused so you can start typing in it. */
+  _addLink() {
+    const list = this.shadowRoot.querySelector('.sheet .linklist');
+    if (!list) return;
+    list.insertAdjacentHTML('beforeend', linkRow({}));
+    list.lastElementChild?.querySelector('.linklabel')?.focus();
+  }
+
+  /**
+   * The replacement-part links as the form has them.
+   *
+   * Read from the rows rather than from _fields, which keys by name and would
+   * collapse several links into one. A row with no address is dropped, which
+   * is how a link is removed without a button as well as with one.
+   */
+  _linkFields() {
+    const sheet = this.shadowRoot.querySelector('.sheet');
+    if (!sheet) return [];
+    return [...sheet.querySelectorAll('.linkrow')]
+      .map((row) => ({
+        label: (row.querySelector('.linklabel')?.value || '').trim(),
+        url: (row.querySelector('.linkurl')?.value || '').trim(),
+      }))
+      .filter((l) => l.url);
+  }
+
   _pickPart(select) {
     const id = select.value;
     if (!id) return;
@@ -905,20 +945,29 @@ class ElmerPanel extends HTMLElement {
       location: titleCase(
         (f.locationPick && f.locationPick !== '__new__' ? f.locationPick : f.locationNew || '').trim(),
       ),
-      category: f.category || '',
+      // Either the picker or the new-category box, the same way Located
+      // works; "__new__" means the box.
+      category: (f.categoryPick && f.categoryPick !== '__new__'
+        ? f.categoryPick
+        : f.categoryNew || '').trim(),
       brand: (f.brand || '').trim(),
       model: (f.model || '').trim(),
       serial: (f.serial || '').trim(),
-      partNumber: (f.partNumber || '').trim(),
+      // No field for this on the form any more — a part number belongs to a
+      // part, not to the thing it goes in. What is already stored is carried
+      // through rather than wiped, because older records and imports have it
+      // and the detail page still shows it.
+      partNumber: existing ? existing.partNumber || '' : '',
       installedOn: f.installedOn || null,
       purchasedFrom: (f.purchasedFrom || '').trim(),
       phone: (f.phone || '').trim(),
       email: (f.email || '').trim(),
       notes: f.notes || '',
       icon: f.icon || '',
-      // Carried through rather than rebuilt: the panel has no editor for the
-      // replacement-parts links, and a save must not quietly drop them.
-      parts: existing ? existing.parts || [] : [],
+      // Read back from the form, which now has an editor for them. It used to
+      // carry the old value through untouched, which kept links safe from an
+      // unrelated edit but also made a dead one impossible to remove.
+      parts: this._linkFields(),
     };
 
     const isNew = !id;

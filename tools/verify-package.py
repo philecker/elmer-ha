@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import urllib.parse
 import struct
 import sys
 
@@ -187,6 +188,53 @@ def main() -> int:
         # against — which is exactly how they came out broken on the HACS page.
         # So: no relative image references at all, and every absolute one that
         # points back into this repository must name a file that exists.
+        # Every image of ours has to declare a size. Without one it renders
+        # at its natural width, and these are retina captures — the desktop
+        # shot is 2360px across. GitHub happens to clamp to the column, but
+        # HACS renders the same README in a much narrower frontend.
+        ours = re.findall(r"<img[^>]*raw\.githubusercontent[^>]*>", text)
+        unsized = [t for t in ours if "width=" not in t and "height=" not in t]
+        check(
+            "every README image declares a width or a height",
+            not unsized,
+            f"{len(unsized)} without: {[t[:70] for t in unsized]}",
+        )
+
+        # The wordmark is dark ink, so on a dark README it disappears. The
+        # dark variant has to be offered beside it.
+        if "images/logo.png" in text:
+            check(
+                "the logo offers its dark variant too",
+                "images/dark_logo.png" in text and "prefers-color-scheme: dark" in text,
+                "a <picture> with a dark source is what makes it legible on GitHub's dark theme",
+            )
+
+        # The My Home Assistant button has the owner and repository baked
+        # into its query string, so renaming either one leaves a button that
+        # silently opens nothing. Check it against the manifest's own
+        # documentation URL rather than against a copy of the name here.
+        doc = str(manifest.get("documentation", ""))
+        slug = re.search(r"github\.com/([\w.-]+)/([\w.-]+)", doc)
+        my = re.findall(
+            r"my\.home-assistant\.io/redirect/hacs_repository/\?([^)\s\"']+)", text
+        )
+        check("the README offers the My Home Assistant button", len(my) >= 1, f"{len(my)} found")
+        if my and slug:
+            owner, repo = slug.group(1), slug.group(2)
+            # Parsed, not matched as a substring: "repository=elmer-ha" is
+            # inside "repository=elmer-ha-OLD", so a renamed repository
+            # sailed through the first version of this check.
+            want = {"owner": owner, "repository": repo, "category": "integration"}
+            wrong = [
+                q for q in my
+                if {k: v[0] for k, v in urllib.parse.parse_qs(q).items()} != want
+            ]
+            check(
+                "and every one of them points at this repository",
+                not wrong,
+                f"expected owner={owner} repository={repo}; bad: {wrong}",
+            )
+
         relative = re.findall(r"!\[[^\]]*\]\((?!https?://)([^)\s]+)", text)
         relative += re.findall(r"""<img[^>]+src=['"](?!https?://)([^'"]+)""", text)
         check(

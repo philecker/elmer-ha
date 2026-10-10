@@ -586,7 +586,41 @@ async function main() {
   ok('choosing to add one reveals the box',
     await page.isVisible(el('.sheet input[name="locationNew"]')));
   await page.fill(el('.sheet input[name="locationNew"]'), 'basement');
-  await page.selectOption(el('.sheet select[name="category"]'), 'water');
+  await page.selectOption(el('.sheet select[name="categoryPick"]'), 'water');
+
+  // Category behaves the way Located does: the built-ins, any the house has
+  // invented, and a way to name a new one. It used to be a fixed list.
+  const cats = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const sel = root.querySelector('.sheet select[name="categoryPick"]');
+    return {
+      options: [...sel.options].map((o) => o.value),
+      newLabel: [...sel.options].find((o) => o.value === '__new__').textContent.trim(),
+      boxHidden: !root.querySelector('.sheet input[name="categoryNew"]').offsetParent,
+    };
+  });
+  ok('the built-in categories are offered', cats.options.includes('hvac')
+    && cats.options.includes('water'), JSON.stringify(cats.options));
+  check('with a way to name a new one', cats.newLabel, 'New Category…');
+  ok('whose box stays out of the way until asked for', cats.boxHidden);
+  check('and the new-location option reads the same way',
+    await page.$eval(el('.sheet select[name="locationPick"] option[value="__new__"]'),
+      (o) => o.textContent.trim()), 'New Location…');
+
+  // A part number belongs to a part, not to the thing it goes in.
+  check('the equipment form has no part-number field',
+    await page.$(el('.sheet input[name="partNumber"]')), null);
+
+  // Naming a new category saves it, and it is offered next time.
+  await page.selectOption(el('.sheet select[name="categoryPick"]'), '__new__');
+  await page.waitForTimeout(80);
+  ok('choosing to add one reveals the category box',
+    await page.isVisible(el('.sheet input[name="categoryNew"]')));
+  await page.fill(el('.sheet input[name="categoryNew"]'), 'Plumbing');
+  await page.selectOption(el('.sheet select[name="categoryPick"]'), 'water');
+  await page.waitForTimeout(80);
+  check('picking a real one again empties the box',
+    await page.inputValue(el('.sheet input[name="categoryNew"]')), '');
   // Blur is what capitalises, so move focus the way a person would.
   await page.click(el('.sheet input[name="brand"]'));
   await page.waitForTimeout(30);
@@ -839,6 +873,12 @@ async function main() {
     };
   });
   check('the header still says ELMER on a detail page', detailChrome.word, listChrome.word);
+  check('and the section keeps its tab underlined', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const on = [...root.querySelectorAll('.tab')]
+      .filter((t) => t.getAttribute('aria-selected') === 'true');
+    return on.map((t) => t.dataset.value);
+  }), ['equipment']);
   ok('and still carries the mark', detailChrome.hasMark);
   check('the breadcrumb names where it came from', detailChrome.up, 'Equipment');
   check('and where you are', detailChrome.here, 'Furnace / Air Conditioner');
@@ -877,14 +917,78 @@ async function main() {
   const edited = await page.evaluate(() => window.__snapshot().equipment.find((e) => e.id === 'eq1'));
   check('edit kept the replacement-part links', edited.parts.length, linksBefore);
   check('edit saved the change', edited.brand, 'Trane XE');
-  check('edit kept the serial', edited.serial, '12345A / 67890B');
+  check('edit kept the serial', edited.serial, 'SN-0000-A / SN-0000-B');
+  // The form no longer has a field for it, so a save must carry it through
+  // rather than wipe what older records and imports already hold.
+  check('and the part number it has no field for', edited.partNumber, '20x25x1');
+
+  // --- the replacement-part links can be changed ------------------------
+  // They were shown on the detail page and carried through a save, but
+  // nothing could edit one. A part that stopped being sold left a dead link
+  // with no way to remove it.
+  await page.click(el('[data-act="edit-equipment"]'));
+  await page.waitForSelector(el('.sheet .linklist'));
+  const linkEditor = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return {
+      rows: root.querySelectorAll('.sheet .linkrow').length,
+      urls: [...root.querySelectorAll('.sheet .linkurl')].map((i) => i.value),
+      canAdd: !!root.querySelector('.sheet [data-act="add-link"]'),
+      canRemove: root.querySelectorAll('.sheet [data-act="unlink"]').length,
+    };
+  });
+  check('the form lists the links it has', linkEditor.rows, linksBefore);
+  ok('each with a way to remove it', linkEditor.canRemove === linksBefore);
+  ok('and a way to add another', linkEditor.canAdd);
+
+  // Removing one must not disturb what else is being typed.
+  await page.fill(el('.sheet input[name="brand"]'), 'Still Typing');
+  await page.click(el('.sheet .linkrow [data-act="unlink"]'));
+  await page.waitForTimeout(100);
+  check('removing a link drops its row',
+    (await page.$$(el('.sheet .linkrow'))).length, linksBefore - 1);
+  check('and leaves the rest of the form alone',
+    await page.inputValue(el('.sheet input[name="brand"]')), 'Still Typing');
+
+  await page.click(el('.sheet [data-act="add-link"]'));
+  await page.waitForTimeout(80);
+  check('adding gives you an empty row',
+    (await page.$$(el('.sheet .linkrow'))).length, linksBefore);
+  const rowsNow = await page.$$(el('.sheet .linkrow'));
+  await rowsNow[rowsNow.length - 1].$eval('.linklabel', (i) => { i.value = 'Spare belt'; });
+  await rowsNow[rowsNow.length - 1].$eval('.linkurl', (i) => { i.value = 'example.com/belt'; });
+  await page.click(el('.sheet [data-act="save-equipment"]'));
+  await page.waitForTimeout(220);
+  const afterLinks = await page.evaluate(
+    () => window.__snapshot().equipment.find((e) => e.id === 'eq1').parts);
+  check('the removed link is gone for good', afterLinks.length, linksBefore);
+  ok('the one that was kept is still there',
+    afterLinks.some((l) => l.url === linkEditor.urls[1]), JSON.stringify(afterLinks));
+  ok('and the new one was saved',
+    afterLinks.some((l) => l.url === 'example.com/belt' && l.label === 'Spare belt'),
+    JSON.stringify(afterLinks));
+  check('the unrelated edit saved too',
+    await page.evaluate(() => window.__snapshot().equipment.find((e) => e.id === 'eq1').brand),
+    'Still Typing');
+
+  // An empty address is the other way to drop one, so a row left blank by
+  // accident does not become a link to nowhere.
+  await page.click(el('[data-act="edit-equipment"]'));
+  await page.waitForSelector(el('.sheet .linklist'));
+  await page.click(el('.sheet [data-act="add-link"]'));
+  await page.waitForTimeout(80);
+  await page.click(el('.sheet [data-act="save-equipment"]'));
+  await page.waitForTimeout(220);
+  check('a row with no address is not saved', await page.evaluate(
+    () => window.__snapshot().equipment.find((e) => e.id === 'eq1').parts.length), linksBefore);
+
 
   // --- parts ------------------------------------------------------------
   await page.click(el('.tab[data-value="parts"]'));
   await page.waitForSelector(el('.qty'));
   // Out of stock sorts to the top.
   check('out of stock first',
-    await page.textContent(el('.card .row .title')), 'LG LT1000P');
+    await page.textContent(el('.card .row .title')), 'Fridge Water Filter');
   const q0 = await page.evaluate(() => window.__snapshot().supplies.find((s) => s.id === 's1').quantity);
   await page.click(el('.row[data-id="s1"] [data-act="stock"][data-delta="1"]'));
   await page.waitForTimeout(90);
@@ -1072,11 +1176,11 @@ async function main() {
   // --- search on every list ---------------------------------------------
   // Each tab keeps its own text: searching routines and then opening Parts
   // must not hand back a parts list narrowed by a word typed elsewhere.
-  await page.fill(el('.search input'), 'lg');
+  await page.fill(el('.search input'), 'filter');
   await page.waitForTimeout(140);
   const partsFound = await page.$$eval(el('.card .row .title'), (n) => n.map((t) => t.textContent.trim()));
   ok('parts can be searched', partsFound.length > 0
-    && partsFound.every((t) => t.toLowerCase().includes('lg')), JSON.stringify(partsFound));
+    && partsFound.every((t) => t.toLowerCase().includes('filter')), JSON.stringify(partsFound));
 
   await page.click(el('.tab[data-value="equipment"]'));
   await page.waitForTimeout(120);
@@ -1097,7 +1201,7 @@ async function main() {
   await page.click(el('.tab[data-value="parts"]'));
   await page.waitForTimeout(120);
   check('and each tab kept its own text',
-    await page.inputValue(el('.search input')), 'lg');
+    await page.inputValue(el('.search input')), 'filter');
   await page.click(el('.search .clear'));
   await page.waitForTimeout(120);
   await page.click(el('.tab[data-value="equipment"]'));

@@ -72,23 +72,28 @@ const ago = (days) => addInterval(today(), -days, 'days');
 
 // Kept aside so the preview can swap between a furnished house and a fresh
 // install — the empty states are a real screen and deserve to be looked at.
+// Every model, serial and part number below is invented. The brands are real
+// manufacturers because the sample reads better for it, but nothing here is a
+// real product code — these end up in the README screenshots, and a demo is no
+// place for a number somebody might take for their own.
 const SEED = {
   equipment: [
     { id: 'eq1', name: 'Furnace / Air Conditioner', location: 'Basement', category: 'hvac',
-      brand: 'Trane', model: 'XR80 / 4TTR3036', serial: '12345A / 67890B', partNumber: '20x25x1',
+      brand: 'Trane', model: 'HX-400 / AC-2200', serial: 'SN-0000-A / SN-0000-B', partNumber: '20x25x1',
       installedOn: '2019-04-11', purchasedFrom: 'Midwest Heating & Air',
       phone: '(555) 123-4567', email: 'service@midwest.example',
       notes: 'Furnace filter is behind the lower panel. The condensate line runs to the floor drain.',
       icon: 'furnace',
-      parts: [{ label: 'Filter on Amazon', url: 'amazon.com/dp/B000' }, { url: 'trane.com/manual' }] },
+      parts: [{ label: 'Filter, online', url: 'example.com/parts/af-2025' },
+        { label: 'Manual', url: 'example.com/manuals/hx-400' }] },
     { id: 'eq2', name: 'Kitchen Refrigerator', location: 'Kitchen', category: 'appliance',
-      brand: 'LG', model: 'LFXS26973S', partNumber: 'LT1000P', icon: 'refrigerator', parts: [] },
+      brand: 'LG', model: 'RF-900X', partNumber: 'WF-100', icon: 'refrigerator', parts: [] },
     { id: 'eq3', name: 'Water Softener', location: 'Basement', category: 'water',
       brand: 'Culligan', icon: 'water', parts: [] },
     { id: 'eq4', name: 'Smoke Alarms', location: 'Hallway', category: 'safety',
       icon: 'alarm', parts: [] },
     { id: 'eq5', name: 'Riding Mower', location: 'Garage', category: 'vehicle',
-      brand: 'John Deere', model: 'S140', icon: 'mower', parts: [] },
+      brand: 'John Deere', model: 'LT-21', icon: 'mower', parts: [] },
   ],
   tasks: [
     { id: 't1', equipmentId: 'eq1', name: 'Replace Furnace Filter', lastDone: ago(122),
@@ -113,12 +118,12 @@ const SEED = {
       intervalCount: 3, intervalUnit: 'months', partsUsed: [] },
   ],
   supplies: [
-    { id: 's1', name: '20x25x1 MERV 11', quantity: 3, reorderAt: 2, partNumber: 'MPR 1200',
+    { id: 's1', name: '20x25x1 MERV 11', quantity: 3, reorderAt: 2, partNumber: 'AF-2025',
       purchasedFrom: 'Home Depot' },
     // One shop name and one link, because "Buy from" takes either and they
     // are shown differently: a name is a fact, a link is a chip to press.
-    { id: 's2', name: 'LG LT1000P', quantity: 0, reorderAt: 1, partNumber: 'LT1000P',
-      purchasedFrom: 'https://www.example.com/dp/B002JAKRAM?ref=long_and_unreadable&th=1' },
+    { id: 's2', name: 'Fridge Water Filter', quantity: 0, reorderAt: 1, partNumber: 'WF-100',
+      purchasedFrom: 'https://www.example.com/parts/wf-100?ref=long_and_unreadable&variant=1' },
     { id: 's3', name: 'Softener Salt (40 lb)', quantity: 2, reorderAt: 2 },
     { id: 's4', name: '9V Battery', quantity: 8, reorderAt: 2 },
   ],
@@ -352,7 +357,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.0.3' } };
+panel.panel = { config: { version: '1.0.4' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

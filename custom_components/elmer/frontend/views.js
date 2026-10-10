@@ -707,44 +707,103 @@ ${c.equipment} ${raw(c.equipment === 1 ? 'piece' : 'pieces')} of equipment · ${
 /* ------------------------------------------------------------------ forms -- */
 
 /**
- * Where a piece of equipment is.
+ * A dropdown of what is already in use, with an escape hatch for something
+ * new — a free text box the first time, because there is nothing to choose
+ * from yet.
  *
- * A free text box the first time, because there is nothing to choose from yet.
- * Once a location exists it becomes a list of the ones already in use, with an
- * escape hatch for a new one — which is what stops "Basement", "basement" and
- * "Bsmt" becoming three different places that group separately.
+ * Shared by Located and Category. It is what stops "Basement", "basement" and
+ * "Bsmt" becoming three different places that group separately, and the same
+ * argument applies to categories.
  */
-export function locationField(state, equipment) {
-  const known = [...new Set(
-    state.equipment.map((x) => (x.location || '').trim()).filter(Boolean),
-  )].sort((a, b) => a.localeCompare(b));
-
-  const current = (equipment.location || '').trim();
-
-  if (!known.length) {
+export function pickOrNew({ label, id, pickName, newName, known, current, newLabel, placeholder }) {
+  const has = known.length > 0;
+  if (!has) {
     return html`<div class="field">
-      <label for="f-location">Located</label>
-      <input id="f-location" name="locationNew" value="${current}" placeholder="Kitchen"
+      <label for="${id}">${label}</label>
+      <input id="${id}" name="${newName}" value="${current}" placeholder="${placeholder}"
         data-titlecase autocomplete="off">
     </div>`;
   }
 
-  // An existing location that is somehow not in the list still has to be
-  // editable, so it opens on the new-location box rather than silently
-  // snapping to something else.
-  const isKnown = known.includes(current);
+  // A value that is somehow not in the list still has to be editable, so it
+  // opens on the new box rather than silently snapping to something else.
+  const isKnown = known.some(([value]) => value === current);
   const picked = current && isKnown ? current : (current ? '__new__' : '');
 
   return html`<div class="field">
-    <label for="f-location">Located</label>
-    <select id="f-location" name="locationPick" data-act="pick-location">
+    <label for="${id}">${label}</label>
+    <select id="${id}" name="${pickName}" data-act="pick-or-new" data-for="${newName}">
       <option value=""${raw(picked === '' ? ' selected' : '')}>—</option>
-      ${known.map((l) => html`<option value="${l}"${raw(picked === l ? ' selected' : '')}>${l}</option>`)}
-      <option value="__new__"${raw(picked === '__new__' ? ' selected' : '')}>Somewhere new…</option>
+      ${known.map(([value, text]) => html`<option value="${value}"${raw(picked === value ? ' selected' : '')}>${text}</option>`)}
+      <option value="__new__"${raw(picked === '__new__' ? ' selected' : '')}>${newLabel}</option>
     </select>
-    <input name="locationNew" value="${picked === '__new__' ? current : ''}"
-      placeholder="Where is it?" data-titlecase autocomplete="off"
+    <input name="${newName}" value="${picked === '__new__' ? current : ''}"
+      placeholder="${placeholder}" data-titlecase autocomplete="off"
       style="margin-top:8px${raw(picked === '__new__' ? '' : ';display:none')}">
+  </div>`;
+}
+
+/** Where a piece of equipment is. */
+export function locationField(state, equipment) {
+  const known = [...new Set(
+    state.equipment.map((x) => (x.location || '').trim()).filter(Boolean),
+  )].sort((a, b) => a.localeCompare(b)).map((l) => [l, l]);
+
+  return pickOrNew({
+    label: 'Located',
+    id: 'f-location',
+    pickName: 'locationPick',
+    newName: 'locationNew',
+    known,
+    current: (equipment.location || '').trim(),
+    newLabel: 'New Location…',
+    placeholder: 'Kitchen',
+  });
+}
+
+/**
+ * What kind of thing it is.
+ *
+ * The built-in categories plus any the house has invented, so one typed once
+ * is offered thereafter. A custom one carries no suggested routines and falls
+ * back to the generic icon, which is the cost of not being on the list.
+ */
+export function categoryField(state, equipment) {
+  const builtIn = CATEGORIES.map(([v, l]) => [v, l]);
+  const names = new Set(builtIn.map(([v]) => v));
+  const custom = [...new Set(
+    state.equipment.map((x) => (x.category || '').trim()).filter((c) => c && !names.has(c)),
+  )].sort((a, b) => a.localeCompare(b)).map((c) => [c, c]);
+
+  return pickOrNew({
+    label: 'Category',
+    id: 'f-category',
+    pickName: 'categoryPick',
+    newName: 'categoryNew',
+    known: [...builtIn, ...custom],
+    current: (equipment.category || '').trim(),
+    newLabel: 'New Category…',
+    placeholder: 'What kind of thing?',
+  });
+}
+
+/**
+ * One replacement-part link on the equipment form.
+ *
+ * Rendered here and appended by the panel when another is added, so a row
+ * that arrives mid-edit is identical to one the form opened with.
+ */
+export function linkRow(link) {
+  const l = link || {};
+  return html`<div class="row linkrow">
+    <div class="linkfields">
+      <input class="linklabel" value="${l.label || ''}" placeholder="What it is"
+        aria-label="What this link is" autocomplete="off">
+      <input class="linkurl" value="${l.url || ''}" placeholder="example.com/part"
+        aria-label="Address" autocomplete="off" spellcheck="false">
+    </div>
+    <button class="iconbtn" data-act="unlink" type="button"
+      aria-label="Remove this link">${raw(icon('x', 16))}</button>
   </div>`;
 }
 
@@ -758,13 +817,7 @@ export function equipmentForm(state, eq) {
     </div>
     <div class="two">
       ${raw(locationField(state, e))}
-      <div class="field">
-        <label for="f-category">Category</label>
-        <select id="f-category" name="category">
-          <option value="">—</option>
-          ${CATEGORIES.map(([v, l]) => html`<option value="${v}"${raw(e.category === v ? ' selected' : '')}>${l}</option>`)}
-        </select>
-      </div>
+      ${raw(categoryField(state, e))}
     </div>
     <div class="two">
       <div class="field">
@@ -776,16 +829,9 @@ export function equipmentForm(state, eq) {
         <input id="f-model" name="model" value="${e.model || ''}" autocomplete="off">
       </div>
     </div>
-    <div class="two">
-      <div class="field">
-        <label for="f-serial">Serial</label>
-        <input id="f-serial" name="serial" value="${e.serial || ''}" autocomplete="off">
-      </div>
-      <div class="field">
-        <label for="f-partNumber">Part number</label>
-        <input id="f-partNumber" name="partNumber" value="${e.partNumber || ''}"
-          placeholder="20x25x1" autocomplete="off">
-      </div>
+    <div class="field">
+      <label for="f-serial">Serial</label>
+      <input id="f-serial" name="serial" value="${e.serial || ''}" autocomplete="off">
     </div>
     <div class="two">
       <div class="field">
@@ -810,6 +856,15 @@ export function equipmentForm(state, eq) {
     <div class="field">
       <label for="f-notes">Notes</label>
       <textarea id="f-notes" name="notes">${e.notes || ''}</textarea>
+    </div>
+    <!-- Links to where a replacement is bought. They were shown on the detail
+         page and carried through a save, but nothing could change one: a part
+         that stopped being sold left a dead link with no way to remove it. -->
+    <div class="field">
+      <label>Links</label>
+      <button class="btn" data-act="add-link" type="button">${raw(icon('plus', 15))}Add a link</button>
+      <div class="hint">Where to buy a replacement, or the manual. Clearing the address drops a link.</div>
+      <div class="linklist">${raw((e.parts || []).filter(Boolean).map((l) => linkRow(l)).join(''))}</div>
     </div>
     <div class="field">
       <label>Icon</label>

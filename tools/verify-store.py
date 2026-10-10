@@ -118,7 +118,7 @@ async def main() -> int:
                 "partsUsed": [{"supplyId": "s1", "quantity": 0}],
             },
         ],
-        "supplies": [{"id": "s1", "name": "LT1000P", "quantity": "2", "reorderAt": "1"}],
+        "supplies": [{"id": "s1", "name": "WF-100", "quantity": "2", "reorderAt": "1"}],
         "log": [],
     }
     n = store_mod.normalize(legacy)
