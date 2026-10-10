@@ -364,10 +364,19 @@ export const CSS = `
    ============================================================ */
 
 .scroll {
-  overflow-y: auto;
+  /* scroll, not auto. With auto, a tab whose content happens to fit is not a
+     scroll container at all, so a swipe over it has nothing to move and the
+     gesture passes outward to whatever can scroll — inside Home Assistant
+     that is the page, and the header and tabs go up with it. Parts and
+     History are short, which is why they misbehaved while the longer tabs
+     looked right. scroll makes every tab a scroll container whether or not
+     it has anywhere to go, and contain stops the gesture at its edge rather
+     than handing it on. The gutter is reserved either way, so no scrollbar
+     appears where there is nothing to scroll. */
+  overflow-y: scroll;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  overscroll-behavior-y: contain;
+  overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: var(--line-strong) transparent;
   /* Hold the scrollbar's width whether or not there is anything to scroll.

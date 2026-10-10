@@ -1831,6 +1831,35 @@ async function main() {
     await probe.ctx.close();
   }
 
+  // Every tab must be a scroll container, including the ones whose content
+  // happens to fit. With overflow-y:auto a short tab is not one, so a swipe
+  // over it has nothing to move and passes outward to whatever can scroll —
+  // inside Home Assistant that is the page, and the header goes up with it.
+  // Parts and History are the short ones, which is why they misbehaved while
+  // the longer tabs looked right.
+  ({ ctx, page } = await open({ narrow: false, viewport: { width: 1280, height: 680 } }));
+  const containers = {};
+  for (const tab of ['routines', 'equipment', 'parts', 'history', 'settings']) {
+    await page.click(el(`.tab[data-value="${tab}"]`));
+    await page.waitForTimeout(130);
+    containers[tab] = await page.evaluate(() => {
+      const sc = document.querySelector('elmer-panel').shadowRoot.querySelector('.scroll');
+      const cs = getComputedStyle(sc);
+      return {
+        overflowY: cs.overflowY,
+        chains: cs.overscrollBehaviorY !== 'contain' && cs.overscrollBehaviorY !== 'none',
+        hasRoom: sc.scrollHeight > sc.clientHeight + 1,
+      };
+    });
+  }
+  check('every tab is a scroll container',
+    [...new Set(Object.values(containers).map((c) => c.overflowY))], ['scroll']);
+  ok('none of them hands the gesture outward',
+    Object.values(containers).every((c) => !c.chains), JSON.stringify(containers));
+  ok('and the check covers a tab with nothing to scroll',
+    Object.values(containers).some((c) => !c.hasRoom), JSON.stringify(containers));
+  await ctx.close();
+
   // The scrollbar's width is held whether or not there is anything to scroll,
   // so moving between a long tab and a short one cannot shift the content
   // sideways by the width of a scrollbar that has just appeared.
