@@ -14,7 +14,7 @@
 import { CSS } from './styles.js';
 import { icon } from './icons.js';
 import {
-  esc, html, raw, titleCase, uid, todayIso,
+  esc, html, raw, titleCase, uid, todayIso, intervalText,
 } from './util.js';
 import {
   routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
@@ -30,7 +30,143 @@ const TABS = [
   ['settings', 'Settings', 'settings'],
 ];
 
+/**
+ * Suggested routines, keyed by what the thing is and then by what kind of
+ * thing it is.
+ *
+ * Category alone was too coarse to suggest from. A pool is Exterior, and
+ * Exterior means gutters, roof and deck — so adding a pool offered three
+ * routines that had nothing to do with it. The icon is the finer answer:
+ * picking the pool glyph says "pool" where the category can only say
+ * "outside". The form's hidden icon field defaults to the category, so a
+ * piece whose icon was never touched still lands on the category list below
+ * rather than on nothing.
+ */
 const TEMPLATES = {
+  /* --- by icon: what the thing actually is --------------------------- */
+  refrigerator: [
+    ['Replace water filter', 6, 'months'],
+    ['Clean condenser coils', 6, 'months'],
+    ['Clean door gaskets', 1, 'years'],
+  ],
+  dishwasher: [
+    ['Clean filter', 1, 'months'],
+    ['Run a cleaner cycle', 3, 'months'],
+    ['Clear spray arm holes', 6, 'months'],
+  ],
+  washer: [
+    ['Run tub clean cycle', 1, 'months'],
+    ['Wipe door seal and dispenser', 1, 'months'],
+    ['Inspect fill hoses', 1, 'years'],
+  ],
+  dryer: [
+    ['Clean lint screen housing', 6, 'months'],
+    ['Clean vent duct', 1, 'years'],
+    ['Check vent hood flap', 1, 'years'],
+  ],
+  oven: [
+    ['Clean oven', 3, 'months'],
+    ['Clean range hood filter', 3, 'months'],
+    ['Check door seal', 1, 'years'],
+  ],
+  microwave: [
+    ['Clean grease filter', 3, 'months'],
+    ['Replace charcoal filter', 1, 'years'],
+  ],
+  furnace: [
+    ['Replace air filter', 3, 'months'],
+    ['Professional service', 1, 'years'],
+    ['Clear condensate drain line', 6, 'months'],
+  ],
+  waterheater: [
+    ['Flush tank / sediment drain', 1, 'years'],
+    ['Test T&P relief valve', 1, 'years'],
+    ['Check anode rod', 3, 'years'],
+  ],
+  filterfunnel: [
+    ['Replace filter cartridge', 6, 'months'],
+    ['Sanitize housing', 1, 'years'],
+  ],
+  sumppump: [
+    ['Test pump and float', 3, 'months'],
+    ['Test battery backup', 6, 'months'],
+    ['Clean pit and inlet screen', 1, 'years'],
+  ],
+  sprinkler: [
+    ['Start up and check heads', 1, 'years'],
+    ['Adjust zone timings', 6, 'months'],
+    ['Blow out lines for winter', 1, 'years'],
+  ],
+  alarm: [
+    ['Test alarm', 6, 'months'],
+    ['Replace battery', 1, 'years'],
+    ['Replace unit', 10, 'years'],
+  ],
+  garage: [
+    ['Lubricate rollers and hinges', 6, 'months'],
+    ['Test auto-reverse safety', 6, 'months'],
+    ['Inspect springs and cables', 1, 'years'],
+  ],
+  mower: [
+    ['Sharpen blades', 1, 'years'],
+    ['Change oil', 1, 'years'],
+    ['Replace air filter', 1, 'years'],
+    ['Replace spark plug', 1, 'years'],
+  ],
+  generator: [
+    ['Run under load', 1, 'months'],
+    ['Change oil', 1, 'years'],
+    ['Replace air filter', 1, 'years'],
+  ],
+
+  pool: [
+    ['Test water chemistry', 1, 'weeks'],
+    ['Skim and brush', 1, 'weeks'],
+    ['Vacuum pool', 2, 'weeks'],
+    ['Shock / superchlorinate', 1, 'months'],
+    ['Open pool', 1, 'years'],
+    ['Close pool', 1, 'years'],
+  ],
+  poolpump: [
+    ['Empty pump basket', 1, 'weeks'],
+    ['Lubricate pump lid O-ring', 6, 'months'],
+    ['Inspect seals and impeller', 1, 'years'],
+  ],
+  poolfilter: [
+    ['Backwash filter', 1, 'months'],
+    ['Clean cartridge / grids', 6, 'months'],
+    ['Replace filter media', 5, 'years'],
+  ],
+  hottub: [
+    ['Test water chemistry', 1, 'weeks'],
+    ['Rinse filter cartridge', 1, 'months'],
+    ['Drain and refill', 4, 'months'],
+    ['Replace filter cartridge', 1, 'years'],
+  ],
+
+  car: [
+    ['Oil and filter change', 6, 'months'],
+    ['Rotate tires', 6, 'months'],
+    ['Replace cabin air filter', 1, 'years'],
+    ['Replace engine air filter', 1, 'years'],
+    ['State inspection / registration', 1, 'years'],
+  ],
+  suv: [
+    ['Oil and filter change', 6, 'months'],
+    ['Rotate tires', 6, 'months'],
+    ['Replace cabin air filter', 1, 'years'],
+    ['Replace engine air filter', 1, 'years'],
+    ['State inspection / registration', 1, 'years'],
+  ],
+  truck: [
+    ['Oil and filter change', 6, 'months'],
+    ['Rotate tires', 6, 'months'],
+    ['Replace cabin air filter', 1, 'years'],
+    ['Replace engine air filter', 1, 'years'],
+    ['State inspection / registration', 1, 'years'],
+  ],
+
+  /* --- by category: the fallback when no icon says otherwise --------- */
   hvac: [
     ['Replace air filter', 3, 'months'],
     ['Professional service', 1, 'years'],
@@ -63,6 +199,24 @@ const TEMPLATES = {
   ],
   other: [['General inspection', 1, 'years']],
 };
+
+/**
+ * The suggestions for one piece of equipment: what it is, then what kind of
+ * thing it is, and nothing at all if neither is known.
+ *
+ * Returns null rather than the "other" list when there is nothing specific to
+ * say, so the caller can skip the sheet instead of offering a single generic
+ * inspection to somebody who has told us nothing.
+ */
+function templatesFor(eq) {
+  if (!eq) return null;
+  // "other" is the catch-all glyph, not a statement about what the thing is,
+  // so it does not get to outrank the category. Records saved before the form
+  // stopped defaulting the icon carry it, and they should still get whatever
+  // their category can offer.
+  const what = eq.icon && eq.icon !== 'other' ? eq.icon : '';
+  return TEMPLATES[what] || TEMPLATES[eq.category] || null;
+}
 
 class ElmerPanel extends HTMLElement {
   constructor() {
@@ -536,7 +690,11 @@ class ElmerPanel extends HTMLElement {
       if (this.sheet) {
         this._measurePanel();
         const { title, body } = this._sheetContent(state);
-        this._layer.insertAdjacentHTML('afterbegin', html`<div class="scrim" data-act="scrim">
+        // The scrim carries no action of its own. It used to close the sheet,
+        // which on a desktop meant a stray click beside a form threw away
+        // everything typed into it with no warning and no way back. The X,
+        // Cancel and Escape are the ways out; the backdrop only dims.
+        this._layer.insertAdjacentHTML('afterbegin', html`<div class="scrim">
           <div class="sheet" role="dialog" aria-modal="true" aria-label="${title}" tabindex="-1">
             <header>
               <h2>${title}</h2>
@@ -599,11 +757,11 @@ class ElmerPanel extends HTMLElement {
 
   _templateBody(state, equipmentId) {
     const eq = state.equipment.find((e) => e.id === equipmentId);
-    const list = (eq && TEMPLATES[eq.category]) || TEMPLATES.other;
+    const list = templatesFor(eq) || TEMPLATES.other;
     return html`<div class="note" style="padding:8px 0 4px">These are typical for ${eq ? eq.name : 'this'}. Pick the ones that apply — every interval stays editable, and you can add your own instead.</div>
       <div class="card">${list.map((t, i) => html`<div class="row" style="cursor:default">
         <div class="body"><div class="title">${t[0]}</div>
-          <div class="sub"><span class="txt">every ${t[1]} ${t[2]}</span></div></div>
+          <div class="sub"><span class="txt">every ${intervalText(t[1], t[2])}</span></div></div>
         <input type="checkbox" name="tpl:${i}" checked style="width:22px;height:22px;accent-color:var(--accent)">
       </div>`)}</div>
       <div class="btnrow">
@@ -643,11 +801,25 @@ class ElmerPanel extends HTMLElement {
     // preventDefault. Links are checked first so the nearest one wins.
     if (ev.target.closest && ev.target.closest('a[href]')) return;
 
+    // The calendar glyph on a date field is painted by the stylesheet rather
+    // than supplied by the engine, so it has to be wired up as well as drawn.
+    // Only the glyph opens the picker: a click anywhere else in the field is
+    // somebody aiming at the month or the year to type over it, and hijacking
+    // that would make the field unusable from a keyboard.
+    const date = ev.target.closest && ev.target.closest('input[type="date"]');
+    if (date) {
+      const box = date.getBoundingClientRect();
+      const glyph = parseFloat(getComputedStyle(date).paddingRight) || 0;
+      if (ev.clientX >= box.right - glyph && typeof date.showPicker === 'function') {
+        // Not supported everywhere, and throws if the engine decides this was
+        // not a user gesture. Either way the field still takes typing.
+        try { date.showPicker(); } catch { /* the field is still editable */ }
+      }
+      return;
+    }
+
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (!el) return;
-    // The scrim is the whole overlay, so only a click on the backdrop itself
-    // should dismiss — not one that lands on the sheet inside it.
-    if (el.dataset.act === 'scrim' && ev.target !== el) return;
     ev.preventDefault();
     ev.stopPropagation();
     this._act(el.dataset.act, el);
@@ -797,7 +969,6 @@ class ElmerPanel extends HTMLElement {
         this._unpickPart(el);
         return;
       case 'close':
-      case 'scrim':
         this._closeSheet();
         return;
       case 'complete':
@@ -1018,8 +1189,10 @@ class ElmerPanel extends HTMLElement {
       // through rather than wiped, because older records and imports have it
       // and the detail page still shows it.
       partNumber: existing ? existing.partNumber || '' : '',
+      purchasedOn: f.purchasedOn || null,
       installedOn: f.installedOn || null,
       purchasedFrom: (f.purchasedFrom || '').trim(),
+      orderNumber: (f.orderNumber || '').trim(),
       phone: (f.phone || '').trim(),
       email: (f.email || '').trim(),
       notes: f.notes || '',
@@ -1036,7 +1209,7 @@ class ElmerPanel extends HTMLElement {
 
     // A brand new piece of equipment with a category has suggestions worth
     // offering, so the app is useful before anybody types an interval.
-    if (isNew && record.category && TEMPLATES[record.category]) {
+    if (isNew && templatesFor(record)) {
       this._openSheet({ kind: 'templates', id: record.id });
     } else {
       this.detail = { kind: 'equipment', id: record.id };
@@ -1091,7 +1264,7 @@ class ElmerPanel extends HTMLElement {
   async _saveTemplates(equipmentId) {
     const f = this._fields();
     const eq = this.data.equipment.find((e) => e.id === equipmentId);
-    const list = (eq && TEMPLATES[eq.category]) || TEMPLATES.other;
+    const list = templatesFor(eq) || TEMPLATES.other;
     const ops = [];
     list.forEach((t, i) => {
       if (!f[`tpl:${i}`]) return;

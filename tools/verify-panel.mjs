@@ -709,6 +709,79 @@ async function main() {
     return out;
   });
   check('nothing in the form is wider than what holds it', spill, []);
+  // A date input is a native control, and a native control keeps its own
+  // intrinsic box unless the appearance is stripped — which is how the two
+  // date fields came out half again as tall as every other field in the form
+  // and stopped lining up with the one beside them. Measured against a plain
+  // text input in the same form rather than against a number, because every
+  // height here scales with the text-size setting.
+  const boxes = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const h = (sel) => {
+      const n = root.querySelector(sel);
+      return n ? Math.round(n.getBoundingClientRect().height) : null;
+    };
+    return {
+      text: h('.sheet input[name="name"]'),
+      select: h('.sheet select[name="categoryPick"]'),
+      purchased: h('.sheet input[name="purchasedOn"]'),
+      installed: h('.sheet input[name="installedOn"]'),
+    };
+  });
+  check('a date field is the same box as a text field', boxes.purchased, boxes.text);
+  check('and as the select beside it', boxes.purchased, boxes.select);
+  check('both dates agree', boxes.installed, boxes.purchased);
+
+  // Those three pass in Chromium either way: Chromium honours the height on a
+  // date input regardless. iOS does not — it keeps the control's intrinsic
+  // box unless the appearance is stripped, exactly as it does for a select.
+  // So the thing to assert is the property iOS needs, not the height it
+  // produces, which this engine cannot be made to get wrong.
+  check('and the appearance is stripped, which is what iOS obeys the height for',
+    await page.evaluate(() => getComputedStyle(document.querySelector('elmer-panel')
+      .shadowRoot.querySelector('.sheet input[type="date"]')).appearance),
+    'none');
+
+  // Stripping the appearance also takes the engine's calendar button away, so
+  // the field would read as a bare text box. The glyph is drawn by the
+  // stylesheet instead, which means it has to actually be there, and the
+  // field has to keep room for it rather than running the value underneath.
+  const glyph = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const cs = getComputedStyle(root.querySelector('.sheet input[type="date"]'));
+    return { image: cs.backgroundImage, padRight: parseFloat(cs.paddingRight) };
+  });
+  ok('a date field shows a calendar glyph', /svg/.test(glyph.image), glyph.image);
+  ok('with room reserved for it', glyph.padRight > 24, String(glyph.padRight));
+
+  // --- the icon picker ---------------------------------------------------
+  // icon() falls back to the generic crate for a name it does not know, and
+  // the list of names is kept apart from the drawings — so a typo in one does
+  // not throw, it quietly renders a crate that looks deliberate. Every glyph
+  // being distinct is what catches that, and it is the check that earns its
+  // keep as the set grows.
+  const picker = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const buttons = [...root.querySelectorAll('.iconpick [data-act="pick-icon"]')];
+    const drawings = buttons.map((b) => b.querySelector('svg').innerHTML);
+    const g = root.querySelector('.iconpick');
+    return {
+      n: buttons.length,
+      unique: new Set(drawings).size,
+      names: buttons.map((b) => b.dataset.value),
+      cols: getComputedStyle(g).gridTemplateColumns.split(' ').length,
+      smallest: Math.min(...buttons.map((b) => Math.round(b.getBoundingClientRect().width))),
+    };
+  });
+  check('every icon offered is drawn, none falls back to the generic one',
+    picker.unique, picker.n);
+  check('and no icon is listed twice', new Set(picker.names).size, picker.n);
+  // The grid is auto-fill, so the column count follows the width — 6 across on
+  // a 390pt phone, more on a larger one, 10 on a desktop. What has to hold at
+  // every width is the tap target, not the tidiness of the last row.
+  ok('and every target is big enough to hit', picker.smallest >= 44,
+    `${picker.smallest}px at ${picker.cols} across`);
+
   ok('a date gets a row to itself on a phone', await page.evaluate(() => {
     const root = document.querySelector('elmer-panel').shadowRoot;
     const date = root.querySelector('.sheet input[type="date"]');
@@ -735,10 +808,88 @@ async function main() {
     const eq = s.equipment.find((e) => e.name === 'Water Heater');
     return s.tasks.filter((t) => t.equipmentId === eq.id).map((t) => t.name);
   });
+  // Keyed on the icon that was picked above, not on the Water category: the
+  // category can only say "something to do with water", and a water heater
+  // does not take a filter cartridge.
   check('suggested routines added', withRoutines,
-    ['Replace filter cartridge', 'Flush tank / sediment drain', 'Check anode rod']);
+    ['Flush tank / sediment drain', 'Test T&P relief valve', 'Check anode rod']);
   ok('landed on the equipment detail', await page.$(el('[data-act="edit-equipment"]')) !== null);
   await shot(page, 'phone-equipment-detail.png');
+
+  // --- suggestions follow the thing, not the category -------------------
+  // A pool is Exterior, and Exterior used to mean gutters, roof and deck — so
+  // adding a pool offered three routines with nothing to do with a pool.
+  // The icon is the finer answer: it can say "pool" where a category can only
+  // say "outside".
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(80);
+  await page.click(el('.addbtn[data-act="add-equipment"]'));
+  await page.waitForSelector(el('.sheet input[name="name"]'));
+  await page.fill(el('.sheet input[name="name"]'), 'Swimming Pool');
+  await page.selectOption(el('.sheet select[name="categoryPick"]'), 'exterior');
+  await page.click(el('.sheet [data-act="pick-icon"][data-value="pool"]'));
+  await page.click(el('.sheet [data-act="save-equipment"]'));
+  await page.waitForSelector(el('.sheet [data-act="save-templates"]'));
+
+  const poolOffered = await page.$$eval(el('.sheet .card .row .title'),
+    (n) => n.map((x) => x.textContent.trim()));
+  const exteriorOnes = ['Clean gutters', 'Inspect roof and flashing', 'Reseal deck'];
+  ok('a pool is not offered the roof and the gutters',
+    exteriorOnes.every((t) => !poolOffered.includes(t)), JSON.stringify(poolOffered));
+  ok('it is offered pool work instead',
+    poolOffered.includes('Test water chemistry') && poolOffered.includes('Skim and brush'),
+    JSON.stringify(poolOffered));
+
+  // The unit is stored plural because that is what the picker offers, so a
+  // weekly routine used to read "every 1 weeks". Rare until the pool arrived
+  // with two of them.
+  const cadences = await page.$$eval(el('.sheet .card .row .sub .txt'),
+    (n) => n.map((x) => x.textContent.trim()));
+  ok('and each cadence is written the way it is said',
+    cadences.includes('every week') && cadences.includes('every 2 weeks')
+      && !cadences.some((c) => /every 1 /.test(c)),
+    JSON.stringify(cadences));
+  // Still filed under Exterior — the icon changes what is suggested, not
+  // where the thing lives.
+  check('and it is still an Exterior piece',
+    await page.evaluate(() => window.__snapshot().equipment.find((e) => e.name === 'Swimming Pool').category),
+    'exterior');
+  await page.click(el('.sheet [data-act="close"]'));
+  await page.waitForTimeout(120);
+
+  // A deck, filed the same way but left on the category's own icon, still
+  // gets the Exterior list. That is the fallback working, not a miss.
+  await page.click(el('.addbtn[data-act="add-equipment"]'));
+  await page.waitForSelector(el('.sheet input[name="name"]'));
+  await page.fill(el('.sheet input[name="name"]'), 'Back Deck');
+  await page.selectOption(el('.sheet select[name="categoryPick"]'), 'exterior');
+  await page.click(el('.sheet [data-act="save-equipment"]'));
+  await page.waitForSelector(el('.sheet [data-act="save-templates"]'));
+  const deckOffered = await page.$$eval(el('.sheet .card .row .title'),
+    (n) => n.map((x) => x.textContent.trim()));
+  check('an Exterior piece with no icon of its own still gets the Exterior list',
+    deckOffered, exteriorOnes);
+  await page.click(el('.sheet [data-act="close"]'));
+  await page.waitForTimeout(120);
+
+  // The same mistake showed on the list: an untouched icon was saved as the
+  // generic box, which then beat the category, so every new piece arrived
+  // wearing a crate regardless of what it was.
+  const glyphs = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const out = {};
+    for (const row of root.querySelectorAll('.row[data-act="equipment"]')) {
+      out[row.querySelector('.title').textContent.trim()] =
+        row.querySelector('svg path') ? row.querySelector('svg').innerHTML : null;
+    }
+    return out;
+  });
+  ok('a piece that picked no icon does not land on the generic one',
+    glyphs['Back Deck'] && glyphs['Back Deck'] !== glyphs['Swimming Pool'],
+    'deck and pool drew the same glyph');
+  check('and nothing was stored as a choice nobody made',
+    await page.evaluate(() => window.__snapshot().equipment.find((e) => e.name === 'Back Deck').icon),
+    '');
 
   // --- the sheet must not cut its own content off -----------------------
   // The overlay is anchored to the viewport, not to the panel. When it was
@@ -790,6 +941,41 @@ async function main() {
   // buttons, and one raised while the form is open must move clear of them.
   check('opening a form clears a stale toast',
     await page.$(el('.toast')), null);
+
+  // --- the backdrop is not a way out ------------------------------------
+  // It used to be: a click anywhere beside the form closed it and threw away
+  // everything typed, with no warning and no undo. On a desktop, where the
+  // sheet is a small panel in the middle of a wide window, most of what you
+  // can click is backdrop. Typing first, because the cost of the old
+  // behaviour was losing exactly this.
+  await page.fill(el('.sheet input[name="brand"]'), 'Half typed');
+  const box = await page.evaluate(() => {
+    const r = document.querySelector('elmer-panel').shadowRoot
+      .querySelector('.sheet').getBoundingClientRect();
+    return { x: r.x, y: r.y };
+  });
+  // Above and to the left of the sheet — backdrop in any layout.
+  await page.mouse.click(Math.max(4, box.x / 2), Math.max(4, box.y / 2));
+  await page.waitForTimeout(160);
+  ok('a click on the backdrop leaves the form open',
+    await page.$(el('.sheet')) !== null);
+  check('with what was typed still in it',
+    await page.inputValue(el('.sheet input[name="brand"]')), 'Half typed');
+
+  // Escape is a deliberate act with no pointer to slip, so it still closes.
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(160);
+  check('Escape still closes it', await page.$(el('.sheet')), null);
+
+  // And the X, which is what the form offers as the way out.
+  await page.click(el('[data-act="edit-equipment"]'));
+  await page.waitForSelector(el('.sheet'));
+  await page.click(el('.sheet header [data-act="close"]'));
+  await page.waitForTimeout(160);
+  check('the X closes it', await page.$(el('.sheet')), null);
+
+  await page.click(el('[data-act="edit-equipment"]'));
+  await page.waitForSelector(el('.sheet'));
   await page.click(el('.sheet [data-act="close"]'));
   await page.waitForTimeout(80);
 
@@ -968,6 +1154,12 @@ async function main() {
   await page.click(el('[data-act="edit-equipment"]'));
   await page.waitForSelector(el('.sheet input[name="name"]'));
   await page.fill(el('.sheet input[name="brand"]'), 'Trane XE');
+
+  // What a receipt holds: when it was bought, what it cost to look up again.
+  // Two dates, not one — a unit bought in the autumn sale and fitted in the
+  // spring has two different warranties running from two different days.
+  await page.fill(el('.sheet input[name="purchasedOn"]'), '2021-11-26');
+  await page.fill(el('.sheet input[name="orderNumber"]'), 'WO-4471-B');
   await page.click(el('.sheet [data-act="save-equipment"]'));
   await page.waitForTimeout(180);
   const edited = await page.evaluate(() => window.__snapshot().equipment.find((e) => e.id === 'eq1'));
@@ -977,6 +1169,37 @@ async function main() {
   // The form no longer has a field for it, so a save must carry it through
   // rather than wipe what older records and imports already hold.
   check('and the part number it has no field for', edited.partNumber, '20x25x1');
+  check('the purchased date saved', edited.purchasedOn, '2021-11-26');
+  check('the order number saved', edited.orderNumber, 'WO-4471-B');
+  // Installed is a separate field and must not have been overwritten by the
+  // one that now sits beside it in the form.
+  ok('and the installed date is still its own', !!edited.installedOn && edited.installedOn !== '2021-11-26',
+    String(edited.installedOn));
+
+  const bought = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const out = {};
+    const dts = [...root.querySelectorAll('dl.kv dt')];
+    for (const dt of dts) out[dt.textContent.trim()] = dt.nextElementSibling.textContent.trim();
+    return out;
+  });
+  ok('the detail page shows both dates, told apart',
+    bought.Purchased && bought.Installed && bought.Purchased !== bought.Installed,
+    JSON.stringify({ p: bought.Purchased, i: bought.Installed }));
+  check('and the order number', bought['Order number'], 'WO-4471-B');
+
+  // An order number is the one thing you have when the label has rubbed off.
+  await page.click(el('.crumb .up'));
+  await page.waitForTimeout(80);
+  await page.fill(el('.search input'), 'WO-4471');
+  await page.waitForTimeout(140);
+  check('searching equipment finds it by order number',
+    await page.$$eval(el('.card .row .title'), (n) => n.map((x) => x.textContent.trim())),
+    ['Furnace / Air Conditioner']);
+  await page.fill(el('.search input'), '');
+  await page.waitForTimeout(140);
+  await page.click(el('.row[data-id="eq1"]'));
+  await page.waitForTimeout(60);
 
   // --- the replacement-part links can be changed ------------------------
   // They were shown on the detail page and carried through a save, but

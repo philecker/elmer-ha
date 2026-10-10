@@ -1061,15 +1061,67 @@ a.btn { text-decoration: none; }
 .two > .field { min-width: 0; }
 .field input, .field select, .field textarea { min-width: 0; max-width: 100%; }
 
-/* Stripping the native appearance is what makes a date input take the width it
-   is given rather than the width it wants, and left-aligns it with every other
-   field. Tapping it still opens the platform's own picker. */
+/* A date field is a native control, and that is the whole difficulty: the
+   platform wants to draw the box, the value and the calendar, and each
+   engine wants to draw them differently.
+
+   The appearance is stripped, because iOS treats a date input the way it
+   treats a select — it keeps its own intrinsic box and ignores the height
+   set above, so the field came out half again as tall as every other one and
+   the pair in a row no longer lined up. Stripping it is the only way the
+   height here is obeyed.
+
+   Stripping it also takes the calendar button away, which is what made the
+   field read as a bare text box on the Mac. So the glyph is drawn here
+   instead, as a background image: ours on every platform, in the ink of the
+   theme, rather than whatever the engine felt like supplying. The field
+   reserves room for it on the right.
+
+   "color-scheme" is declared on the control rather than left to inherit from
+   :host. The calendar that drops out of it is an OS panel, not part of the
+   page, and WebKit resolves its appearance per control — inherited from a
+   shadow host it was drawn for light mode over a dark material, which is how
+   October arrived as near-black digits on a near-black sheet.
+
+   What Chromium shows here is the geometry, which the panel suite checks.
+   The picker panel's own colours are WebKit's and are checked on a device. */
 .field input[type="date"] {
   -webkit-appearance: none;
   appearance: none;
   display: block;
   width: 100%;
   text-align: left;
+  color-scheme: light;
+  padding-right: calc(38px * var(--ui-scale));
+  background-repeat: no-repeat;
+  background-position: right calc(12px * var(--ui-scale)) center;
+  background-size: calc(16px * var(--ui-scale));
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+}
+:host([data-theme="dark"]) .field input[type="date"],
+:host([data-pinned][data-theme="dark"]) .field input[type="date"] {
+  color-scheme: dark;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a2b0ac' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+}
+:host([data-pinned][data-theme="light"]) .field input[type="date"] {
+  color-scheme: light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+}
+/* WebKit gives the value a tall line box of its own and centres it. */
+.field input[type="date"]::-webkit-date-and-time-value {
+  text-align: left;
+  margin: 0;
+  line-height: normal;
+}
+.field input[type="date"]::-webkit-datetime-edit {
+  padding: 0;
+  line-height: normal;
+}
+/* The native button is gone with the appearance; the glyph above stands in
+   for it, and the whole field is the target. */
+.field input[type="date"]::-webkit-calendar-picker-indicator {
+  display: none;
+  -webkit-appearance: none;
 }
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: 2px solid var(--accent);

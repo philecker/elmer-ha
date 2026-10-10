@@ -13,7 +13,7 @@
 import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
-  INTERVAL_UNITS, safeHref, asLink, linkLabel, daysBetween, MONTHS,
+  INTERVAL_UNITS, intervalText, safeHref, asLink, linkLabel, daysBetween, MONTHS,
 } from './util.js';
 
 /* ------------------------------------------------------------------ bits -- */
@@ -98,7 +98,7 @@ export function routineRow(row, state, opts = {}) {
   // Inside a piece of equipment, naming it on every row says nothing — the
   // interval is what you actually want there.
   const where = opts.hideEquipment
-    ? `every ${t.intervalCount} ${t.intervalUnit}`
+    ? `every ${intervalText(t.intervalCount, t.intervalUnit)}`
     : whereLine(eq, state.settings.showLocations);
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
@@ -236,6 +236,7 @@ export function equipmentView(state) {
   const needle = (state.query || '').trim().toLowerCase();
   const matched = state.equipment.filter((eq) => !needle || haystack(
     eq.name, eq.location, eq.brand, eq.model, eq.partNumber,
+    eq.serial, eq.orderNumber, eq.purchasedFrom,
   ).includes(needle));
 
   if (!matched.length) {
@@ -338,8 +339,12 @@ export function equipmentDetail(state, id) {
   add('Model', eq.model, 'mono');
   add('Serial', eq.serial, 'mono');
   add('Part number', eq.partNumber, 'mono');
+  // Bought, then fitted, then where from and under which order — the order a
+  // receipt is read in, and the order you would retrace to make a claim.
+  add('Purchased', eq.purchasedOn ? formatDay(eq.purchasedOn, state.computed.today) : '');
   add('Installed', eq.installedOn ? formatDay(eq.installedOn, state.computed.today) : '');
   add('Purchased from', eq.purchasedFrom);
+  add('Order number', eq.orderNumber, 'mono');
 
   const tel = safeHref(eq.phone ? `tel:${String(eq.phone).replace(/[^\d+]/g, '')}` : '');
   if (eq.phone) {
@@ -922,12 +927,22 @@ export function equipmentForm(state, eq) {
     </div>
     <div class="two">
       <div class="field">
+        <label for="f-purchasedOn">Purchased</label>
+        <input id="f-purchasedOn" name="purchasedOn" type="date" value="${e.purchasedOn || ''}">
+      </div>
+      <div class="field">
         <label for="f-installedOn">Installed</label>
         <input id="f-installedOn" name="installedOn" type="date" value="${e.installedOn || ''}">
       </div>
+    </div>
+    <div class="two">
       <div class="field">
         <label for="f-purchasedFrom">Purchased from</label>
         <input id="f-purchasedFrom" name="purchasedFrom" value="${e.purchasedFrom || ''}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="f-orderNumber">Order number</label>
+        <input id="f-orderNumber" name="orderNumber" value="${e.orderNumber || ''}" autocomplete="off">
       </div>
     </div>
     <div class="two">
@@ -959,7 +974,13 @@ export function equipmentForm(state, eq) {
         ${EQUIPMENT_ICONS.map((n) => html`<button type="button" data-act="pick-icon" data-value="${n}"
           aria-pressed="${chosen === n}" aria-label="${n}">${raw(icon(n, 20))}</button>`)}
       </div>
-      <input type="hidden" name="icon" value="${chosen}">
+      <!-- Empty until somebody actually picks one. The highlight above shows
+           what the category would give you, but storing that as a choice
+           makes "I did not choose" indistinguishable from "I chose this" —
+           and since a new piece started out as "other", every new piece was
+           saved as having deliberately chosen the generic box, which then
+           beat its own category for both the glyph and the suggestions. -->
+      <input type="hidden" name="icon" value="${e.icon || ''}">
     </div>
     <div class="btnrow">
       <button class="btn" data-act="close">Cancel</button>
@@ -1096,7 +1117,7 @@ export function logForm(state, taskId) {
 
   return html`<dl class="kv" style="padding:4px 0 10px">
       ${raw(eq ? `<dt>Equipment</dt><dd>${esc(eq.name)}</dd>` : '')}
-      <dt>Every</dt><dd>${task.intervalCount} ${task.intervalUnit}</dd>
+      <dt>Every</dt><dd>${intervalText(task.intervalCount, task.intervalUnit)}</dd>
       <dt>Last done</dt><dd>${raw(task.lastDone ? esc(formatDay(task.lastDone, state.computed.today)) : 'never')}</dd>
       ${raw(st.due ? `<dt>Due</dt><dd>${esc(formatDay(st.due, state.computed.today))} · ${esc(relative(st.daysLeft))}</dd>` : '')}
       ${raw(eq && eq.partNumber ? `<dt>Part number</dt><dd class="mono">${esc(eq.partNumber)}</dd>` : '')}

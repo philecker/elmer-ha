@@ -43,11 +43,20 @@ const P = {
   furnace: '<rect x="4.5" y="2.5" width="15" height="19" rx="2"/><path d="M4.5 13h15"/><path d="M12 5c1.8 1.8 2.4 3.3.9 5-1.7-1.1-2.9-2.7-.9-5z"/>',
   waterheater: '<rect x="6" y="4" width="12" height="17" rx="4"/><path d="M12 4V2M9 21v1.4M15 21v1.4M8 9.5h8"/>',
   filterfunnel: '<path d="M3.5 4.5h17l-6.6 8.2v7.3l-3.8 1.9v-9.2z"/>',
+  // The pit, the pump standing in it, and the discharge running up and out.
+  sumppump: '<path d="M3.8 11.2v8.2a2 2 0 0 0 2 2h12.4a2 2 0 0 0 2-2v-8.2"/><path d="M2.6 11.2h18.8"/><rect x="7.6" y="14.6" width="5" height="7" rx="1"/><path d="M10.1 14.6V8a1.8 1.8 0 0 1 1.8-1.8h4.3a1.8 1.8 0 0 1 1.8 1.8v3"/>',
+  // A pop-up head on its riser, throwing three ways.
+  sprinkler: '<path d="M12 21.6v-7.2M8.8 21.6h6.4"/><rect x="10.2" y="11" width="3.6" height="3.4" rx="1.2"/><path d="M9.5 10.4C8 8.5 5.9 7.5 3.4 7.3M14.5 10.4c1.5-1.9 3.6-2.9 6.1-3.1M12 10.5V4.4"/>',
   alarm: '<circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="2"/><path d="M12 3.5v1.8M12 18.7v1.8M3.5 12h1.8M18.7 12h1.8"/>',
   garage: '<path d="M3 10.5 12 4l9 6.5"/><path d="M5 9.8V20h14V9.8"/><path d="M8 20v-6.2h8V20M8 16.6h8"/>',
   mower: '<circle cx="6.5" cy="17.4" r="2.6"/><circle cx="17.2" cy="17.9" r="2.1"/><path d="M4 14.8V9.4h7v5.4"/><path d="M11 10.8h5l3-5.2h2"/>',
   generator: '<rect x="3" y="7.5" width="18" height="11" rx="2"/><path d="M7.5 7.5v-2h9v2"/><path d="m12.6 10-2.4 3.4h3.2L11 17"/>',
   pool: '<path d="M2.5 16.6c2-1.6 3.5-1.6 5.5 0s3.5 1.6 5.5 0 3.5-1.6 5.5 0M2.5 20c2-1.6 3.5-1.6 5.5 0s3.5 1.6 5.5 0 3.5-1.6 5.5 0"/><path d="M7 13.4V5.6a2 2 0 0 1 4 0v7.8M13 13.4V5.6a2 2 0 0 1 4 0v7.8M7 9.4h10"/>',
+  // The rest of the pool: the pump that moves the water, the cartridge or sand
+  // filter it pushes it through, and the spa that often shares both.
+  poolpump: '<circle cx="8.6" cy="12.6" r="4.6"/><circle cx="8.6" cy="12.6" r="1.4"/><path d="M8.6 8v-3h3.6"/><path d="M13.2 10h5.2a1.6 1.6 0 0 1 1.6 1.6v2a1.6 1.6 0 0 1-1.6 1.6h-5.2"/><path d="M5 19.6h11.4"/>',
+  poolfilter: '<path d="M6.5 7.6h11v10.8a2.6 2.6 0 0 1-2.6 2.6H9.1a2.6 2.6 0 0 1-2.6-2.6z"/><ellipse cx="12" cy="7.6" rx="5.5" ry="2.4"/><path d="M12 3.1v2.1M9.4 12.4h5.2M9.4 15.8h5.2"/>',
+  hottub: '<path d="M3.2 11.4h17.6v5.1a3.5 3.5 0 0 1-3.5 3.5H6.7a3.5 3.5 0 0 1-3.5-3.5z"/><path d="M6.4 20v1.4M17.6 20v1.4"/><path d="M8.6 8.4c-1.1-1.2-1.1-2.3 0-3.5s1.1-2.3 0-3.5M15.4 8.4c-1.1-1.2-1.1-2.3 0-3.5s1.1-2.3 0-3.5"/>',
 
   // categories
   hvac: '<path d="M4 8h11a3 3 0 1 0-3-3"/><path d="M4 16h13a3 3 0 1 1-3 3"/><path d="M4 12h7"/>',
@@ -56,13 +65,24 @@ const P = {
   safety: '<path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"/><path d="M12 9v4"/><circle cx="12" cy="16" r=".6" fill="currentColor"/>',
   exterior: '<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-6h4v6"/>',
   vehicle: '<path d="M5 16h14M6 16v2M18 16v2"/><path d="M4 16l1.5-5.5A2 2 0 0 1 7.4 9h9.2a2 2 0 0 1 1.9 1.5L20 16z"/><circle cx="7.5" cy="16" r="1.4"/><circle cx="16.5" cy="16" r="1.4"/>',
+  // Three road vehicles, told apart by roofline rather than by badge: the car
+  // is low and raked, the SUV upright and square, the truck a cab with a bed
+  // behind it. The generic vehicle above stays for anything else with wheels.
+  car: '<path d="M3 15.5v-2.2l2-.4 2.2-3.1A2 2 0 0 1 8.8 9h6.4a2 2 0 0 1 1.6.8l2.2 3.1 2 .4v2.2"/><path d="M3 15.5h1.6M9.9 15.5h4.2M19.4 15.5H21"/><circle cx="7.2" cy="15.5" r="1.8"/><circle cx="16.8" cy="15.5" r="1.8"/><path d="M5.2 12.9h13.6"/>',
+  suv: '<path d="M3.2 15.6v-3.1l1.5-4A2 2 0 0 1 6.6 7.2h10.8a2 2 0 0 1 1.9 1.3l1.5 4v3.1"/><path d="M3.2 15.6h1.8M9.9 15.6h4.2M19 15.6h1.8"/><circle cx="7.4" cy="15.6" r="1.8"/><circle cx="16.6" cy="15.6" r="1.8"/><path d="M4.7 12.5h14.6M12 7.2v5.3"/>',
+  truck: '<path d="M2.4 15.2V8.6a1.6 1.6 0 0 1 1.6-1.6h5.2a1.6 1.6 0 0 1 1.6 1.6v2.6h10.8v4"/><path d="M2.4 15.2h1.7M7.9 15.2h8M19.7 15.2h1.9"/><circle cx="6" cy="15.2" r="1.8"/><circle cx="17.8" cy="15.2" r="1.8"/><rect x="4.4" y="9.1" width="4.4" height="2.1" rx=".5"/>',
   other: '<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="m3 7 9 5 9-5M12 12v10"/>',
 };
 
+/* The picker, grouped the way a house is: indoors, then the mechanicals, then
+   the yard, the pool, what is parked outside, and the catch-alls last. */
 export const EQUIPMENT_ICONS = [
   'refrigerator', 'dishwasher', 'washer', 'dryer', 'oven', 'microwave',
-  'furnace', 'hvac', 'waterheater', 'water', 'filterfunnel', 'alarm',
-  'garage', 'mower', 'generator', 'pool', 'exterior', 'vehicle', 'appliance', 'other',
+  'furnace', 'hvac', 'waterheater', 'water', 'filterfunnel', 'sumppump', 'alarm',
+  'garage', 'mower', 'generator', 'sprinkler', 'exterior',
+  'pool', 'poolpump', 'poolfilter', 'hottub',
+  'vehicle', 'car', 'suv', 'truck',
+  'appliance', 'other',
 ];
 
 export function icon(name, size = 20) {

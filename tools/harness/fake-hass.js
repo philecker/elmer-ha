@@ -80,7 +80,8 @@ const SEED = {
   equipment: [
     { id: 'eq1', name: 'Furnace / Air Conditioner', location: 'Basement', category: 'hvac',
       brand: 'Trane', model: 'HX-400 / AC-2200', serial: 'SN-0000-A / SN-0000-B', partNumber: '20x25x1',
-      installedOn: '2019-04-11', purchasedFrom: 'Midwest Heating & Air',
+      purchasedOn: '2019-03-28', installedOn: '2019-04-11',
+      purchasedFrom: 'Midwest Heating & Air', orderNumber: 'MHA-00000',
       phone: '(555) 123-4567', email: 'service@midwest.example',
       notes: 'Furnace filter is behind the lower panel. The condensate line runs to the floor drain.',
       icon: 'furnace',
@@ -357,7 +358,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.0.5' } };
+panel.panel = { config: { version: '1.0.6' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

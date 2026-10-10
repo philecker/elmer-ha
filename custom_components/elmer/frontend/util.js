@@ -106,6 +106,20 @@ export const INTERVAL_UNITS = [
   ['years', 'years'],
 ];
 
+/**
+ * An interval written the way it is said: "month", "3 months", "2 weeks".
+ *
+ * The unit is stored plural because that is what the picker offers, and the
+ * count was printed straight beside it — so a routine that runs once a month
+ * read "every 1 months". Rare until the pool arrived with two weekly routines
+ * and made it the common case.
+ */
+export function intervalText(count, unit) {
+  const n = Math.max(1, Math.round(Number(count) || 1));
+  const one = String(unit || 'months').replace(/s$/, '');
+  return n === 1 ? one : `${n} ${one}s`;
+}
+
 export const CATEGORIES = [
   ['hvac', 'Heating & Cooling'],
   ['water', 'Water'],

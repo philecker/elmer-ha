@@ -97,6 +97,12 @@ async def main() -> int:
                 "contact": "dave@hvac.example",
             },
             {"id": "e2", "name": "Fridge", "contact": "(555) 123-4567"},
+            {
+                "id": "e3",
+                "name": "Pool Pump",
+                "purchasedOn": "2024-05-02",
+                "orderNumber": "WO-4471-B",
+            },
         ],
         "tasks": [
             {
@@ -133,6 +139,12 @@ async def main() -> int:
     check("quantity 0 floors at 1", n["tasks"][1]["partsUsed"][0]["quantity"], 1)
     check("numeric strings coerced", n["supplies"][0]["quantity"], 2)
     check("reorderAt coerced", n["supplies"][0]["reorderAt"], 1)
+    # Equipment is copied wholesale rather than rebuilt from a field list, so
+    # a field the panel adds reaches the file without the store knowing it
+    # exists. That is only true for as long as nobody turns this into a
+    # whitelist, which is what this pins down.
+    check("a purchase date survives a round trip", n["equipment"][2]["purchasedOn"], "2024-05-02")
+    check("so does an order number", n["equipment"][2]["orderNumber"], "WO-4471-B")
     check("settings defaulted", n["settings"]["dueSoonDays"], 14)
     check("garbage in -> empty out", store_mod.normalize("nope")["tasks"], [])
     check("None in -> empty out", store_mod.normalize(None)["equipment"], [])
