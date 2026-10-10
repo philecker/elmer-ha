@@ -213,6 +213,62 @@ async function main() {
   // filtered to the same thing when tapped. A search box is the one thing the
   // pills cannot do.
   check('the banner is gone', await page.$(el('.alert')), null);
+
+  // --- a row that opens something says so under the pointer --------------
+  // The same answer a part's card gives: the edge lights up. Checked on all
+  // three lists, because the rule is written once and each list has its own
+  // row variants that could fall outside it.
+  const ringOf = async (selector) => {
+    await page.hover(el(selector));
+    await page.waitForTimeout(80);
+    return page.evaluate((sel) => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const cs = getComputedStyle(root.querySelector(sel));
+      return { shadow: cs.boxShadow, radius: cs.borderTopLeftRadius };
+    }, selector);
+  };
+  // Nothing is under the pointer to begin with, so this is what no ring reads
+  // as — compared against rather than assuming the word "none".
+  const atRest = await page.evaluate(() => getComputedStyle(
+    document.querySelector('elmer-panel').shadowRoot.querySelector('.row[role="button"]')).boxShadow);
+
+  for (const [tab, sel] of [
+    ['routines', '.row[data-act="routine"]'],
+    ['equipment', '.row[data-act="equipment"]'],
+    ['parts', '.row[data-act="part"]'],
+  ]) {
+    await page.click(el(`.tab[data-value="${tab}"]`));
+    await page.waitForTimeout(90);
+    // Where the list sits before anything is pointed at.
+    const before = await page.$$eval(el('.card .row'), (n) =>
+      n.map((x) => Math.round(x.getBoundingClientRect().top)));
+    const ring = await ringOf(sel);
+    ok(`a ${tab.replace(/s$/, '')} row lights its edge under the pointer`,
+      ring.shadow !== atRest && /inset/.test(ring.shadow), `${tab}: ${ring.shadow}`);
+    // Drawn inside the row. A border would make the row a pixel taller the
+    // moment the pointer touched it and shunt every row under it down.
+    const during = await page.$$eval(el('.card .row'), (n) =>
+      n.map((x) => Math.round(x.getBoundingClientRect().top)));
+    check(`and the ${tab} list does not move as it appears`, during, before);
+  }
+
+  // The first row sits against the card's rounded corner, so a square ring
+  // would read as a clipped corner rather than a round one.
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(90);
+  const firstRow = await ringOf('.card .row[role="button"]:first-child');
+  ok('the ring follows the card curve at the top of a list',
+    parseFloat(firstRow.radius) > 0, firstRow.radius);
+
+  // A row that only holds a field or a stepper is not a way into anything, so
+  // it must not claim to be one.
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  const inert = await ringOf('.groprow');
+  check('a settings row stays flat under the pointer', inert.shadow, atRest);
+
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.waitForTimeout(90);
   ok('and a search box is there', await page.$(el('.search input[data-act="search"]')) !== null);
 
   // Unfiltered, the list is grouped by state, worst first, each heading
@@ -926,8 +982,28 @@ async function main() {
   // They were shown on the detail page and carried through a save, but
   // nothing could edit one. A part that stopped being sold left a dead link
   // with no way to remove it.
+
+  // The same list is headed on the detail page and labelled in the form, and
+  // the two drifted apart once: the form was renamed to "Links" and the detail
+  // page went on saying "Replacement parts" above the identical rows. Compared
+  // against each other rather than against a literal, so renaming one without
+  // the other is what fails.
+  const detailHeadings = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
+
   await page.click(el('[data-act="edit-equipment"]'));
   await page.waitForSelector(el('.sheet .linklist'));
+  const formLinkLabel = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const list = root.querySelector('.sheet .linklist');
+    // The label of the field the list belongs to, whatever it is called.
+    const field = list.closest('.field') || list.parentElement;
+    const label = field.querySelector('label');
+    return label ? label.textContent.trim() : null;
+  });
+  ok('the form labels its links', !!formLinkLabel);
+  ok('and the detail page heads the same list with the same word',
+    detailHeadings.includes(formLinkLabel),
+    `form says "${formLinkLabel}", detail says ${JSON.stringify(detailHeadings)}`);
   const linkEditor = await page.evaluate(() => {
     const root = document.querySelector('elmer-panel').shadowRoot;
     return {
@@ -1833,6 +1909,24 @@ async function main() {
   ok('they simply stopped having one', clearedLoc.blank >= 1);
   check('and it has left the list',
     (await groupRows()).locations.map((r) => r.title), ['Cellar', 'Hallway', 'Kitchen']);
+
+  // --- where the leftovers sit -------------------------------------------
+  // Clearing Garage left one piece with no location at all, so Equipment now
+  // has something to put under "Unassigned". That heading is not a room and
+  // sorting it with the rooms drops it wherever the alphabet happens to put
+  // it — between Office and Utility Room in a real house. It belongs last.
+  await page.click(el('.groprow [data-act="rename-group"][data-value="Kitchen"]'));
+  await page.waitForSelector(el('.sheet input[name="groupName"]'));
+  await page.fill(el('.sheet input[name="groupName"]'), 'Workshop');
+  await page.click(el('.sheet [data-act="save-group"]'));
+  await page.waitForTimeout(240);
+
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(90);
+  const placed = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
+  // Workshop sorts after Unassigned; before this it came out third of four.
+  check('rooms read alphabetically with the unplaced last', placed,
+    ['Cellar', 'Hallway', 'Workshop', 'Unassigned']);
 
   await ctx.close();
 

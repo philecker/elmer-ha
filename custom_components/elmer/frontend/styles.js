@@ -775,6 +775,28 @@ export const CSS = `
 .row:hover { background: var(--surface-2); }
 .row:active { background: var(--surface-3); }
 
+/* A row you can open answers the way a part's card does: its edge lights up.
+   Only the three main lists qualify — role="button" is what marks a row as a
+   way into something, and it leaves the rows that only hold a field or a
+   stepper alone.
+
+   Drawn as a ring inside the row rather than as a border, so the row does not
+   grow by a pixel and shunt the list as the pointer crosses it. The card
+   clips to its own radius, so the ends are rounded to match: without it the
+   ring runs square into the curve at the top and bottom of the card and the
+   corner reads as clipped rather than round. */
+.row[role="button"]:hover {
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.row[role="button"]:first-child:hover { border-radius: var(--r-lg) var(--r-lg) 0 0; }
+.row[role="button"]:last-child:hover { border-radius: 0 0 var(--r-lg) var(--r-lg); }
+.row[role="button"]:first-child:last-child:hover { border-radius: var(--r-lg); }
+/* A pointer is not the only way in. */
+.row[role="button"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .row .body { flex: 1 1 auto; min-width: 0; }
 .row .title {
   font-size: calc(14.5px * var(--ui-scale));

@@ -251,16 +251,35 @@ export function equipmentView(state) {
 
   // Grouped by location when locations are in use, so the basement reads
   // together. One flat list otherwise.
+  //
+  // Keyed by the location as stored, with the leftovers under a key of their
+  // own rather than under the word "Unassigned" — otherwise a house with a
+  // room actually called that would merge the two.
+  const UNPLACED = Symbol('unplaced');
   const groups = new Map();
   for (const eq of matched) {
-    const key = state.settings.showLocations ? (eq.location || 'Unassigned') : '';
+    if (!state.settings.showLocations) {
+      if (!groups.has('')) groups.set('', []);
+      groups.get('').push(eq);
+      continue;
+    }
+    const key = (eq.location || '').trim() || UNPLACED;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(eq);
   }
 
+  // Rooms alphabetically, and whatever has no room at the end. It is the one
+  // heading that is not a place, and it is a leftovers pile rather than a
+  // section of the house, so it reads as a footnote rather than sitting
+  // between the O's and the U's.
   const sections = [...groups.entries()]
-    .sort((a, b) => a[0].localeCompare(b[0]))
-    .map(([where, items]) => {
+    .sort((a, b) => {
+      if (a[0] === UNPLACED) return 1;
+      if (b[0] === UNPLACED) return -1;
+      return String(a[0]).localeCompare(String(b[0]));
+    })
+    .map(([key, items]) => {
+      const where = key === UNPLACED ? 'Unassigned' : key;
       const rows = items
         .slice()
         .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
@@ -356,7 +375,7 @@ export function equipmentDetail(state, id) {
       <button class="btn" data-act="add-routine" data-id="${eq.id}">${raw(icon('plus', 16))}Add routine</button>
     </div>
 
-    ${raw(linkRows.length ? `<div class="label">Replacement parts</div><div class="card">${linkRows.join('')}</div>` : '')}
+    ${raw(linkRows.length ? `<div class="label">Links</div><div class="card">${linkRows.join('')}</div>` : '')}
 
     <div class="btnrow">
       <button class="btn" data-act="edit-equipment" data-id="${eq.id}">${raw(icon('edit', 16))}Edit</button>
