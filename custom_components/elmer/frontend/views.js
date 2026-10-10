@@ -13,7 +13,7 @@
 import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
-  INTERVAL_UNITS, safeHref, linkLabel,
+  INTERVAL_UNITS, safeHref, linkLabel, daysBetween, MONTHS,
 } from './util.js';
 
 /* ------------------------------------------------------------------ bits -- */
@@ -30,6 +30,48 @@ function emptyState({ ic, title, body }) {
     <h3>${title}</h3>
     <p>${body}</p>
   </div>`;
+}
+
+/**
+ * The search box that heads a list. One per tab, each with its own text, so
+ * searching routines and then looking at parts does not hand you a parts list
+ * silently narrowed by a word you typed on another screen.
+ */
+export function searchBox(state, placeholder) {
+  return html`<div class="search">
+    ${raw(icon('search', 16))}
+    <input type="search" data-act="search" value="${state.query || ''}"
+      placeholder="${placeholder}" aria-label="${placeholder}"
+      autocomplete="off" spellcheck="false">
+    ${raw(state.query
+      ? `<button class="clear" data-act="search-clear" aria-label="Clear search">${icon('x', 15)}</button>`
+      : '')}
+  </div>`;
+}
+
+/**
+ * The way back from a detail page, at the top of the content rather than in
+ * the header — the header keeps the Elmer mark on every screen, so the trail
+ * sits where the list's search box sits and the two line up.
+ *
+ * The section reads as the strong half and the page you are on as the quiet
+ * one, which is the opposite of the usual breadcrumb: the only thing here you
+ * can act on is the way back, so that is what the eye should land on. The one
+ * chevron sits between them and points at the section, the direction you
+ * would be travelling. There is no second arrow out at the left, which only
+ * said the same thing twice.
+ */
+export function crumb(backLabel, current) {
+  return html`<nav class="crumb" aria-label="Breadcrumb">
+    <button class="up" data-act="back">${backLabel}</button>
+    ${raw(icon('back', 13))}
+    <span class="here" aria-current="page">${current}</span>
+  </nav>`;
+}
+
+/** Lower-cased words from a record, for matching what was typed. */
+function haystack(...parts) {
+  return parts.filter(Boolean).join(' ').toLowerCase();
 }
 
 function equipmentGlyph(eq, size = 19) {
@@ -84,8 +126,30 @@ const FILTERS = [
   ['ok', 'Up to date'],
 ];
 
+/** The four real states, in the order they matter. 'all' is not a group. */
+const GROUPS = FILTERS.filter(([key]) => key !== 'all');
+
+/**
+ * Does this routine answer to what was typed?
+ *
+ * Name, equipment and location together, because "furnace" and "basement" are
+ * both reasonable things to go looking for and it is not obvious from the
+ * outside which of the three a word belongs to.
+ */
+function matchesQuery(row, needle) {
+  if (!needle) return true;
+  return haystack(
+    row.task.name,
+    row.equipment && row.equipment.name,
+    row.equipment && row.equipment.location,
+  ).includes(needle);
+}
+
 export function routinesView(state) {
-  const rows = state.rows.filter((r) => state.filter === 'all' || r.state.status === state.filter);
+  const needle = (state.query || '').trim().toLowerCase();
+  const rows = state.rows
+    .filter((r) => state.filter === 'all' || r.state.status === state.filter)
+    .filter((r) => matchesQuery(r, needle));
   const counts = state.computed.counts;
 
   // One control, not two. There used to be a strip of counting tiles above a
@@ -103,12 +167,7 @@ export function routinesView(state) {
     </button>`;
   });
 
-  const banner = counts.overdue > 0
-    ? html`<button class="alert" data-act="filter" data-value="overdue">
-        ${raw(icon('alarm', 15))}
-        <span>Needs attention: ${counts.overdue} ${raw(counts.overdue === 1 ? 'item' : 'items')}</span>
-      </button>`
-    : '';
+  const search = searchBox(state, 'Search routines, equipment or location');
 
   let body;
   if (!state.tasks.length) {
@@ -122,6 +181,12 @@ export function routinesView(state) {
         ? 'Use Add Routine above, or open a piece of equipment for the routines Elmer suggests for it.'
         : 'Use Add Routine above for anything you want reminding of. Or add a piece of equipment first, and Elmer will suggest the routines that usually go with it.',
     });
+  } else if (!rows.length && needle) {
+    body = emptyState({
+      ic: 'search',
+      title: 'Nothing matches that',
+      body: `No routine, equipment or location matching \u201c${state.query.trim()}\u201d.`,
+    });
   } else if (!rows.length) {
     const label = (FILTERS.find((f) => f[0] === state.filter) || [, 'that'])[1];
     body = emptyState({
@@ -129,6 +194,18 @@ export function routinesView(state) {
       title: `Nothing ${String(label).toLowerCase()}`,
       body: 'Tap All to see everything you are tracking.',
     });
+  } else if (state.filter === 'all') {
+    // Grouped by state, worst first. A flat list sorted by urgency already put
+    // these in this order; the headings say where one state ends and the next
+    // begins, which a run of thirteen rows does not. Narrowing with a pill
+    // leaves one group, so the heading would only repeat the pill: filtered,
+    // the list is flat.
+    body = raw(GROUPS.map(([key, label]) => {
+      const group = rows.filter((r) => r.state.status === key);
+      if (!group.length) return '';
+      return html`<div class="label">${label}<span class="count">${group.length}</span></div>
+        <div class="card">${group.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] }))}</div>`;
+    }).join(''));
   } else {
     body = html`<div class="card">${rows.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] }))}</div>`;
   }
@@ -140,8 +217,7 @@ export function routinesView(state) {
   // zeros above an empty state is noise on the one screen where someone new
   // most needs a clear instruction.
   return html`<div class="scroll"><div class="pad">
-    ${raw(banner)}
-    ${raw(state.tasks.length ? html`<div class="pills">${pills}</div>` : '')}
+    ${raw(state.tasks.length ? search + html`<div class="pills">${pills}</div>` : '')}
     ${raw(body)}
   </div></div>`;
 }
@@ -157,10 +233,26 @@ export function equipmentView(state) {
     }))}</div></div>`;
   }
 
+  const needle = (state.query || '').trim().toLowerCase();
+  const matched = state.equipment.filter((eq) => !needle || haystack(
+    eq.name, eq.location, eq.brand, eq.model, eq.partNumber,
+  ).includes(needle));
+
+  if (!matched.length) {
+    return html`<div class="scroll"><div class="pad">
+      ${raw(searchBox(state, 'Search equipment'))}
+      ${raw(emptyState({
+        ic: 'search',
+        title: 'Nothing matches that',
+        body: `No equipment matching \u201c${state.query.trim()}\u201d.`,
+      }))}
+    </div></div>`;
+  }
+
   // Grouped by location when locations are in use, so the basement reads
   // together. One flat list otherwise.
   const groups = new Map();
-  for (const eq of state.equipment) {
+  for (const eq of matched) {
     const key = state.settings.showLocations ? (eq.location || 'Unassigned') : '';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(eq);
@@ -194,7 +286,10 @@ export function equipmentView(state) {
         <div class="card">${rows}</div>`;
     });
 
-  return html`<div class="scroll"><div class="pad">${sections}</div></div>`;
+  return html`<div class="scroll"><div class="pad">
+    ${raw(searchBox(state, 'Search equipment'))}
+    ${sections}
+  </div></div>`;
 }
 
 function rollUp(tasks, state) {
@@ -249,6 +344,7 @@ export function equipmentDetail(state, id) {
   });
 
   return html`<div class="scroll"><div class="pad">
+    ${raw(crumb('Equipment', eq.name))}
     ${raw(facts.length ? `<div class="card"><dl class="kv">${facts.join('')}</dl></div>` : '')}
     ${raw(eq.notes ? `<div class="label">Notes</div><div class="card"><div class="note">${esc(eq.notes)}</div></div>` : '')}
 
@@ -271,6 +367,75 @@ export function equipmentDetail(state, id) {
 
 /* ------------------------------------------------------------------ parts -- */
 
+/**
+ * One part, on a page of its own rather than straight into the edit form —
+ * the same shape as a piece of equipment, because they are the same kind of
+ * thing to look at: some facts, what depends on it, then the way to change it.
+ */
+export function partDetail(state, id) {
+  const part = state.supplies.find((s2) => s2.id === id);
+  if (!part) return html`<div class="center">That part is gone.</div>`;
+
+  const tone = state.computed.stock[part.id] || 'ok';
+  const users = state.rows.filter(
+    (r) => (r.task.partsUsed || []).some((u) => u.supplyId === part.id),
+  );
+
+  const facts = [];
+  const add = (label, value, cls) => {
+    if (value || value === 0) {
+      facts.push(html`<dt>${label}</dt><dd${raw(cls ? ` class="${cls}"` : '')}>${value}</dd>`);
+    }
+  };
+  // Not 'On hand' — that is the large figure at the top of the page, and
+  // saying it twice makes the reader check whether they differ.
+  add('Reorder at', part.reorderAt);
+  add('Part number', part.partNumber, 'mono');
+  add('Buy from', part.purchasedFrom);
+
+  return html`<div class="scroll"><div class="pad">
+    ${raw(crumb('Parts', part.name))}
+
+    <!-- One card, not two. How many are on the shelf and what to reorder at
+         are the same subject, and splitting them made the page read as a
+         readout followed by an unrelated table. The card opens the edit form;
+         the stepper inside it does not, because a click resolves to the
+         nearest thing that handles one. -->
+    <div class="card onepart" data-act="edit-part" data-id="${part.id}"
+      role="button" tabindex="0" aria-label="Edit ${part.name}">
+      <div class="row stockrow">
+        <div class="qty" data-tone="${tone}">${part.quantity}</div>
+        <div class="body">
+          <!-- The breadcrumb directly above already names the part. -->
+          <div class="title">${raw(
+            tone === 'out' ? 'None left' : tone === 'low' ? 'Running low' : 'In stock'
+          )}</div>
+          <div class="sub"><span class="txt">${part.quantity} on the shelf</span></div>
+        </div>
+        <div class="stepper">
+          <button class="iconbtn" data-act="stock" data-id="${part.id}" data-delta="-1"
+            aria-label="One fewer ${part.name}">${raw(icon('minus', 16))}</button>
+          <button class="iconbtn" data-act="stock" data-id="${part.id}" data-delta="1"
+            aria-label="One more ${part.name}">${raw(icon('plus', 16))}</button>
+        </div>
+      </div>
+      ${raw(facts.length ? `<dl class="kv">${facts.join('')}</dl>` : '')}
+      <div class="editnote">${raw(icon('edit', 13))}<span>Tap to edit</span></div>
+    </div>
+    ${raw(part.notes ? `<div class="label">Notes</div><div class="card"><div class="note">${esc(part.notes)}</div></div>` : '')}
+
+    <div class="label">Used by</div>
+    ${raw(users.length
+      ? `<div class="card">${users.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] })).join('')}</div>`
+      : `<div class="card"><div class="note">No routine uses this yet. Add it to one and marking that routine done will take it off the shelf.</div></div>`)}
+
+    <div class="btnrow">
+      <button class="btn" data-variant="danger" data-act="delete-part" data-id="${part.id}">${raw(icon('trash', 16))}Delete</button>
+    </div>
+  </div></div>`;
+}
+
+
 export function partsView(state) {
   if (!state.supplies.length) {
     return html`<div class="scroll"><div class="pad">${raw(emptyState({
@@ -280,8 +445,24 @@ export function partsView(state) {
     }))}</div></div>`;
   }
 
+  const needle = (state.query || '').trim().toLowerCase();
+  const matched = state.supplies.filter((p) => !needle || haystack(
+    p.name, p.partNumber,
+  ).includes(needle));
+
+  if (!matched.length) {
+    return html`<div class="scroll"><div class="pad">
+      ${raw(searchBox(state, 'Search parts'))}
+      ${raw(emptyState({
+        ic: 'search',
+        title: 'Nothing matches that',
+        body: `No part matching \u201c${state.query.trim()}\u201d.`,
+      }))}
+    </div></div>`;
+  }
+
   const order = { out: 0, low: 1, ok: 2 };
-  const sorted = state.supplies.slice().sort((a, b) => {
+  const sorted = matched.slice().sort((a, b) => {
     const d = order[state.computed.stock[a.id] || 'ok'] - order[state.computed.stock[b.id] || 'ok'];
     return d !== 0 ? d : String(a.name || '').localeCompare(String(b.name || ''));
   });
@@ -308,19 +489,28 @@ export function partsView(state) {
     </div>`;
   });
 
-  const low = state.computed.counts.lowStock;
-  const banner = low > 0
-    ? html`<div class="alert" style="cursor:default">${raw(icon('supplies', 15))}
-        <span>${low} ${raw(low === 1 ? 'part' : 'parts')} to reorder</span></div>`
-    : '';
-
   return html`<div class="scroll"><div class="pad">
-    ${raw(banner)}
+    ${raw(searchBox(state, 'Search parts'))}
     <div class="card">${rows}</div>
   </div></div>`;
 }
 
 /* ---------------------------------------------------------------- history -- */
+
+/** How far back the history list reaches. */
+export const RANGES = [
+  ['3m', '3 months', 92],
+  ['12m', '12 months', 366],
+  ['all', 'All time', null],
+];
+
+/** "Aug 9" — the day of an entry, for the timeline's left column. */
+function shortDay(iso) {
+  const parts = String(iso || '').split('-');
+  if (parts.length < 3) return String(iso || '');
+  const [, m, d] = parts.map(Number);
+  return `${MONTHS[m - 1] || ''} ${d}`;
+}
 
 export function historyView(state) {
   if (!state.log.length) {
@@ -331,30 +521,80 @@ export function historyView(state) {
     }))}</div></div>`;
   }
 
-  const rows = state.log.slice(0, 300).map((l) => {
-    const eq = state.equipment.find((e) => e.id === l.equipmentId);
-    const bits = [formatDay(l.doneOn, state.computed.today)];
-    if (eq) bits.push(eq.name);
-    const parts = (l.usedParts || [])
-      .map((u) => {
-        const p = state.supplies.find((s) => s.id === u.supplyId);
-        return p ? `${u.quantity} × ${p.name}` : null;
-      })
-      .filter(Boolean);
-    return html`<div class="row" data-act="log" data-id="${l.id}" role="button" tabindex="0">
-      ${raw(equipmentGlyph(eq))}
-      <div class="body">
-        <div class="title">${l.taskName}</div>
-        <div class="sub"><span class="txt">${bits.join(' · ')}${raw(parts.length ? ` · ${esc(parts.join(', '))}` : '')}</span></div>
-      </div>
-      <button class="iconbtn" data-act="undo" data-id="${l.id}"
-        title="Undo this" aria-label="Undo ${l.taskName}">${raw(icon('undo', 17))}</button>
-    </div>`;
+  const range = RANGES.find(([key]) => key === state.range) || RANGES[RANGES.length - 1];
+  const within = range[2];
+  const kept = state.log
+    .filter((l) => within === null || daysBetween(l.doneOn, state.computed.today) <= within)
+    .slice()
+    .sort((a, b) => String(b.doneOn || '').localeCompare(String(a.doneOn || '')))
+    .slice(0, 300);
+
+  const picker = html`<div class="seg" role="group" aria-label="How far back">
+    ${RANGES.map(([key, label]) => html`<button data-act="range" data-value="${key}"
+      aria-pressed="${range[0] === key}">${label}</button>`)}
+  </div>`;
+
+  const head = html`<div class="label">
+    ${kept.length} ${raw(kept.length === 1 ? 'service' : 'services')} logged${raw(picker)}
+  </div>`;
+
+  if (!kept.length) {
+    return html`<div class="scroll"><div class="pad">
+      ${raw(head)}
+      ${raw(emptyState({
+        ic: 'history',
+        title: 'Nothing in that window',
+        body: 'Choose a longer stretch to see older entries.',
+      }))}
+    </div></div>`;
+  }
+
+  // By year, newest first. A log read top to bottom is a chronology, and the
+  // year is the only heading it needs — every other grouping cuts across time.
+  const years = new Map();
+  for (const l of kept) {
+    const y = String(l.doneOn || '').slice(0, 4) || '—';
+    if (!years.has(y)) years.set(y, []);
+    years.get(y).push(l);
+  }
+
+  const sections = [...years.entries()].map(([year, entries]) => {
+    const items = entries.map((l) => {
+      const eq = state.equipment.find((e) => e.id === l.equipmentId);
+      const parts = (l.usedParts || [])
+        .map((u) => {
+          const sup = state.supplies.find((x) => x.id === u.supplyId);
+          return sup ? `${u.quantity} × ${sup.name}` : null;
+        })
+        .filter(Boolean);
+      const bits = [];
+      if (eq) bits.push(eq.name);
+      if (parts.length) bits.push(parts.join(', '));
+      // A cost of nothing is not worth a column. "0" is what a warranty job
+      // gets typed in as, and "· 0" in the middle of a line reads as an error.
+      if (l.cost && Number(String(l.cost).replace(/[^\d.-]/g, '')) !== 0) bits.push(l.cost);
+      if (l.notes) bits.push(l.notes);
+
+      return html`<li class="tl" data-act="log" data-id="${l.id}" role="button" tabindex="0">
+        <span class="dot" aria-hidden="true"></span>
+        <time class="when" datetime="${l.doneOn || ''}">${shortDay(l.doneOn)}</time>
+        <div class="body">
+          <div class="title">${l.taskName}</div>
+          ${raw(bits.length ? `<div class="sub"><span class="txt">${esc(bits.join(' · '))}</span></div>` : '')}
+        </div>
+      </li>`;
+    });
+
+    return html`<div class="label">${year}<span class="count">${entries.length}</span></div>
+      <ol class="timeline">${items}</ol>`;
   });
 
   return html`<div class="scroll"><div class="pad">
-    <div class="card">${rows}</div>
-    ${raw(state.log.length > 300 ? `<div class="label">Showing the most recent 300 of ${state.log.length}</div>` : '')}
+    ${raw(head)}
+    ${sections}
+    ${raw(state.log.length > kept.length && within === null
+      ? `<div class="label">Showing the most recent 300 of ${state.log.length}</div>`
+      : '')}
   </div></div>`;
 }
 

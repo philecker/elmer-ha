@@ -399,29 +399,231 @@ export const CSS = `
 
 /* ---------- alert banner ---------- */
 
-.alert {
+/* The routines search box, where the "needs attention" banner used to be. */
+.search {
   display: flex;
   align-items: center;
   gap: 8px;
   margin: 0 0 12px;
-  padding: 11px 13px;
-  min-height: calc(44px * var(--ui-scale));
+  padding: 0 10px;
+  height: calc(42px * var(--ui-scale));
   border-radius: var(--r-md);
-  background: var(--rust-soft);
-  color: var(--rust);
-  border: 1px solid color-mix(in srgb, var(--rust) 24%, transparent);
-  font-size: calc(12px * var(--ui-scale));
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+.search:focus-within { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -1px; }
+.search .ic { flex: none; color: var(--ink-3); }
+.search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  /* 15px or more, or iOS Safari zooms the page when it takes focus. */
+  font-size: calc(15px * var(--ui-scale));
+  /* The box draws the focus ring; a second one inside it reads as a seam. */
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+/* There is a clear button of our own, which stays put and is big enough to
+   hit; WebKit's appears only while typing and is half the size. */
+.search input::-webkit-search-cancel-button,
+.search input::-webkit-search-decoration { -webkit-appearance: none; display: none; }
+.search .clear {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(30px * var(--ui-scale));
+  height: calc(30px * var(--ui-scale));
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.search .clear:hover { background: var(--line); color: var(--ink); }
+
+/* ---------- history timeline ---------- */
+
+/* The range picker rides at the right-hand end of the count heading; the
+   heading's ::after hairline takes the slack between them. */
+.seg {
+  display: flex;
+  flex: none;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+}
+.seg button {
+  border: 0;
+  border-radius: calc(var(--r-sm) - 2px);
+  padding: 5px 9px;
+  background: none;
+  color: var(--ink-3);
+  font: inherit;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
   cursor: pointer;
   white-space: nowrap;
-  overflow: hidden;
-  width: 100%;
-  text-align: left;
+  -webkit-tap-highlight-color: transparent;
 }
-.alert .ic { flex: none; }
-.alert span { overflow: hidden; text-overflow: ellipsis; }
+.seg button:hover { color: var(--ink-2); }
+.seg button[aria-pressed="true"] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+
+/* A log read top to bottom is a chronology, so it is drawn as one: a rail
+   down the left with a dot per entry, rather than a stack of cards. */
+.timeline {
+  list-style: none;
+  margin: 0 0 4px;
+  padding: 2px 0 2px 0;
+  position: relative;
+}
+.timeline::before {
+  content: "";
+  position: absolute;
+  left: calc(4px * var(--ui-scale));
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--line);
+}
+.tl {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 9px 2px 9px calc(22px * var(--ui-scale));
+  min-height: calc(46px * var(--ui-scale));
+  cursor: pointer;
+  border-radius: var(--r-sm);
+  -webkit-tap-highlight-color: transparent;
+}
+.tl .dot {
+  position: absolute;
+  left: 0;
+  top: calc(14px * var(--ui-scale));
+  width: calc(9px * var(--ui-scale));
+  height: calc(9px * var(--ui-scale));
+  border-radius: 50%;
+  background: var(--paper);
+  border: 1.5px solid var(--accent);
+  box-sizing: border-box;
+}
+.tl .when {
+  flex: none;
+  width: calc(52px * var(--ui-scale));
+  padding-top: 1px;
+  font-family: var(--mono);
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.tl .body { flex: 1 1 auto; min-width: 0; }
+.tl .title {
+  font-size: calc(14px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tl .sub {
+  margin-top: 2px;
+  font-size: calc(12px * var(--ui-scale));
+  color: var(--ink-3);
+  display: flex;
+  min-width: 0;
+}
+.tl .sub .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The way back from a detail page. It sits where the list's search box sits,
+   so moving between a list and one of its items does not shift the content
+   under the tab row. */
+.crumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 12px;
+  min-height: calc(42px * var(--ui-scale));
+  color: var(--ink-3);
+}
+.crumb .ic { flex: none; opacity: 0.6; }
+.crumb .up {
+  display: inline-flex;
+  align-items: center;
+  /* -8px on the left so the label, not the button's padding, lands on the
+     content's edge with the search box and the list below it. */
+  margin-left: -8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  /* The strong half: it is the only thing in the trail you can act on. */
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.crumb .up:hover { background: var(--surface-3); }
+.crumb .here {
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--ink-3);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A part's page is one card: the stock at the top, the figures under it, and
+   the whole thing opens the edit form. */
+.onepart { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+.onepart:hover { border-color: var(--line-strong); }
+.onepart:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The stock row inside it is part of that card, not a link of its own, so it
+   does not light up separately on the way past. */
+.row.stockrow { cursor: inherit; }
+.row.stockrow:hover, .row.stockrow:active { background: none; }
+/* The stepper is the exception: it acts on the spot rather than opening the
+   form, so it keeps its own feedback. */
+.onepart .stepper .iconbtn { cursor: pointer; }
+.onepart .kv { padding-bottom: 4px; }
+.onepart .editnote {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 12px 11px;
+  font-size: calc(11px * var(--ui-scale));
+  color: var(--ink-3);
+}
+.onepart .editnote .ic { opacity: 0.7; }
+@media (hover: hover) {
+  .onepart .editnote { opacity: 0; transition: opacity 0.12s ease; }
+  .onepart:hover .editnote, .onepart:focus-visible .editnote { opacity: 1; }
+}
+
+/* The tally at the right-hand end of a group heading. .label::after is the
+   hairline and takes the slack, so anything after it lands on the right. */
+.label .count {
+  font-size: calc(10px * var(--ui-scale));
+  font-weight: 700;
+  color: var(--ink-3);
+  letter-spacing: 0.06em;
+  flex: none;
+}
 
 /* ---------- filter row ----------
    Five equal buttons filling the measure, each tinted by what it counts, so
@@ -508,7 +710,12 @@ export const CSS = `
   align-items: center;
   gap: 8px;
 }
-.label::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+/* The hairline takes the slack between the heading and anything trailing it
+   — a tally, the history range picker. order puts it between them: a ::after
+   is always the last child, so without this the rule would run off the right
+   of the row and the trailing thing would sit against the text. */
+.label::after { content: ""; flex: 1; height: 1px; background: var(--line); order: 1; }
+.label .count, .label .seg { order: 2; }
 .label:first-child { margin-top: 4px; }
 
 /* ---------- cards & rows ---------- */

@@ -20,7 +20,10 @@ const P = {
   x: '<path d="M6 6l12 12M18 6L6 18"/>',
   trash: '<path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"/>',
   edit: '<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/>',
-  chevron: '<path d="m6 9 6 6 6-6"/>',
+  // Pointing right, not down: these sit at the end of a row that opens a page
+  // of its own, and a downward chevron reads as a disclosure that will expand
+  // in place.
+  chevron: '<path d="m9 6 6 6-6 6"/>',
   back: '<path d="M15 5l-7 7 7 7"/>',
   link: '<path d="M15 3h6v6M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/>',
   download: '<path d="M12 3v12M7 11l5 5 5-5M4 20h16"/>',

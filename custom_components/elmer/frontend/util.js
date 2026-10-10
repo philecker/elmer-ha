@@ -33,7 +33,7 @@ export function raw(markup) {
   return [markup === null || markup === undefined ? '' : String(markup)];
 }
 
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+export const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 /** "14 Mar 2026", or "14 Mar" when it is this year. */
 export function formatDay(iso, todayIso) {

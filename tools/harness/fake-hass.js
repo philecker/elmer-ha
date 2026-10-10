@@ -126,6 +126,19 @@ const SEED = {
     { id: 'l2', taskId: 't9', equipmentId: 'eq5', taskName: 'Oil Change',
       doneOn: ago(14), notes: '', cost: '34.50', recordedAt: Date.now() - 1e9,
       previousLastDone: ago(200), usedParts: [] },
+    // Older entries, so the sample house has a history worth looking at: the
+    // list groups by year and can be narrowed to the last few months, and
+    // neither is exercised by a log that only reaches back a month.
+    { id: 'l3', taskId: 't2', equipmentId: 'eq1', taskName: 'Replace Furnace Filter',
+      doneOn: ago(130), notes: 'Old one was grey. Bought a four-pack this time.',
+      cost: '18.99', recordedAt: Date.now() - 1.1e10, previousLastDone: ago(220),
+      usedParts: [{ supplyId: 's1', quantity: 1 }] },
+    { id: 'l4', taskId: 't1', equipmentId: 'eq1', taskName: 'Professional Service',
+      doneOn: ago(330), notes: 'Capacitor replaced under warranty. Blower wheel cleaned.',
+      cost: '0', recordedAt: Date.now() - 2.8e10, previousLastDone: ago(700), usedParts: [] },
+    { id: 'l5', taskId: 't6', equipmentId: 'eq3', taskName: 'Flush Tank / Sediment Drain',
+      doneOn: ago(470), notes: 'A lot of sediment. Worth doing every year.',
+      cost: '', recordedAt: Date.now() - 4e10, previousLastDone: null, usedParts: [] },
   ],
   settings: { theme: 'system', showLocations: true, dueSoonDays: 14, notifyOverdue: true },
 };
@@ -336,7 +349,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.0.1' } };
+panel.panel = { config: { version: '1.0.2' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

@@ -1,7 +1,7 @@
 {
   "domain": "elmer",
   "name": "Elmer",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "documentation": "https://github.com/philecker/elmer-ha",
   "issue_tracker": "https://github.com/philecker/elmer-ha/issues",
   "codeowners": ["@philecker"],

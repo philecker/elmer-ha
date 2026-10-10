@@ -17,7 +17,7 @@ import {
   esc, html, raw, titleCase, uid, todayIso,
 } from './util.js';
 import {
-  routinesView, equipmentView, equipmentDetail, partsView, historyView, settingsView,
+  routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
   equipmentForm, routineForm, partForm, logForm, logDetail, importForm,
   partRow, partOptions,
 } from './views.js';
@@ -75,6 +75,8 @@ class ElmerPanel extends HTMLElement {
 
     this.tab = 'routines';
     this.filter = 'all';
+    this.queries = {};    // the search text, one per tab
+    this.range = 'all';   // how far back the history list reaches
     this.detail = null;     // { kind, id } — equipment detail replaces the list
     this.sheet = null;      // { kind, id, title } — the modal
     this.busy = {};         // routine ids with a completion in flight
@@ -90,6 +92,7 @@ class ElmerPanel extends HTMLElement {
     this._onClick = this._onClick.bind(this);
     this._onKeydown = this._onKeydown.bind(this);
     this._onChange = this._onChange.bind(this);
+    this._onInput = this._onInput.bind(this);
     this._onBlur = this._onBlur.bind(this);
     this._onThemeChange = this._onThemeChange.bind(this);
     this._onResize = () => this._measurePanel();
@@ -140,6 +143,7 @@ class ElmerPanel extends HTMLElement {
     }
     root.addEventListener('click', this._onClick);
     root.addEventListener('change', this._onChange);
+    root.addEventListener('input', this._onInput);
     // Capture, because blur does not bubble.
     root.addEventListener('blur', this._onBlur, true);
     // Keys are listened for on the window, not the shadow root. Opening a sheet
@@ -179,6 +183,7 @@ class ElmerPanel extends HTMLElement {
     const root = this.shadowRoot;
     root.removeEventListener('click', this._onClick);
     root.removeEventListener('change', this._onChange);
+    root.removeEventListener('input', this._onInput);
     root.removeEventListener('blur', this._onBlur, true);
     window.removeEventListener('keydown', this._onKeydown, true);
     if (this._media) this._media.removeEventListener('change', this._onThemeChange);
@@ -289,6 +294,19 @@ class ElmerPanel extends HTMLElement {
   /* -------------------------------------------------------------- state -- */
 
   /** The shape the views read: raw data plus the integration's computed status. */
+  /**
+   * The search text for whichever list is showing. Per tab, not one shared
+   * box: searching routines for "furnace" and then opening Parts should not
+   * hand back a parts list quietly narrowed by a word typed on another screen.
+   */
+  get query() {
+    return this.queries[this.tab] || '';
+  }
+
+  set query(value) {
+    this.queries[this.tab] = value;
+  }
+
   get state() {
     const d = this.data;
     const rows = d.tasks
@@ -308,6 +326,8 @@ class ElmerPanel extends HTMLElement {
       computed: d.computed,
       rows,
       filter: this.filter,
+      query: this.query,
+      range: this.range,
       busy: this.busy,
       version: (this._panel && this._panel.config && this._panel.config.version) || '—',
     };
@@ -322,6 +342,15 @@ class ElmerPanel extends HTMLElement {
     // a long list does not throw you back to the top.
     const scroller = this.shadowRoot.querySelector('.scroll');
     if (scroller) this._scrollTops[this._scrollKey()] = scroller.scrollTop;
+
+    // Searching re-renders on every keystroke, which throws away the input the
+    // keystroke came from. Note where the caret was so it can be put back; the
+    // check is on the element being the search box rather than on why we are
+    // rendering, so a push arriving mid-word does not steal the caret either.
+    const focused = this.shadowRoot.activeElement;
+    const caret = focused && focused.dataset && focused.dataset.act === 'search'
+      ? { start: focused.selectionStart, end: focused.selectionEnd }
+      : null;
 
     if (this.error) {
       this._mount.innerHTML = html`<div class="center">
@@ -342,7 +371,7 @@ class ElmerPanel extends HTMLElement {
     // scroller), and without the wrapper the grid's row template would depend on
     // which screen happened to be showing.
     this._mount.innerHTML =
-      this._header(state)
+      this._header()
       + this._tabs(state)
       + `<div class="main">${body}</div>`;
 
@@ -350,6 +379,16 @@ class ElmerPanel extends HTMLElement {
 
     const next = this.shadowRoot.querySelector('.scroll');
     if (next) next.scrollTop = this._scrollTops[this._scrollKey()] || 0;
+
+    if (caret) {
+      const box = this.shadowRoot.querySelector('[data-act="search"]');
+      if (box) {
+        box.focus();
+        // A search input rejects setSelectionRange in some browsers; losing the
+        // caret position is survivable, losing focus mid-word is not.
+        try { box.setSelectionRange(caret.start, caret.end); } catch { /* ignore */ }
+      }
+    }
 
     // The tab row scrolls sideways on a narrow screen, so the selected tab has
     // to be brought into view or it can sit off the edge after a tab change.
@@ -384,21 +423,15 @@ class ElmerPanel extends HTMLElement {
    * is a control that looks identical while doing something different each time
    * you reach for it. Adding now lives in a fixed corner button instead.
    */
-  _header(state) {
-    const back = this.detail;
-
-    if (back) {
-      const eq = back.kind === 'equipment'
-        ? state.equipment.find((e) => e.id === back.id)
-        : null;
-      return html`<div class="header"><div class="headerinner">
-        <button class="iconbtn" data-act="back" aria-label="Back">${raw(icon('back', 20))}</button>
-        <div class="brand"><span class="title">${eq ? eq.name : 'Equipment'}</span></div>
-        <div class="spacer"></div>
-        ${raw(this._addButton())}
-      </div></div>`;
-    }
-
+  /**
+   * The header is the same on every screen, detail pages included. It used to
+   * turn into a back arrow and the thing's name, which meant the one fixed
+   * point in the panel — the Elmer mark — disappeared exactly when you had
+   * navigated away from the list and most wanted it. The way back is a
+   * breadcrumb at the top of the page instead, where the search box sits on a
+   * list, so the two screens line up.
+   */
+  _header() {
     // Home Assistant hides its sidebar on a narrow screen, so the panel has to
     // offer the way back to it.
     const menu = this._narrow
@@ -455,6 +488,7 @@ class ElmerPanel extends HTMLElement {
 
   _renderDetail(state) {
     if (this.detail.kind === 'equipment') return equipmentDetail(state, this.detail.id);
+    if (this.detail.kind === 'part') return partDetail(state, this.detail.id);
     return '<div class="center">—</div>';
   }
 
@@ -602,6 +636,21 @@ class ElmerPanel extends HTMLElement {
     this._act(el.dataset.act, el);
   }
 
+  /**
+   * Typing in the routines search box.
+   *
+   * Every keystroke re-renders the list, which replaces the input element the
+   * keystroke came from — so _render puts the caret back where it was. Doing it
+   * there rather than here keeps it correct for anything else that re-renders
+   * while the box has focus, such as a push arriving from another device.
+   */
+  _onInput(ev) {
+    const el = ev.target.closest && ev.target.closest('[data-act="search"]');
+    if (!el) return;
+    this.query = el.value;
+    this._render();
+  }
+
   _onChange(ev) {
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (!el) return;
@@ -659,6 +708,15 @@ class ElmerPanel extends HTMLElement {
         this.detail = null;
         this._render();
         return;
+      case 'range':
+        this.range = el.dataset.value;
+        this._render();
+        return;
+      case 'search-clear':
+        this.query = '';
+        this._render();
+        this.shadowRoot.querySelector('[data-act="search"]')?.focus();
+        return;
       case 'filter':
         // Tapping the active filter clears it, so the stat strip toggles.
         this.filter = this.filter === el.dataset.value ? 'all' : el.dataset.value;
@@ -673,6 +731,10 @@ class ElmerPanel extends HTMLElement {
         this._openSheet({ kind: 'routine', id });
         return;
       case 'part':
+        this.detail = { kind: 'part', id };
+        this._render();
+        return;
+      case 'edit-part':
         this._openSheet({ kind: 'part-form', id });
         return;
       case 'log':

@@ -208,11 +208,108 @@ async function main() {
     new Set([tints.overdue, tints.due, tints.ok]).size === 3, JSON.stringify(tints));
   check('a zero is not painted as an alarm', tints.overdue === tints.new, false);
 
-  const banner = await page.textContent(el('.alert span'));
-  ok('overdue banner reads as one line', /NEEDS ATTENTION/i.test(await page.evaluate(
-    () => getComputedStyle(document.querySelector('elmer-panel').shadowRoot.querySelector('.alert')).textTransform
-  ) === 'uppercase' ? banner : ''), banner);
-  ok('banner counts only overdue', banner.includes(String(counts.overdue)), banner);
+  // --- grouped by state, and searchable ---------------------------------
+  // The "needs attention" banner is gone: it restated the Overdue pill and
+  // filtered to the same thing when tapped. A search box is the one thing the
+  // pills cannot do.
+  check('the banner is gone', await page.$(el('.alert')), null);
+  ok('and a search box is there', await page.$(el('.search input[data-act="search"]')) !== null);
+
+  // Unfiltered, the list is grouped by state, worst first, each heading
+  // carrying its own tally.
+  const grouped = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return [...root.querySelectorAll('.pad > .label')].map((l) => ({
+      label: l.firstChild.textContent.trim(),
+      count: Number(l.querySelector('.count').textContent),
+      rows: l.nextElementSibling.querySelectorAll('.row').length,
+    }));
+  });
+  check('groups run worst first', grouped.map((g) => g.label),
+    ['Overdue', 'Due soon', 'Never done', 'Up to date']);
+  ok('every heading counts its own group',
+    grouped.every((g) => g.count === g.rows), JSON.stringify(grouped));
+  check('and together they are every routine',
+    grouped.reduce((n, g) => n + g.rows, 0), counts.overdue + counts.due + counts.new + counts.ok);
+  check('the overdue group matches the pill', grouped[0].count, counts.overdue);
+
+  // Typing filters the list. Each keystroke re-renders, which replaces the
+  // input the keystroke came from, so the caret has to be put back or the box
+  // drops focus after one letter and the rest goes nowhere.
+  await page.click(el('.search input'));
+  await page.type(el('.search input'), 'furnace', { delay: 30 });
+  await page.waitForTimeout(160);
+  const searched = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const box = root.querySelector('.search input');
+    return {
+      value: box.value,
+      focused: root.activeElement === box,
+      caret: box.selectionStart,
+      titles: [...root.querySelectorAll('.row .title')].map((t) => t.textContent.trim()),
+      groups: [...root.querySelectorAll('.pad > .label')].map((l) => l.firstChild.textContent.trim()),
+    };
+  });
+  check('the whole word arrives', searched.value, 'furnace');
+  ok('the box still has focus after typing', searched.focused);
+  check('with the caret at the end', searched.caret, 7);
+  ok('the list is narrowed', searched.titles.length > 0
+    && searched.titles.length < counts.overdue + counts.due + counts.new + counts.ok,
+    JSON.stringify(searched.titles));
+  ok('to things that match somewhere', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return [...root.querySelectorAll('.row')].every(
+      (r) => r.textContent.toLowerCase().includes('furnace'));
+  }));
+  ok('and the groups shrink to what is left',
+    searched.groups.length > 0 && searched.groups.length <= 4, JSON.stringify(searched.groups));
+
+  // Equipment and location are searchable too, not just the routine's name.
+  await page.fill(el('.search input'), 'basement');
+  await page.waitForTimeout(160);
+  ok('a location finds its routines', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const rows = [...root.querySelectorAll('.row')];
+    return rows.length > 0 && rows.every((r) => r.textContent.toLowerCase().includes('basement'));
+  }));
+
+  // Nothing matching says so rather than showing an empty page.
+  await page.fill(el('.search input'), 'zzzznothing');
+  await page.waitForTimeout(160);
+  check('a search with no matches explains itself',
+    await page.textContent(el('.empty h3')), 'Nothing matches that');
+  check('and no rows are left', (await page.$$(el('.row'))).length, 0);
+
+  // Clearing puts everything back and hands focus to the box.
+  await page.click(el('.search .clear'));
+  await page.waitForTimeout(160);
+  const cleared = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const box = root.querySelector('.search input');
+    return {
+      value: box.value,
+      focused: root.activeElement === box,
+      clearGone: !root.querySelector('.search .clear'),
+      groups: [...root.querySelectorAll('.pad > .label')].map((l) => l.firstChild.textContent.trim()),
+    };
+  });
+  check('clearing empties the box', cleared.value, '');
+  ok('and leaves focus in it', cleared.focused);
+  ok('the clear button goes when there is nothing to clear', cleared.clearGone);
+  check('and every group is back', cleared.groups,
+    ['Overdue', 'Due soon', 'Never done', 'Up to date']);
+
+  // Narrowing with a pill leaves one group, so a heading would only repeat the
+  // pill; the list goes flat instead.
+  await page.click(el('.pill[data-value="overdue"]'));
+  await page.waitForTimeout(140);
+  check('a filtered list drops the headings',
+    (await page.$$(el('.pad > .label'))).length, 0);
+  check('and shows only that state',
+    (await page.$$(el('.row'))).length, counts.overdue);
+  await page.click(el('.pill[data-value="overdue"]'));
+  await page.waitForTimeout(140);
+  check('and the headings come back', (await page.$$(el('.pad > .label'))).length, 4);
 
   // --- every row is the same height -------------------------------------
   // A relative time that wraps to a second line makes its row taller than its
@@ -698,6 +795,74 @@ async function main() {
     await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').partsUsed),
     [{ supplyId: 's4', quantity: 2 }]);
 
+  // --- the chrome does not change on a detail page ----------------------
+  // The header used to turn into a back arrow and the thing's name, so the one
+  // fixed point in the panel disappeared exactly when you had navigated away
+  // from the list. The mark stays; the way back is a breadcrumb at the top of
+  // the content, where the list's search box sits.
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(60);
+  const listChrome = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const s2 = root.querySelector('.search');
+    return {
+      word: root.querySelector('.header .brand .word').textContent.trim(),
+      searchTop: s2 ? Math.round(s2.getBoundingClientRect().top) : null,
+      searchLeft: s2 ? Math.round(s2.getBoundingClientRect().left) : null,
+    };
+  });
+  await page.click(el('.row[data-id="eq1"]'));
+  await page.waitForTimeout(80);
+  const detailChrome = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const c = root.querySelector('.crumb');
+    const card = root.querySelector('.card');
+    return {
+      word: root.querySelector('.header .brand .word').textContent.trim(),
+      hasMark: !!root.querySelector('.header .brand .ic'),
+      crumbTop: Math.round(c.getBoundingClientRect().top),
+      // The section's label leads the trail now, so that is what should land
+      // on the content's edge; the button's own padding is cancelled out.
+      upLeft: Math.round(c.querySelector('.up').getBoundingClientRect().left
+        + parseFloat(getComputedStyle(c.querySelector('.up')).paddingLeft)),
+      cardLeft: Math.round(card.getBoundingClientRect().left),
+      // One chevron, between the two, pointing back at the section.
+      chevrons: c.querySelectorAll('.ic').length,
+      chevronPath: c.querySelector('.ic path').getAttribute('d'),
+      upTone: getComputedStyle(c.querySelector('.up')).color,
+      hereTone: getComputedStyle(c.querySelector('.here')).color,
+      paper: getComputedStyle(root.querySelector('.app')).backgroundColor,
+      up: c.querySelector('.up').textContent.trim(),
+      here: c.querySelector('.here').textContent.trim(),
+      aboveEverything: c.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING,
+      noSearch: !root.querySelector('.search'),
+    };
+  });
+  check('the header still says ELMER on a detail page', detailChrome.word, listChrome.word);
+  ok('and still carries the mark', detailChrome.hasMark);
+  check('the breadcrumb names where it came from', detailChrome.up, 'Equipment');
+  check('and where you are', detailChrome.here, 'Furnace / Air Conditioner');
+  ok('it is the first thing in the content', detailChrome.aboveEverything !== 0);
+  ok('a detail page has no search box of its own', detailChrome.noSearch);
+  check('the crumb sits exactly where the search box sat',
+    detailChrome.crumbTop, listChrome.searchTop);
+  check('and the section lands on the content edge',
+    detailChrome.upLeft - detailChrome.cardLeft, 0);
+  check('there is one chevron, not two', detailChrome.chevrons, 1);
+  ok('the section stands out more than the page you are on',
+    contrastRatio(detailChrome.upTone, detailChrome.paper)
+      > contrastRatio(detailChrome.hereTone, detailChrome.paper),
+    `${contrastRatio(detailChrome.upTone, detailChrome.paper)}:1 vs `
+      + `${contrastRatio(detailChrome.hereTone, detailChrome.paper)}:1`);
+  check('and it points back at the section', detailChrome.chevronPath, 'M15 5l-7 7 7 7');
+  // The section is the only thing here you can act on, so it carries the
+  // weight; the page you are already on is the quiet half. Stated as contrast
+  // against the page rather than as "darker", which is only true on a light
+  // theme — on a dark one the stronger colour is the lighter of the two.
+  await page.click(el('.crumb .up'));
+  await page.waitForTimeout(80);
+  ok('and it goes back', await page.$(el('.search')) !== null);
+
   // --- editing equipment must not drop its links ------------------------
   await page.click(el('.tab[data-value="equipment"]'));
   await page.waitForTimeout(60);
@@ -731,6 +896,129 @@ async function main() {
     await page.evaluate(() => window.__snapshot().supplies.find((s) => s.id === 's2').quantity), 0);
   await shot(page, 'phone-parts.png');
 
+  // --- a part opens a page, the way a piece of equipment does -----------
+  // It used to go straight into the edit form, which is the one thing you
+  // cannot do from a form: look at it.
+  check('the parts list no longer counts the reorders for you',
+    await page.$(el('.alert')), null);
+  await page.click(el('.row[data-id="s1"] .title'));
+  await page.waitForTimeout(100);
+  const partPage = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const c = root.querySelector('.crumb');
+    return {
+      sheet: !!root.querySelector('.sheet'),
+      up: c && c.querySelector('.up').textContent.trim(),
+      here: c && c.querySelector('.here').textContent.trim(),
+      labels: [...root.querySelectorAll('.pad > .label')].map((l) => l.textContent.trim()),
+      hasStepper: !!root.querySelector('.stockrow .stepper'),
+      canEdit: !!root.querySelector('[data-act="edit-part"]'),
+      canDelete: !!root.querySelector('[data-act="delete-part"]'),
+      word: root.querySelector('.header .brand .word').textContent.trim(),
+    };
+  });
+  ok('tapping a part no longer throws you into a form', !partPage.sheet);
+  check('it opens a page under Parts', partPage.up, 'Parts');
+  check('named for the part', partPage.here, '20x25x1 MERV 11');
+  ok('the header is unchanged there too', partPage.word === 'ELMER');
+  ok('the page lists what uses it', partPage.labels.includes('Used by'));
+  ok('stock can be changed from it', partPage.hasStepper);
+  ok('and it offers edit and delete', partPage.canEdit && partPage.canDelete);
+  const beforeStep = await page.evaluate(
+    () => window.__snapshot().supplies.find((s) => s.id === 's1').quantity);
+  await page.click(el('.stockrow [data-act="stock"][data-delta="1"]'));
+  await page.waitForTimeout(120);
+  check('the stepper on the page works',
+    await page.evaluate(() => window.__snapshot().supplies.find((s) => s.id === 's1').quantity),
+    beforeStep + 1);
+  // Stock and the figures are one card, not two: they are the same subject,
+  // and the card is what opens the edit form.
+  const oneCard = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const card = root.querySelector('.onepart');
+    return {
+      cards: root.querySelectorAll('.pad > .card').length,
+      holdsStock: !!card.querySelector('.stockrow'),
+      holdsFigures: !!card.querySelector('.kv'),
+      opensEdit: card.dataset.act === 'edit-part',
+      reachable: card.getAttribute('tabindex') === '0',
+      // The separate Edit button is gone; the card does that job now.
+      editButtons: [...root.querySelectorAll('.btnrow .btn')].map((b) => b.textContent.trim()),
+    };
+  });
+  ok('the stock and the figures share one card',
+    oneCard.holdsStock && oneCard.holdsFigures);
+  ok('which opens the edit form', oneCard.opensEdit);
+  ok('and can be reached from the keyboard', oneCard.reachable);
+  check('with no second way to the same place', oneCard.editButtons, ['Delete']);
+
+  // The stepper sits inside that card and must not open the form with it: a
+  // click resolves to the nearest thing that handles one, and if that ever
+  // stops being true, adding a part to the shelf would throw you into an edit.
+  const beforeInner = await page.evaluate(
+    () => window.__snapshot().supplies.find((s) => s.id === 's1').quantity);
+  await page.click(el('.onepart .stepper [data-act="stock"][data-delta="-1"]'));
+  await page.waitForTimeout(140);
+  check('the stepper still changes the count',
+    await page.evaluate(() => window.__snapshot().supplies.find((s) => s.id === 's1').quantity),
+    Math.max(0, beforeInner - 1));
+  check('and does not open the edit form', await page.$(el('.sheet')), null);
+
+  await page.click(el('.onepart .kv'));
+  await page.waitForSelector(el('.sheet input[name="name"]'));
+  ok('but the card itself does', true);
+  await page.click(el('.sheet [data-act="close"]'));
+  await page.waitForTimeout(80);
+  await page.click(el('.crumb .up'));
+  await page.waitForTimeout(100);
+  ok('and the crumb goes back to the list', await page.$(el('.search')) !== null);
+
+  // --- search on every list ---------------------------------------------
+  // Each tab keeps its own text: searching routines and then opening Parts
+  // must not hand back a parts list narrowed by a word typed elsewhere.
+  await page.fill(el('.search input'), 'lg');
+  await page.waitForTimeout(140);
+  const partsFound = await page.$$eval(el('.card .row .title'), (n) => n.map((t) => t.textContent.trim()));
+  ok('parts can be searched', partsFound.length > 0
+    && partsFound.every((t) => t.toLowerCase().includes('lg')), JSON.stringify(partsFound));
+
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(120);
+  check('the parts search did not follow to equipment',
+    await page.inputValue(el('.search input')), '');
+  await page.fill(el('.search input'), 'basement');
+  await page.waitForTimeout(140);
+  ok('equipment can be searched by location', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const rows = [...root.querySelectorAll('.card .row')];
+    return rows.length > 0;
+  }));
+  await page.fill(el('.search input'), 'zzzznothing');
+  await page.waitForTimeout(140);
+  check('equipment says when nothing matches',
+    await page.textContent(el('.empty h3')), 'Nothing matches that');
+
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(120);
+  check('and each tab kept its own text',
+    await page.inputValue(el('.search input')), 'lg');
+  await page.click(el('.search .clear'));
+  await page.waitForTimeout(120);
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(120);
+  await page.click(el('.search .clear'));
+  await page.waitForTimeout(120);
+
+  // The chevron at the end of an equipment row points at the page it opens.
+  // Pointing down, it read as a disclosure that would expand in place.
+  check('the row chevron points right', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const path = root.querySelector('.card .row > svg path, .card .row > .ic path');
+    return path ? path.getAttribute('d') : null;
+  }), 'm9 6 6 6-6 6');
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(100);
+
   await page.click(el('.addbtn[data-act="add-part"]'));
   await page.waitForSelector(el('.sheet input[name="name"]'));
   await page.fill(el('.sheet input[name="name"]'), 'anode rod');
@@ -743,10 +1031,64 @@ async function main() {
   check('quantity saved as a number', part.quantity, 1);
 
   // --- history ----------------------------------------------------------
+  // A log read top to bottom is a chronology, so it is drawn as one: a rail
+  // down the left with a dot per entry, grouped by year, rather than a stack
+  // of cards.
   await page.click(el('.tab[data-value="history"]'));
-  await page.waitForSelector(el('.card .row'));
-  ok('history lists entries', (await page.$$(el('.card .row'))).length >= 3);
-  await page.click(el('.card .row .title'));
+  await page.waitForSelector(el('.timeline .tl'));
+  ok('history lists entries', (await page.$$(el('.timeline .tl'))).length >= 3);
+  const timeline = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const years = [...root.querySelectorAll('.pad > .label')]
+      .filter((l) => /^\d{4}$/.test(l.firstChild.textContent.trim()));
+    const ol = root.querySelector('.timeline');
+    const first = ol.querySelector('.tl');
+    return {
+      years: years.map((l) => l.firstChild.textContent.trim()),
+      counts: years.map((l) => Number(l.querySelector('.count').textContent)),
+      perYear: years.map((l) => l.nextElementSibling.querySelectorAll('.tl').length),
+      hasRail: getComputedStyle(ol, '::before').width !== 'auto',
+      dots: ol.querySelectorAll('.dot').length,
+      rows: ol.querySelectorAll('.tl').length,
+      when: first.querySelector('.when').textContent.trim(),
+      mono: getComputedStyle(first.querySelector('.when')).fontFamily,
+      // The entries are a record to read, not a row of controls. Undo lives
+      // on the entry's own sheet, a tap away, where there is room to say what
+      // it will put back.
+      actions: first.querySelectorAll('button').length,
+      ranges: [...root.querySelectorAll('.seg button')].map((b) => b.textContent.trim()),
+      pressed: [...root.querySelectorAll('.seg button')]
+        .filter((b) => b.getAttribute('aria-pressed') === 'true').map((b) => b.textContent.trim()),
+    };
+  });
+  check('grouped by year, newest first', timeline.years,
+    [...timeline.years].sort().reverse());
+  check('each year counts its own entries', timeline.counts, timeline.perYear);
+  ok('there is a rail', timeline.hasRail);
+  check('with a dot per entry', timeline.dots, timeline.rows);
+  ok('the date reads as a short day', /^[A-Z][a-z]{2} \d{1,2}$/.test(timeline.when), timeline.when);
+  ok('set in the mono face so the column lines up', /mono|Mono|Menlo/.test(timeline.mono),
+    timeline.mono);
+  check('an entry carries no buttons of its own', timeline.actions, 0);
+  check('the range picker offers three windows', timeline.ranges,
+    ['3 months', '12 months', 'All time']);
+  check('and opens on all of it', timeline.pressed, ['All time']);
+
+  // Narrowing the window drops the older entries and says so in the count.
+  const allCount = await page.$$eval(el('.timeline .tl'), (n) => n.length);
+  await page.click(el('.seg button[data-value="3m"]'));
+  await page.waitForTimeout(140);
+  const narrowed = await page.$$eval(el('.timeline .tl'), (n) => n.length);
+  ok('three months shows fewer than all time', narrowed < allCount,
+    `${narrowed} of ${allCount}`);
+  check('and the heading counts what is shown',
+    Number((await page.textContent(el('.pad > .label'))).trim().split(' ')[0]), narrowed);
+  await page.click(el('.seg button[data-value="all"]'));
+  await page.waitForTimeout(140);
+  check('and it all comes back',
+    await page.$$eval(el('.timeline .tl'), (n) => n.length), allCount);
+
+  await page.click(el('.timeline .tl .title'));
   await page.waitForSelector(el('.sheet'));
   // The sheet is titled "History entry", so what the work was done to is what
   // identifies it; the date is a detail of that, not the headline.
@@ -840,7 +1182,7 @@ async function main() {
         tabIcon: px(tab.querySelector('.ic'), 'width'),
         tabTap: px(tab, 'minHeight'),
         body: px(root.querySelector('.row .title'), 'fontSize'),
-        hint: px(root.querySelector('.alert span') || root.querySelector('.row .sub'), 'fontSize'),
+        hint: px(root.querySelector('.row .sub'), 'fontSize'),
         // --ui-scale is a calc() expression, and an unregistered custom
         // property is not evaluated, so read the two numbers it multiplies.
         scale: parseFloat(getComputedStyle(host).getPropertyValue('--ui-base'))
@@ -1277,7 +1619,7 @@ async function main() {
   await page.waitForTimeout(100);
   check('markup in a name does not execute', await page.evaluate(() => window.__pwned), undefined);
   check('the name is shown as text',
-    await page.textContent(el('.header .brand .title')), '<img src=x onerror="window.__pwned=1">');
+    await page.textContent(el('.crumb .here')), '<img src=x onerror="window.__pwned=1">');
   const jsLink = await page.$(el('a[href^="javascript:"]'));
   check('a javascript: url is never a link', jsLink, null);
   ok('the link label is still shown',
@@ -1300,13 +1642,13 @@ async function main() {
   ok('tabs sit between the header and the content',
     order.header < order.tabs && order.tabs < order.main, JSON.stringify(order));
 
-  // The banner and the filter row are page content now, so they line up with
+  // The search box and the filter row are page content, so they line up with
   // the list because they share its padding box, not because of a separate rule.
   const aligned = await page.evaluate(() => {
     const root = document.querySelector('elmer-panel').shadowRoot;
     const card = root.querySelector('.card').getBoundingClientRect();
     const probes = {
-      '.alert': root.querySelector('.alert'),
+      '.search': root.querySelector('.search'),
       '.pills': root.querySelector('.pills .pill'),
     };
     const out = {};
@@ -1315,7 +1657,7 @@ async function main() {
     }
     return out;
   });
-  check('banner and filters line up with the list', aligned, { '.alert': 0, '.pills': 0 });
+  check('search and filters line up with the list', aligned, { '.search': 0, '.pills': 0 });
 
   // The tab row spans the panel but its tabs sit in the content's column, so
   // the first label starts on the same vertical as the list below it.
