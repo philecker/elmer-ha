@@ -115,7 +115,10 @@ const SEED = {
   supplies: [
     { id: 's1', name: '20x25x1 MERV 11', quantity: 3, reorderAt: 2, partNumber: 'MPR 1200',
       purchasedFrom: 'Home Depot' },
-    { id: 's2', name: 'LG LT1000P', quantity: 0, reorderAt: 1, partNumber: 'LT1000P' },
+    // One shop name and one link, because "Buy from" takes either and they
+    // are shown differently: a name is a fact, a link is a chip to press.
+    { id: 's2', name: 'LG LT1000P', quantity: 0, reorderAt: 1, partNumber: 'LT1000P',
+      purchasedFrom: 'https://www.example.com/dp/B002JAKRAM?ref=long_and_unreadable&th=1' },
     { id: 's3', name: 'Softener Salt (40 lb)', quantity: 2, reorderAt: 2 },
     { id: 's4', name: '9V Battery', quantity: 8, reorderAt: 2 },
   ],
@@ -349,7 +352,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.0.2' } };
+panel.panel = { config: { version: '1.0.3' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

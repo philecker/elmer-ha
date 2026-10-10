@@ -609,20 +609,33 @@ export const CSS = `
 /* The stepper is the exception: it acts on the spot rather than opening the
    form, so it keeps its own feedback. */
 .onepart .stepper .iconbtn { cursor: pointer; }
-.onepart .kv { padding-bottom: 4px; }
-.onepart .editnote {
-  display: flex;
+/* The chip sits beside the figures rather than on a line of its own under
+   them: on the same right edge as the stepper above it, so the two things you
+   can press are in one column, and centred against the text so it reads as
+   part of that block instead of an afterthought below it. */
+.onepart .factrow { display: flex; align-items: center; gap: 12px; }
+.onepart .factrow .kv { flex: 1 1 auto; min-width: 0; }
+.onepart .factrow .chip { flex: none; margin-right: 12px; }
+
+/* A link worth pressing, rather than a URL to read: the address itself is
+   usually a long unreadable thing that pushes the rest of the card sideways.
+   Carried over from the desktop app, where it was .link-chip. */
+.chip {
+  display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0 12px 11px;
-  font-size: calc(11px * var(--ui-scale));
-  color: var(--ink-3);
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--accent);
+  font-size: calc(12px * var(--ui-scale));
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
 }
-.onepart .editnote .ic { opacity: 0.7; }
-@media (hover: hover) {
-  .onepart .editnote { opacity: 0; transition: opacity 0.12s ease; }
-  .onepart:hover .editnote, .onepart:focus-visible .editnote { opacity: 1; }
-}
+.chip:hover { background: var(--accent-soft); border-color: var(--accent); }
+.chip .ic { flex: none; }
 
 /* The tally at the right-hand end of a group heading. .label::after is the
    hairline and takes the slack, so anything after it lands on the right. */

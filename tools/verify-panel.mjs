@@ -948,6 +948,102 @@ async function main() {
   });
   ok('the stock and the figures share one card',
     oneCard.holdsStock && oneCard.holdsFigures);
+
+  // The card is headed by the part, not by its stock state: the state is a
+  // sentence under the name and the count is the figure in the chip.
+  const heading = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const card = root.querySelector('.onepart');
+    return {
+      title: card.querySelector('.stockrow .title').textContent.trim(),
+      sub: card.querySelector('.stockrow .sub').textContent.trim(),
+      chipCount: card.querySelector('.qty').textContent.trim(),
+      hint: !!card.querySelector('.editnote'),
+    };
+  });
+  check('the card is headed by the part', heading.title, '20x25x1 MERV 11');
+  ok('with the stock state under it', /left|low|stock/i.test(heading.sub), heading.sub);
+  check('and the count in the chip', heading.chipCount,
+    String(await page.evaluate(() => window.__snapshot().supplies.find((x) => x.id === 's1').quantity)));
+  ok('no tap-to-edit hint', !heading.hint);
+
+  // "Buy from" takes either a shop name or a link. s1 is a name, so it stays
+  // a row among the other figures and no chip appears.
+  const asName = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return {
+      chip: !!root.querySelector('.chip'),
+      facts: [...root.querySelectorAll('.onepart .kv dt')].map((d) => d.textContent.trim()),
+      value: [...root.querySelectorAll('.onepart .kv dd')].map((d) => d.textContent.trim()),
+    };
+  });
+  ok('a shop name gets no buy chip', !asName.chip);
+  ok('and stays a row like the rest', asName.facts.includes('Buy from')
+    && asName.value.includes('Home Depot'), JSON.stringify(asName));
+
+  // s2's is a link, so it becomes a chip and the address itself is not shown
+  // — it is long, unreadable, and pushes the rest of the card sideways.
+  await page.click(el('.crumb .up'));
+  await page.waitForTimeout(120);
+  await page.click(el('.row[data-id="s2"] .title'));
+  await page.waitForTimeout(140);
+  const asLinkCase = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const chip = root.querySelector('.chip');
+    return {
+      label: chip && chip.textContent.trim(),
+      href: chip && chip.getAttribute('href'),
+      target: chip && chip.getAttribute('target'),
+      rel: chip && chip.getAttribute('rel'),
+      facts: [...root.querySelectorAll('.onepart .kv dt')].map((d) => d.textContent.trim()),
+      showsUrl: root.querySelector('.onepart').textContent.includes('example.com'),
+    };
+  });
+  check('a link becomes a buy chip', asLinkCase.label, 'Buy');
+  // The figures sit the same distance from the hairline above them as from
+  // the foot of the card. It was 12px against 4px, left over from when the
+  // chip was on a line below and the figures were tucked up against it.
+  check('the section is inset evenly top and bottom', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const el2 = root.querySelector('.onepart');
+    const card = el2.getBoundingClientRect();
+    const row = root.querySelector('.onepart .factrow').getBoundingClientRect();
+    const rule = root.querySelector('.onepart .stockrow').getBoundingClientRect();
+    // Against the card's padding box: its own bottom border sits inside that
+    // measurement and the hairline above does not, which is a 1px lie.
+    const border = parseFloat(getComputedStyle(el2).borderBottomWidth) || 0;
+    return Math.round((card.bottom - border - row.bottom) - (row.top - rule.bottom));
+  }), 0);
+  check('sitting on the same edge as the stepper above it', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const chip = root.querySelector('.chip').getBoundingClientRect();
+    const step = root.querySelector('.onepart .stepper').getBoundingClientRect();
+    return Math.round(chip.right - step.right);
+  }), 0);
+  ok('pointing at the address', /^https:\/\/www\.example\.com\//.test(asLinkCase.href || ''),
+    asLinkCase.href);
+  check('opening away from Home Assistant', asLinkCase.target, '_blank');
+  ok('without handing over the opener',
+    /noopener/.test(asLinkCase.rel || '') && /noreferrer/.test(asLinkCase.rel || ''), asLinkCase.rel);
+  ok('and the raw address is not printed', !asLinkCase.showsUrl);
+  ok('nor left as a row', !asLinkCase.facts.includes('Buy from'), JSON.stringify(asLinkCase.facts));
+
+  // The chip sits inside the card that opens the edit form, so pressing it
+  // must not do both. Playwright would follow the link out of the harness,
+  // so the click is cancelled and only the panel's own reaction is measured.
+  await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    root.querySelector('.chip').addEventListener('click', (e) => e.preventDefault());
+  });
+  await page.click(el('.onepart .chip'));
+  await page.waitForTimeout(160);
+  check('pressing Buy does not open the edit form', await page.$(el('.sheet')), null);
+
+  // Back to s1, which the checks below are standing on.
+  await page.click(el('.crumb .up'));
+  await page.waitForTimeout(120);
+  await page.click(el('.row[data-id="s1"] .title'));
+  await page.waitForTimeout(140);
   ok('which opens the edit form', oneCard.opensEdit);
   ok('and can be reached from the keyboard', oneCard.reachable);
   check('with no second way to the same place', oneCard.editButtons, ['Delete']);

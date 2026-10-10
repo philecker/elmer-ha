@@ -626,6 +626,13 @@ class ElmerPanel extends HTMLElement {
   }
 
   _onClick(ev) {
+    // A real link does its own thing. It matters because a link can sit
+    // inside something clickable — the Buy chip is in the card that opens a
+    // part's edit form — and without this the click would walk up to the
+    // card, which both opened the form and swallowed the navigation with
+    // preventDefault. Links are checked first so the nearest one wins.
+    if (ev.target.closest && ev.target.closest('a[href]')) return;
+
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (!el) return;
     // The scrim is the whole overlay, so only a click on the backdrop itself

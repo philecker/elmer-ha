@@ -13,7 +13,7 @@
 import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
-  INTERVAL_UNITS, safeHref, linkLabel, daysBetween, MONTHS,
+  INTERVAL_UNITS, safeHref, asLink, linkLabel, daysBetween, MONTHS,
 } from './util.js';
 
 /* ------------------------------------------------------------------ bits -- */
@@ -391,7 +391,11 @@ export function partDetail(state, id) {
   // saying it twice makes the reader check whether they differ.
   add('Reorder at', part.reorderAt);
   add('Part number', part.partNumber, 'mono');
-  add('Buy from', part.purchasedFrom);
+  // "Buy from" is a free field: a shop name is a fact, a link is a thing to
+  // press. Only a real http(s) address becomes the chip — safeHref rejects a
+  // javascript: url — and a shop name stays a row like the others.
+  const buy = asLink(part.purchasedFrom);
+  if (part.purchasedFrom && !buy) add('Buy from', part.purchasedFrom);
 
   return html`<div class="scroll"><div class="pad">
     ${raw(crumb('Parts', part.name))}
@@ -406,11 +410,12 @@ export function partDetail(state, id) {
       <div class="row stockrow">
         <div class="qty" data-tone="${tone}">${part.quantity}</div>
         <div class="body">
-          <!-- The breadcrumb directly above already names the part. -->
-          <div class="title">${raw(
+          <div class="title">${part.name}</div>
+          <!-- The count is the figure in the chip beside this; the words say
+               what it means. -->
+          <div class="sub"><span class="txt">${raw(
             tone === 'out' ? 'None left' : tone === 'low' ? 'Running low' : 'In stock'
-          )}</div>
-          <div class="sub"><span class="txt">${part.quantity} on the shelf</span></div>
+          )}</span></div>
         </div>
         <div class="stepper">
           <button class="iconbtn" data-act="stock" data-id="${part.id}" data-delta="-1"
@@ -419,8 +424,11 @@ export function partDetail(state, id) {
             aria-label="One more ${part.name}">${raw(icon('plus', 16))}</button>
         </div>
       </div>
-      ${raw(facts.length ? `<dl class="kv">${facts.join('')}</dl>` : '')}
-      <div class="editnote">${raw(icon('edit', 13))}<span>Tap to edit</span></div>
+      ${raw(facts.length || buy ? `<div class="factrow">
+        ${facts.length ? `<dl class="kv">${facts.join('')}</dl>` : '<div class="kv"></div>'}
+        ${buy ? `<a class="chip" href="${esc(buy)}"
+          target="_blank" rel="noopener noreferrer">${icon('link', 14)}Buy</a>` : ''}
+      </div>` : '')}
     </div>
     ${raw(part.notes ? `<div class="label">Notes</div><div class="card"><div class="note">${esc(part.notes)}</div></div>` : '')}
 

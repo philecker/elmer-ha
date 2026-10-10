@@ -154,6 +154,25 @@ export function safeHref(input) {
   return /^(https?|mailto|tel):/i.test(v) ? v : null;
 }
 
+/**
+ * A safe href, but only when the value actually looks like a web address.
+ *
+ * safeHref is deliberately forgiving: normalizeUrl puts https:// in front of
+ * anything, which is right for a field whose whole purpose is a link. It is
+ * wrong for deciding whether free text *is* one — "Home Depot" came back as
+ * https://Home Depot and a shop name rendered as a button to press. This one
+ * wants an explicit http(s) scheme, or something domain-shaped with no spaces
+ * in it, and returns null for the rest so the caller can show it as text.
+ */
+export function asLink(value) {
+  const v = String(value || '').trim();
+  if (!v || /\s/.test(v)) return null;
+  const scheme = /^https?:\/\//i.test(v);
+  const domainish = /^[\w-]+(\.[\w-]+)+([/?#:]|$)/.test(v);
+  if (!scheme && !domainish) return null;
+  return safeHref(v);
+}
+
 export function linkLabel(link) {
   if (link.label && link.label.trim()) return link.label.trim();
   try {
