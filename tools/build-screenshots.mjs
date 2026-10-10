@@ -79,56 +79,55 @@ async function shot(page, name) {
 // Only clear the files this script owns. images/ also holds the wordmark that
 // build-brand.mjs puts there, and emptying the whole folder meant running these
 // two in the wrong order silently deleted it.
+// Every phone screen is captured in both themes from one sequence, so a light
+// shot and its dark twin are always the same screen in the same state. They
+// used to be captured separately and only Routines had a dark counterpart.
+const SCREENS = ['routines', 'equipment', 'parts', 'history', 'settings', 'log-service'];
 const OWNED = [
-  'routines.png', 'equipment.png', 'parts.png', 'history.png', 'settings.png',
-  'log-service.png', 'routines-dark.png', 'desktop.png', 'desktop-dark.png',
+  ...SCREENS.map((n) => `${n}.png`),
+  ...SCREENS.map((n) => `${n}-dark.png`),
+  'desktop.png', 'desktop-dark.png',
 ];
 fs.mkdirSync(OUT, { recursive: true });
 for (const name of OWNED) fs.rmSync(path.join(OUT, name), { force: true });
 
-/* ---------------------------------------------------------------- phone -- */
-{
-  const { ctx, page } = await open({ viewport: PHONE });
-  await shot(page, 'routines.png');
+/** The same walk through the app, in whichever theme is asked for. */
+async function phoneScreens(dark) {
+  const suffix = dark ? '-dark' : '';
+  const { ctx, page } = await open({ viewport: PHONE, dark });
+
+  await shot(page, `routines${suffix}.png`);
 
   await page.click('.tab[data-value="equipment"]');
   await page.click('.row[data-id="eq1"]');
-  await shot(page, 'equipment.png');
+  await shot(page, `equipment${suffix}.png`);
 
   await page.click('[data-act="back"]');
   await page.click('.tab[data-value="parts"]');
-  await shot(page, 'parts.png');
+  await shot(page, `parts${suffix}.png`);
 
   await page.click('.tab[data-value="history"]');
-  await shot(page, 'history.png');
+  await shot(page, `history${suffix}.png`);
 
   await page.click('.tab[data-value="settings"]');
-  await shot(page, 'settings.png');
+  await shot(page, `settings${suffix}.png`);
 
   // The sheet, which is where most of the typing happens.
   await page.click('.tab[data-value="routines"]');
   await page.click('.row[data-id="t1"]');
   await page.waitForSelector('.sheet');
-  await shot(page, 'log-service.png');
+  await shot(page, `log-service${suffix}.png`);
+
   await ctx.close();
 }
 
-/* ----------------------------------------------------------------- dark -- */
-{
-  const { ctx, page } = await open({ viewport: PHONE, dark: true });
-  await shot(page, 'routines-dark.png');
-  await ctx.close();
-}
+await phoneScreens(false);
+await phoneScreens(true);
 
 /* -------------------------------------------------------------- desktop -- */
-{
-  const { ctx, page } = await open({ viewport: DESKTOP, narrow: false });
-  await shot(page, 'desktop.png');
-  await ctx.close();
-}
-{
-  const { ctx, page } = await open({ viewport: DESKTOP, narrow: false, dark: true });
-  await shot(page, 'desktop-dark.png');
+for (const dark of [false, true]) {
+  const { ctx, page } = await open({ viewport: DESKTOP, narrow: false, dark });
+  await shot(page, `desktop${dark ? '-dark' : ''}.png`);
   await ctx.close();
 }
 

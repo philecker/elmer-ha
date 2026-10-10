@@ -1,7 +1,4 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/dark_logo.png">
-  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/logo.png" alt="Elmer" height="48">
-</picture>
+<img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/readme_logo.png" alt="Elmer" height="48">
 
 [![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=philecker&repository=elmer-ha&category=integration)
 
@@ -46,9 +43,9 @@ Tap targets clear 44px and safe-area insets are honoured, so it works held in
 one hand.
 
 <p>
-  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/routines-dark.png" alt="The same screen on a dark theme" width="250">
-  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/log-service.png" alt="Logging a service, with the parts it uses" width="250">
-  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/settings.png" alt="Settings, including backups" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/routines-dark.png" alt="The Routines screen on a dark theme" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/log-service-dark.png" alt="Logging a service, with the parts it uses" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/settings-dark.png" alt="Settings, including backups" width="250">
 </p>
 
 On a wider screen the same layout stretches; nothing is rearranged.
@@ -315,11 +312,11 @@ Elmer is built and maintained by **Phil Ecker**. It is free and open source,
 and everything it records stays on your own Home Assistant — no account, no
 tracking, nothing sent anywhere.
 
+Bug reports and ideas are welcome, over on
+[the issue tracker](https://github.com/philecker/elmer-ha/issues).
+
 If it has saved you a forgotten filter change or two, you are very welcome to
 [buy me a coffee](https://buymeacoffee.com/philecker).
-
-Bug reports and ideas are just as welcome, over on
-[the issue tracker](https://github.com/philecker/elmer-ha/issues).
 
 ---
 

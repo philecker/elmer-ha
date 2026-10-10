@@ -1906,6 +1906,10 @@ async function main() {
     };
   });
   check('the brand sits on the content edge', headAligned.brandToContent, 0);
+  check('the wordmark is nudged down against the mark', await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return getComputedStyle(root.querySelector('.brand .word')).paddingTop;
+  }), '3px');
   check('and the add button on the other one', headAligned.addToContent, 0);
 
   // A count sitting on top of its own label is the kind of thing only a

@@ -55,6 +55,17 @@ const BOX = '1.62 2.92 20.73 17.62';
 const LIGHT = { tile: '#0f5c4e', glyph: '#f4f7f5', ink: '#16211e' };
 const DARK = { tile: '#4fbfa3', glyph: '#07251e', ink: '#e9efec' };
 
+// One logo that works on a light page and a dark one, for the README.
+//
+// A <picture> with a prefers-color-scheme source is the usual answer, and it
+// is what the README used to do — but HACS renders the same README in its own
+// frontend, which does not support <picture> and printed the raw <source> tag
+// as text across the top of the page. So: a single file, in a mid-tone that
+// carries on both. #1f8a73 is 4.25:1 on white and 4.45:1 on GitHub's dark,
+// where the dark-ink wordmark was 2.4:1 and effectively invisible. The
+// toolbox and the word share it, so the mark reads as one thing.
+const UNIVERSAL = { tile: '#1f8a73', glyph: '#ffffff', ink: '#1f8a73' };
+
 /**
  * Stroke weight for a given rendered size.
  *
@@ -150,7 +161,7 @@ for (const [name, theme] of [['icon', LIGHT], ['dark_icon', DARK]]) {
   }
 }
 
-for (const [name, theme] of [['logo', LIGHT], ['dark_logo', DARK]]) {
+for (const [name, theme] of [['logo', LIGHT], ['dark_logo', DARK], ['readme_logo', UNIVERSAL]]) {
   for (const [suffix, h] of [['', 256], ['@2x', 512]]) {
     const width = await measureLogo(page, h, theme);
     const svg = logoSvg(h, theme).replace(
@@ -168,7 +179,7 @@ for (const [name, theme] of [['logo', LIGHT], ['dark_logo', DARK]]) {
 // folder stays purely what Home Assistant consumes.
 const images = path.join(ROOT, 'images');
 fs.mkdirSync(images, { recursive: true });
-for (const name of ['logo.png', 'dark_logo.png']) {
+for (const name of ['logo.png', 'dark_logo.png', 'readme_logo.png']) {
   fs.copyFileSync(path.join(OUT, name), path.join(images, name));
 }
 
@@ -179,3 +190,10 @@ for (const [file, size] of made) {
   console.log(`  ${file.padEnd(18)} ${size.padEnd(10)} ${(bytes / 1024).toFixed(1)} KB`);
 }
 console.log(`\n${made.length} files in custom_components/elmer/brand/`);
+
+// The universal logo is for the README alone; Home Assistant consumes the
+// light and dark pair, so it must not be left in the brand folder. Last,
+// because the summary above still wants to stat what it made.
+for (const name of ['readme_logo.png', 'readme_logo@2x.png']) {
+  fs.rmSync(path.join(OUT, name), { force: true });
+}

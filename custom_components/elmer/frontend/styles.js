@@ -244,6 +244,10 @@ export const CSS = `
   letter-spacing: 0.1em;
   color: var(--ink);
   transform: translateY(0.5px);
+  /* Sits the word down against the toolbox beside it. Unscaled: it is an
+     optical nudge against a fixed mark, not a measurement that should grow
+     with the type. */
+  padding-top: 3px;
 }
 /* On a detail screen the title replaces the wordmark; it is a name, not a mark. */
 .brand .title {

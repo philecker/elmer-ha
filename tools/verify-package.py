@@ -200,14 +200,32 @@ def main() -> int:
             f"{len(unsized)} without: {[t[:70] for t in unsized]}",
         )
 
-        # The wordmark is dark ink, so on a dark README it disappears. The
-        # dark variant has to be offered beside it.
-        if "images/logo.png" in text:
-            check(
-                "the logo offers its dark variant too",
-                "images/dark_logo.png" in text and "prefers-color-scheme: dark" in text,
-                "a <picture> with a dark source is what makes it legible on GitHub's dark theme",
-            )
+        # Every screenshot exists in both themes. They used to be captured
+        # by separate blocks and only Routines had a dark counterpart, so the
+        # two could drift to different screens without anything noticing.
+        images_dir = os.path.join(ROOT, "images")
+        if os.path.isdir(images_dir):
+            shots = [
+                f[:-4] for f in os.listdir(images_dir)
+                if f.endswith(".png") and not f.endswith("-dark.png") and "logo" not in f
+            ]
+            missing = [n for n in sorted(shots)
+                       if not os.path.exists(os.path.join(images_dir, f"{n}-dark.png"))]
+            check("every screenshot has a dark counterpart", not missing, str(missing))
+
+        # No <picture>. HACS renders this same README in its own frontend,
+        # which does not support it and printed the raw <source> tag as text
+        # across the top of the page. One logo in a mid-tone carries on a
+        # light page and a dark one without needing it.
+        check(
+            "the README uses no <picture> (HACS prints the tags as text)",
+            "<picture" not in text and "prefers-color-scheme" not in text,
+        )
+        check(
+            "and the logo is the one that reads on either background",
+            "images/readme_logo.png" in text,
+            "images/logo.png is dark ink, which vanishes on a dark page",
+        )
 
         # The My Home Assistant button has the owner and repository baked
         # into its query string, so renaming either one leaves a button that
