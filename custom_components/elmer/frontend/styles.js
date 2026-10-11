@@ -1425,10 +1425,27 @@ a.btn { text-decoration: none; }
   .two:has(input[type="date"]) { grid-template-columns: 1fr; }
 }
 
-/* The reader's own preference, multiplied on top of whatever the width chose. */
+/* The reader's own preference, multiplied on top of whatever the width chose.
+   Two of them: a phone at arm's length and a monitor at reading distance are
+   not the same reading task, and --ui-base alone only guesses at the
+   difference. data-text is the wide one and applies at every width;
+   data-text-narrow overrides it below the breakpoint.
+
+   Decided here rather than in script, with the same breakpoint --ui-base uses,
+   so the two can never disagree and dragging a window across the breakpoint
+   changes both at once with nothing to listen for. The panel sets both
+   attributes always, "default" included, because an absent attribute would
+   mean the wide rule kept winning on a phone. */
 :host([data-text="small"]) { --ui-user: 0.92; }
 :host([data-text="large"]) { --ui-user: 1.12; }
 :host([data-text="larger"]) { --ui-user: 1.26; }
+
+@media (max-width: 759px) {
+  :host([data-text-narrow="default"]) { --ui-user: 1; }
+  :host([data-text-narrow="small"]) { --ui-user: 0.92; }
+  :host([data-text-narrow="large"]) { --ui-user: 1.12; }
+  :host([data-text-narrow="larger"]) { --ui-user: 1.26; }
+}
 
 @media (min-width: 760px) {
   :host { --header-h: calc(56px * var(--ui-scale)); }

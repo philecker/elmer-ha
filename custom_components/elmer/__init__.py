@@ -21,6 +21,7 @@ from .const import (
     PANEL_ICON,
     PANEL_TITLE,
     PANEL_URL,
+    SIDEBAR_ICON_FILE,
 )
 from .services import async_setup_services, async_unload_services
 from .store import ElmerStore
@@ -93,6 +94,17 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     )
 
     version = _integration_version()
+
+    # The sidebar takes an icon name, never an image, so showing Elmer's own
+    # mark there means registering an icon set the name can point at. That has
+    # to happen on every page, since the sidebar is drawn whether or not
+    # anybody opens the panel — which is what add_extra_js_url is for, and it
+    # is the one thing Elmer puts on pages that are nothing to do with it. The
+    # file is a couple of kilobytes and holds one path.
+    frontend.add_extra_js_url(
+        hass, f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}?v={version}"
+    )
+
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL,
@@ -129,3 +141,15 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
         frontend.async_remove_panel(hass, PANEL_URL)
     except Exception:  # noqa: BLE001
         _LOGGER.debug("could not remove the Elmer panel; it will go on restart", exc_info=True)
+
+    # The icon set is the one thing Elmer loads on pages that are nothing to do
+    # with it, so it should stop being loaded the moment Elmer is gone rather
+    # than waiting for a restart. Removed by the same URL it was added under,
+    # version and all. Wrapped for the same reason as the panel above.
+    try:
+        version = _integration_version()
+        frontend.remove_extra_js_url(
+            hass, f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}?v={version}"
+        )
+    except Exception:  # noqa: BLE001
+        _LOGGER.debug("could not unregister the Elmer icon set", exc_info=True)

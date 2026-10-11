@@ -149,7 +149,7 @@ const SEED = {
       doneOn: ago(470), notes: 'A lot of sediment. Worth doing every year.',
       cost: '', recordedAt: Date.now() - 4e10, previousLastDone: null, usedParts: [] },
   ],
-  settings: { theme: 'system', showLocations: true, dueSoonDays: 14, notifyOverdue: true },
+  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', dueSoonDays: 14, notifyOverdue: true },
 };
 
 /* ---------------------------------------------------------------- store -- */
@@ -358,7 +358,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.0.6' } };
+panel.panel = { config: { version: '1.1.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

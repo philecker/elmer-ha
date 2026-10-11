@@ -152,17 +152,6 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
     }
 
 
-def overdue_tasks(data: dict) -> list[dict]:
-    """Everything past its due date, most overdue first."""
-    if not data or not isinstance(data.get("tasks"), list):
-        return []
-    soon = (data.get("settings") or {}).get("dueSoonDays") or DUE_SOON_DAYS
-    rows = [{"task": t, "state": task_state(t, soon)} for t in data["tasks"]]
-    rows = [r for r in rows if r["state"]["status"] == "overdue"]
-    rows.sort(key=lambda r: r["state"]["daysLeft"])
-    return rows
-
-
 def sort_key(row: dict):
     """Urgency order, matching sortByUrgency in the renderer.
 

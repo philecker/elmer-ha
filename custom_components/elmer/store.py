@@ -33,7 +33,11 @@ IS_EMAIL = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]{2,}$")
 DEFAULT_SETTINGS: dict[str, Any] = {
     "theme": "system",
     "showLocations": True,
+    # Two of them: a phone at arm's length and a monitor at reading distance
+    # are different reading tasks. "textSize" is the wide one and is the older
+    # key, so a file written before the split still means what it said.
     "textSize": "default",
+    "textSizeNarrow": "default",
     "dueSoonDays": DEFAULT_DUE_SOON_DAYS,
     # Home Assistant handles delivery, so notification settings from an older
     # file are not carried over. They stay in the data untouched if an import
@@ -141,6 +145,11 @@ def normalize(raw: Any) -> dict[str, Any]:
     if isinstance(raw.get("settings"), dict):
         settings.update(raw["settings"])
     settings["dueSoonDays"] = max(0, _int(settings.get("dueSoonDays"), DEFAULT_DUE_SOON_DAYS))
+    # A file from before the two sizes split carries one of them. Whatever it
+    # chose was chosen on some screen and meant for every screen, so it applies
+    # to both rather than leaving the phone silently back at Default.
+    if not isinstance(raw.get("settings"), dict) or "textSizeNarrow" not in raw["settings"]:
+        settings["textSizeNarrow"] = settings.get("textSize") or "default"
 
     return {
         "version": STORAGE_VERSION,

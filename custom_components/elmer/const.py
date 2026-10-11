@@ -8,13 +8,16 @@ STORAGE_KEY = "elmer"
 
 PANEL_URL = "elmer"
 PANEL_TITLE = "Elmer"
-PANEL_ICON = "mdi:toolbox-outline"
+# Elmer's own mark, not an MDI lookalike, so the sidebar and the panel header
+# are the same drawing. The set it names is registered by sidebar-icon.js.
+PANEL_ICON = "elmer:toolbox"
+# Loaded on every Home Assistant page, because the sidebar is drawn long
+# before anybody opens the panel.
+SIDEBAR_ICON_FILE = "sidebar-icon.js"
 # Served from /elmer_frontend/..., versioned so a browser never holds a stale
 # panel after an update.
 FRONTEND_URL = "/elmer_frontend"
 PANEL_COMPONENT = "elmer-panel"
-
-SIGNAL_UPDATED = "elmer_updated"
 
 DEFAULT_DUE_SOON_DAYS = 14
 

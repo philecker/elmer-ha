@@ -417,11 +417,24 @@ class ElmerPanel extends HTMLElement {
    * somebody can pin Home Assistant to dark while their phone is in light mode,
    * and the panel should match the dashboard around it, not the OS.
    */
-  /** The reader's text-size preference, as an attribute the stylesheet reads. */
+  /**
+   * The reader's text-size preferences, as attributes the stylesheet reads.
+   *
+   * Two of them, one for a wide screen and one for a narrow one. Which applies
+   * is settled in CSS, at the same breakpoint --ui-base uses, so this does not
+   * have to know how wide the window is or notice when it changes.
+   *
+   * The narrow one is always set, "default" included: the wide rule applies at
+   * every width, so an absent narrow attribute would leave it in force on a
+   * phone and the phone setting would appear to do nothing whenever the
+   * desktop one was not Default.
+   */
   _applyTextSize() {
-    const pref = (this.data && this.data.settings && this.data.settings.textSize) || 'default';
-    if (pref === 'default') this.removeAttribute('data-text');
-    else this.setAttribute('data-text', pref);
+    const s = (this.data && this.data.settings) || {};
+    const wide = s.textSize || 'default';
+    if (wide === 'default') this.removeAttribute('data-text');
+    else this.setAttribute('data-text', wide);
+    this.setAttribute('data-text-narrow', s.textSizeNarrow || wide);
   }
 
   _applyTheme() {
@@ -850,10 +863,11 @@ class ElmerPanel extends HTMLElement {
       // switch feels like a switch.
       this.data.settings.theme = el.value;
       this._applyTheme();
-    } else if (act === 'set-text') {
-      this._apply([{ kind: 'settings.put', payload: { textSize: el.value } }]);
+    } else if (act === 'set-text' || act === 'set-text-narrow') {
+      const key = act === 'set-text' ? 'textSize' : 'textSizeNarrow';
+      this._apply([{ kind: 'settings.put', payload: { [key]: el.value } }]);
       // Repaint at the new size immediately rather than after the round trip.
-      this.data.settings.textSize = el.value;
+      this.data.settings[key] = el.value;
       this._applyTextSize();
     } else if (act === 'pick-part') {
       this._pickPart(el);

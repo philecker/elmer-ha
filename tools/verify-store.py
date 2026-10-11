@@ -143,6 +143,20 @@ async def main() -> int:
     # a field the panel adds reaches the file without the store knowing it
     # exists. That is only true for as long as nobody turns this into a
     # whitelist, which is what this pins down.
+    # The one text size became two. Whatever an older file chose was chosen on
+    # some screen and meant for every screen, so it has to apply to both —
+    # otherwise upgrading silently shrinks the phone back to Default.
+    one_size = store_mod.normalize({"settings": {"textSize": "larger"}})["settings"]
+    check("an older file's text size reaches the wide screen", one_size["textSize"], "larger")
+    check("and the narrow one too", one_size["textSizeNarrow"], "larger")
+    both = store_mod.normalize(
+        {"settings": {"textSize": "larger", "textSizeNarrow": "small"}}
+    )["settings"]
+    check("a file that already has both keeps them apart", both["textSizeNarrow"], "small")
+    check("without disturbing the other", both["textSize"], "larger")
+    fresh = store_mod.normalize({})["settings"]
+    check("and a file with neither starts at the default", fresh["textSizeNarrow"], "default")
+
     check("a purchase date survives a round trip", n["equipment"][2]["purchasedOn"], "2024-05-02")
     check("so does an order number", n["equipment"][2]["orderNumber"], "WO-4471-B")
     check("settings defaulted", n["settings"]["dueSoonDays"], 14)

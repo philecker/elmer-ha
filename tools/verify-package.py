@@ -16,6 +16,7 @@ import os
 import re
 import urllib.parse
 import struct
+import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -273,6 +274,54 @@ def main() -> int:
             if len(parts) == 4 and not os.path.exists(os.path.join(ROOT, parts[3])):
                 broken.append(url)
         check("every image the README links to exists in the repo", not broken, "; ".join(broken))
+
+    # --- the sidebar icon ------------------------------------------------
+    # Home Assistant's sidebar takes an icon name, never an image, so Elmer's
+    # own mark gets there through a custom icon set: one filled path, derived
+    # from the stroked mark the panel draws. Derived is the risk — the mark can
+    # be edited without regenerating this, and the sidebar would then go on
+    # showing the old drawing with nothing to say so.
+    sidebar = os.path.join(PKG, "frontend", "sidebar-icon.js")
+    check("the sidebar icon ships with the integration", os.path.exists(sidebar))
+    if os.path.exists(sidebar):
+        with open(sidebar, encoding="utf-8") as fh:
+            js = fh.read()
+        with open(os.path.join(PKG, "const.py"), encoding="utf-8") as fh:
+            const = fh.read()
+
+        check("it registers an icon set", "window.customIconsets" in js)
+        # It is loaded on every Home Assistant page, including pages that have
+        # nothing to do with Elmer, so it declares an icon and does nothing
+        # else. Anything reaching for the document or the network does not
+        # belong in a file with that reach.
+        check(
+            "and does nothing else on pages that are not Elmer's",
+            not any(t in js for t in ("document.", "fetch(", "localStorage", "addEventListener")),
+        )
+
+        setname = re.search(r"window\.customIconsets\.(\w+)", js)
+        named = re.search(r'PANEL_ICON\s*=\s*"([^"]+)"', const)
+        check("the panel names an icon from a set", bool(setname and named and ":" in named.group(1)))
+        if setname and named and ":" in named.group(1):
+            check(
+                "and it is the set this file registers",
+                named.group(1).split(":")[0] == setname.group(1),
+                f"{named.group(1)} vs {setname.group(1)}",
+            )
+
+        # The one that matters: rebuild from the mark and compare.
+        built = subprocess.run(
+            ["node", os.path.join(ROOT, "tools", "build-sidebar-icon.mjs"), "--check"],
+            capture_output=True,
+            text=True,
+            cwd=ROOT,
+        )
+        check(
+            "and it is still the mark the panel draws",
+            built.returncode == 0,
+            (built.stderr or built.stdout).strip(),
+        )
+
 
     return report()
 

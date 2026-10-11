@@ -148,6 +148,17 @@ async function main() {
   // reaches inside the panel. Kept as a function so the intent stays readable.
   const el = (sel) => sel;
 
+  // There are two text-size settings, one for a wide window and one for a
+  // narrow one, and CSS decides which governs by the width. So a test has to
+  // drive the one that applies to the window it is running in — driving the
+  // other is a valid thing for a person to do and correctly changes nothing
+  // here, which is a confusing way for an unrelated assertion to fail.
+  const textKey = (p) => ((p.viewportSize().width || 0) < 760 ? 'textSizeNarrow' : 'textSize');
+  const setTextSize = async (p, value) => {
+    const act = textKey(p) === 'textSizeNarrow' ? 'set-text-narrow' : 'set-text';
+    await p.selectOption(`select[data-act="${act}"]`, value);
+  };
+
   // Sheets and toasts animate in over ~220ms. Screenshotting the instant a
   // selector appears catches them half-transparent, which reads as a rendering
   // bug in the review and isn't one.
@@ -1628,7 +1639,7 @@ async function main() {
 
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(60);
-  await page.selectOption(el('select[data-act="set-text"]'), 'larger');
+  await setTextSize(page, 'larger');
   await page.waitForTimeout(160);
   await page.click(el('.tab[data-value="routines"]'));
   await page.waitForTimeout(80);
@@ -1652,10 +1663,10 @@ async function main() {
   // Back to default for the screens that follow.
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(60);
-  await page.selectOption(el('select[data-act="set-text"]'), 'default');
+  await setTextSize(page, 'default');
   await page.waitForTimeout(160);
   check('the preference round-trips',
-    await page.evaluate(() => window.__snapshot().settings.textSize), 'default');
+    await page.evaluate((k) => window.__snapshot().settings[k], textKey(page)), 'default');
 
   // --- the tab row sits one step above the rest --------------------------
   // The tabs start at the size the "large" setting used to give them, and
@@ -1667,7 +1678,7 @@ async function main() {
   for (const size of ['small', 'default', 'large', 'larger']) {
     await page.click(el('.tab[data-value="settings"]'));
     await page.waitForTimeout(70);
-    await page.selectOption(el('select[data-act="set-text"]'), size);
+    await setTextSize(page, size);
     await page.waitForTimeout(160);
     await page.click(el('.tab[data-value="routines"]'));
     await page.waitForTimeout(90);
@@ -1718,7 +1729,7 @@ async function main() {
 
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(70);
-  await page.selectOption(el('select[data-act="set-text"]'), 'default');
+  await setTextSize(page, 'default');
   await page.waitForTimeout(160);
 
   const sections = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
@@ -2151,6 +2162,76 @@ async function main() {
   check('rooms read alphabetically with the unplaced last', placed,
     ['Cellar', 'Hallway', 'Workshop', 'Unassigned']);
 
+  await ctx.close();
+
+  /* ------------------------------- one text size per reading distance -- */
+  // A phone at arm's length and a monitor at reading distance are different
+  // reading tasks, and --ui-base alone only guesses at the difference. Both
+  // settings live in Home Assistant, so either can be set from either kind of
+  // screen — the phone can be fixed from the sofa — and the width decides
+  // which one is in force.
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+
+  const titleSize = async () => {
+    await page.click(el('.tab[data-value="routines"]'));
+    await page.waitForTimeout(90);
+    const n = await page.evaluate(() => parseFloat(getComputedStyle(
+      document.querySelector('elmer-panel').shadowRoot.querySelector('.row .title')).fontSize));
+    await page.click(el('.tab[data-value="settings"]'));
+    await page.waitForTimeout(90);
+    return n;
+  };
+
+  const phoneBase = await titleSize();
+  // The desktop setting, changed from a phone. It is a real thing to want to
+  // do, and the point of keeping both in Home Assistant rather than in the
+  // browser — but it must not touch the screen in front of you.
+  await page.selectOption(el('select[data-act="set-text"]'), 'larger');
+  await page.waitForTimeout(160);
+  check('the desktop size does not change a phone', await titleSize(), phoneBase);
+  check('though it was saved',
+    await page.evaluate(() => window.__snapshot().settings.textSize), 'larger');
+
+  await page.selectOption(el('select[data-act="set-text-narrow"]'), 'larger');
+  await page.waitForTimeout(160);
+  const phoneLarger = await titleSize();
+  ok('the phone size does', phoneLarger > phoneBase, `${phoneBase} -> ${phoneLarger}`);
+
+  // Back down on the phone only. The desktop is still Larger, and the two
+  // must not be reading the same stored value.
+  await page.selectOption(el('select[data-act="set-text-narrow"]'), 'small');
+  await page.waitForTimeout(160);
+  const phoneSmall = await titleSize();
+  ok('and the two are independent', phoneSmall < phoneBase, `${phoneBase} -> ${phoneSmall}`);
+  check('with the desktop one untouched',
+    await page.evaluate(() => window.__snapshot().settings.textSize), 'larger');
+  await ctx.close();
+
+  // The same pair of settings seen from a desktop. The harness starts each
+  // page from the seed, so they are set again here rather than carried over.
+  ({ ctx, page } = await open({ narrow: false, viewport: DESKTOP }));
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  await page.selectOption(el('select[data-act="set-text"]'), 'larger');
+  await page.waitForTimeout(90);
+  await page.selectOption(el('select[data-act="set-text-narrow"]'), 'small');
+  await page.waitForTimeout(160);
+  const onDesktop = await page.evaluate(() => parseFloat(
+    getComputedStyle(document.querySelector('elmer-panel')).getPropertyValue('--ui-user')));
+  // 1.26 is Larger. Reading the multiplier rather than a rendered size says
+  // which of the two settings won, where a font size only says it changed.
+  check('a wide window takes the desktop size, not the phone one', onDesktop, 1.26);
+
+  // Nothing is re-read or re-decided when the width changes: the breakpoint
+  // is the whole mechanism, so dragging the window narrow is all it takes.
+  await page.setViewportSize({ width: 700, height: DESKTOP.height });
+  await page.waitForTimeout(200);
+  const afterDrag = await page.evaluate(() => parseFloat(
+    getComputedStyle(document.querySelector('elmer-panel')).getPropertyValue('--ui-user')));
+  check('and dragging it narrow hands over to the phone one, with no reload',
+    afterDrag, 0.92);
   await ctx.close();
 
   /* ------------------------------------------- a fresh install, empty -- */

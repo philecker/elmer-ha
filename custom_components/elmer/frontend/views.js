@@ -697,6 +697,7 @@ export function groupForm(state, field, value) {
 export function settingsView(state) {
   const s = state.settings;
   const themes = [['system', 'Follow Home Assistant'], ['light', 'Light'], ['dark', 'Dark']];
+  const SIZES = [['small', 'Smaller'], ['default', 'Default'], ['large', 'Large'], ['larger', 'Larger']];
   const counts = state.computed.counts;
 
   return html`<div class="scroll"><div class="pad">
@@ -709,13 +710,25 @@ export function settingsView(state) {
         </select>
         <div class="hint">Following Home Assistant means Elmer turns dark when the rest of your dashboard does.</div>
       </div>
+    <!-- One size per reading distance. Both are editable from either kind of
+         screen, so the phone can be fixed from the sofa without going and
+         finding the phone. -->
+    <div class="two">
       <div class="field">
-        <label for="textsize">Text size</label>
+        <label for="textsize">Desktop size</label>
         <select id="textsize" data-act="set-text">
-          ${[['small', 'Smaller'], ['default', 'Default'], ['large', 'Large'], ['larger', 'Larger']]
-            .map(([v, l]) => html`<option value="${v}"${raw((s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
+          ${SIZES.map(([v, l]) => html`<option value="${v}"${raw((s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
         </select>
-        <div class="hint">Type and icons are already a little larger on a phone than on a desktop, since a phone is held further away. This shifts both.</div>
+      </div>
+      <div class="field">
+        <label for="textsize-n">Mobile size</label>
+        <select id="textsize-n" data-act="set-text-narrow">
+          ${SIZES.map(([v, l]) => html`<option value="${v}"${raw((s.textSizeNarrow || s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
+        </select>
+      </div>
+    </div>
+      <div class="field">
+        <div class="hint">Type and icons are already a little larger on a narrow screen than on a wide one, since a phone is held further away. These shift each further. Which applies follows the width of the window, so a desktop browser dragged narrow reads as a phone.</div>
       </div>
       <div class="field">
         <label for="locs">Show locations</label>
