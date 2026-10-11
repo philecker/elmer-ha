@@ -2164,6 +2164,88 @@ async function main() {
 
   await ctx.close();
 
+  /* ---------------------------------- small text has to be readable --- */
+  // The smallest text on the screen was also the faintest: the line under a
+  // routine's name measured 2.83:1 against the card, where 4.5:1 is what
+  // normal-size text needs. It came out that way because Elmer took Home
+  // Assistant's --secondary-text-color as given, and a grey chosen for HA's
+  // own layout is only matched against that layout — the same reasoning the
+  // modal border already uses. Mixed from the theme's ink instead, it still
+  // follows whatever theme is running but cannot land faint.
+  //
+  // Every width and both themes, because the greys are shared and a floor
+  // that only holds on a phone is not a floor.
+  for (const [label, narrow, viewport] of [['a phone', true, PHONE], ['a desktop', false, DESKTOP]]) {
+    for (const dark of [false, true]) {
+      ({ ctx, page } = await open({ narrow, dark, viewport }));
+      await page.waitForTimeout(160);
+      const text = await page.evaluate(() => {
+        const root = document.querySelector('elmer-panel').shadowRoot;
+        // The colour behind a run of text is whatever actually paints, which
+        // is rarely the element itself — .txt sits on .sub sits on .row,
+        // and only the card has a background of its own.
+        const behind = (n) => {
+          let el2 = n;
+          while (el2) {
+            const c = getComputedStyle(el2).backgroundColor;
+            if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
+            el2 = el2.parentElement || (el2.getRootNode() && el2.getRootNode().host);
+          }
+          return null;
+        };
+        const out = [];
+        for (const [sel, name] of [
+          ['.row .title', 'a routine name'],
+          ['.row .sub .txt', 'the line under it'],
+          ['.label', 'a section heading'],
+          ['.tab:not([aria-selected="true"])', 'a tab not being looked at'],
+        ]) {
+          const n = root.querySelector(sel);
+          if (!n) continue;
+          const cs = getComputedStyle(n);
+          out.push({ name, color: cs.color, bg: behind(n), size: parseFloat(cs.fontSize) });
+        }
+        return out;
+      });
+      ok(`${label}: there is text to measure`, text.length === 4, JSON.stringify(text.map((t) => t.name)));
+      for (const t of text) {
+        const r = contrastRatio(t.color, t.bg);
+        ok(`${label}, ${dark ? 'dark' : 'light'}: ${t.name} is legible against what is behind it`,
+          r >= 4.5, `${r}:1 at ${t.size}px`);
+      }
+      await ctx.close();
+    }
+  }
+
+  // Weight is the other half, and it is a phone-only answer: a phone holds
+  // more CSS pixels per line than a monitor but is read further away and in
+  // worse light, so what gives out is stroke rather than size. The headings
+  // are already bold — a blanket rule here reaches them and thins them, which
+  // is how the first attempt at this made them worse.
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.waitForTimeout(140);
+  const phoneWeights = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const w = (s) => Number(getComputedStyle(root.querySelector(s)).fontWeight);
+    return { sub: w('.row .sub'), label: w('.label'), title: w('.row .title') };
+  });
+  await ctx.close();
+  ({ ctx, page } = await open({ narrow: false, viewport: DESKTOP }));
+  await page.waitForTimeout(140);
+  const deskWeights = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const w = (s) => Number(getComputedStyle(root.querySelector(s)).fontWeight);
+    return { sub: w('.row .sub'), label: w('.label'), title: w('.row .title') };
+  });
+  await ctx.close();
+  ok('the small text carries more weight on a phone than on a desktop',
+    phoneWeights.sub > deskWeights.sub, `${deskWeights.sub} -> ${phoneWeights.sub}`);
+  check('a section heading keeps its own weight there', phoneWeights.label, deskWeights.label);
+  ok('and still outweighs the line it heads', phoneWeights.label > phoneWeights.sub,
+    `${phoneWeights.label} vs ${phoneWeights.sub}`);
+  ok('while a routine name still outweighs its own subtitle',
+    phoneWeights.title > phoneWeights.sub, `${phoneWeights.title} vs ${phoneWeights.sub}`);
+
   /* ------------------------------- one text size per reading distance -- */
   // A phone at arm's length and a monitor at reading distance are different
   // reading tasks, and --ui-base alone only guesses at the difference. Both

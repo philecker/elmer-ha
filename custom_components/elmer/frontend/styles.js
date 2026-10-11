@@ -29,14 +29,26 @@ export const CSS = `
   --surface: var(--card-background-color, #ffffff);
   --surface-2: var(--secondary-background-color, #f8faf9);
   --ink: var(--primary-text-color, #16211e);
-  --ink-2: var(--secondary-text-color, #4a5a56);
   --line: var(--divider-color, #dee5e2);
+
+  /* Secondary text is mixed from the theme's own ink rather than taken from
+     --secondary-text-color, for the same reason the modal border is: a grey
+     that reads well in Home Assistant's own layout is only matched against
+     that layout. Here it lands on 12px lines in a card, and HA's secondary
+     grey measured 2.83:1 against white — well under the 4.5:1 that small
+     text needs, and the faintest thing on the screen was also the smallest.
+     Mixed from --ink it still follows whatever theme is running, and it
+     cannot land faint. Around 6:1 and 5:1, a visible step apart. The two
+     modes differ because contrast is not linear in lightness. */
+  --ink-2: color-mix(in srgb, var(--ink) 70%, var(--surface));
 
   /* No HA equivalent: a subtle fill and a stronger rule, derived from what
      the theme did give us so they track it. */
   --surface-3: color-mix(in srgb, var(--ink) 6%, var(--surface));
   --line-strong: color-mix(in srgb, var(--ink) 20%, var(--surface));
-  --ink-3: color-mix(in srgb, var(--ink-2) 72%, var(--surface));
+  /* Mixed from --ink too, not from --ink-2: fading an already faded colour
+     is what put the section headings at 2.71:1. */
+  --ink-3: color-mix(in srgb, var(--ink) 65%, var(--surface));
 
   /* --- Elmer's own, overridable in a theme ------------------------------ */
   --accent: var(--elmer-accent, #0f5c4e);
@@ -118,8 +130,9 @@ export const CSS = `
   --surface: var(--card-background-color, #181d1c);
   --surface-2: var(--secondary-background-color, #1e2523);
   --ink: var(--primary-text-color, #e9efec);
-  --ink-2: var(--secondary-text-color, #a2b0ac);
   --line: var(--divider-color, #2a3230);
+  --ink-2: color-mix(in srgb, var(--ink) 60%, var(--surface));
+  --ink-3: color-mix(in srgb, var(--ink) 55%, var(--surface));
 
   --accent: var(--elmer-accent, #4fbfa3);
   --accent-hover: var(--elmer-accent-hover, #62d0b4);
@@ -144,7 +157,6 @@ export const CSS = `
   --surface: #ffffff;
   --surface-2: #f8faf9;
   --ink: #16211e;
-  --ink-2: #4a5a56;
   --line: #dee5e2;
   --card-border: var(--line);
 }
@@ -154,8 +166,9 @@ export const CSS = `
   --surface: #181d1c;
   --surface-2: #1e2523;
   --ink: #e9efec;
-  --ink-2: #a2b0ac;
   --line: #2a3230;
+  --ink-2: color-mix(in srgb, var(--ink) 60%, var(--surface));
+  --ink-3: color-mix(in srgb, var(--ink) 55%, var(--surface));
   --card-border: var(--line);
 }
 
@@ -1423,6 +1436,23 @@ a.btn { text-decoration: none; }
      pairs containing one are stacked; the rest stay side by side so the form
      does not become a very long column. */
   .two:has(input[type="date"]) { grid-template-columns: 1fr; }
+
+  /* A shade more weight in the small secondary text. A phone holds more CSS
+     pixels per line than a monitor but is read further away, in worse light
+     and often one-handed, so the thing that gives out first is stroke rather
+     than size — and the lines that give out are the 12px ones under a title.
+     Medium rather than semibold: enough to hold together at a glance without
+     competing with the title it sits beneath, and the titles themselves are
+     left alone so the hierarchy does not flatten.
+
+     Narrow only, deliberately. The desktop reads well as it is, and weight is
+     a matter of how the screen is held rather than a defect to fix; the
+     contrast floor above is the part that applies at every width.
+
+     Only the lines that are set at normal weight. A blanket rule here reaches
+     the section headings, which are bold caps, and quietly thins them — the
+     opposite of the point. */
+  .row .sub, .hint, .note { font-weight: 500; }
 }
 
 /* The reader's own preference, multiplied on top of whatever the width chose.
