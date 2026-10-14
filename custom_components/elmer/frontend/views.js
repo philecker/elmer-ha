@@ -936,7 +936,7 @@ export function settingsView(state) {
         <div class="field">
           <label for="cards"><span class="scope">Desktop</span>Cards per row</label>
           <select id="cards" data-act="set-cards">
-            ${[2, 3, 4].map((n) => html`<option value="${n}"${raw((s.cardsWide || 3) === n ? ' selected' : '')}>${n}</option>`)}
+            ${[2, 3].map((n) => html`<option value="${n}"${raw((s.cardsWide || 3) === n ? ' selected' : '')}>${n}</option>`)}
           </select>
         </div>
         <div class="field">
@@ -947,7 +947,7 @@ export function settingsView(state) {
         </div>
       </div>
       <div class="field">
-        <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. A phone is offered fewer because it has less to give: at four across, a card is about 82px wide.</div>
+        <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. A phone is offered fewer because it has less to give: two cards across a phone are about 175px each.</div>
       </div>
       <!-- Named for where the badge actually appears. Home Assistant gives a
            custom panel's own sidebar row no badge, so this is the nearest
@@ -1425,22 +1425,29 @@ export function logForm(state, taskId) {
       })}
       <div class="hint">Elmer takes these off the shelf. It never takes more than you have.</div>
     </div>` : '')}
-    <div class="btnrow">
-      <button class="btn" data-act="edit-routine" data-id="${task.id}">${raw(icon('edit', 16))}Edit</button>
-      ${raw(task.paused
-        ? `<button class="btn" data-variant="primary" data-act="resume" data-id="${esc(task.id)}">${icon('play', 16)}Resume</button>`
-        : `<button class="btn" data-variant="primary" data-act="save-log" data-id="${esc(task.id)}">${icon('check', 16)}Mark done</button>`)}
-    </div>
-    <!-- Below the buttons rather than among them: pausing is a thing you do
-         rarely and on purpose, and it should not sit where the thumb lands
-         for the thing you do every time. -->
-    <div class="pauserow">
-      ${raw(task.paused
-        ? `<button class="linkbtn" data-act="resume" data-id="${esc(task.id)}">${icon('play', 14)}Resume this routine</button>`
-        : `<button class="linkbtn" data-act="pause" data-id="${esc(task.id)}">${icon('pause', 14)}Pause this routine</button>`)}
-      <div class="hint">${raw(task.paused
-        ? 'It is counting again, and its sensor reports days until due.'
-        : 'Elmer stops counting it: no overdue badge, and its sensor reads unknown so an automation will not fire on it. Its history is kept.')}</div>
+    <!-- Buttons and the pause row are one footer, not two things that happen
+         to be last. Loose, the pause row took the buttons' :last-child and
+         with it the sticky footer and its bottom padding, and making the
+         buttons sticky on their own would then pin them over the pause row
+         rather than above it. -->
+    <div class="sheetfoot">
+      <div class="btnrow">
+        <button class="btn" data-act="edit-routine" data-id="${task.id}">${raw(icon('edit', 16))}Edit</button>
+        ${raw(task.paused
+          ? `<button class="btn" data-variant="primary" data-act="resume" data-id="${esc(task.id)}">${icon('play', 16)}Resume</button>`
+          : `<button class="btn" data-variant="primary" data-act="save-log" data-id="${esc(task.id)}">${icon('check', 16)}Mark done</button>`)}
+      </div>
+      <!-- Below the buttons rather than among them: pausing is a thing you do
+           rarely and on purpose, and it should not sit where the thumb lands
+           for the thing you do every time. -->
+      <div class="pauserow">
+        ${raw(task.paused
+          ? `<button class="linkbtn" data-act="resume" data-id="${esc(task.id)}">${icon('play', 14)}Resume this routine</button>`
+          : `<button class="linkbtn" data-act="pause" data-id="${esc(task.id)}">${icon('pause', 14)}Pause this routine</button>`)}
+        <div class="hint">${raw(task.paused
+          ? 'It is counting again, and its sensor reports days until due.'
+          : 'Elmer stops counting it: no overdue badge, and its sensor reads unknown so an automation will not fire on it. Its history is kept.')}</div>
+      </div>
     </div>`;
 }
 

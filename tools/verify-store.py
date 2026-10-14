@@ -164,7 +164,7 @@ async def main() -> int:
     # many as it could get.
     check("the card counts start at three and two",
           (fresh["cardsWide"], fresh["cardsNarrow"]), (3, 2))
-    for given, want in ((2, 2), (3, 3), (4, 4), (6, 4), (1, 2), (0, 2), ("x", 3), (None, 3)):
+    for given, want in ((2, 2), (3, 3), (4, 3), (6, 3), (1, 2), (0, 2), ("x", 3), (None, 3)):
         got = store_mod.normalize({"settings": {"cardsWide": given}})["settings"]["cardsWide"]
         check(f"a desktop count of {given!r} lands on {want}", got, want)
     for given, want in ((1, 1), (2, 2), (4, 2), (0, 1), ("x", 2)):

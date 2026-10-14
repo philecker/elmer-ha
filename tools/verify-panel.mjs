@@ -2634,6 +2634,30 @@ async function main() {
 
   await page.click(el(`.row[data-id="${wasOverdue.id}"]`));
   await page.waitForSelector(el('.sheet [data-act="pause"]'));
+
+  // The sheet's bottom padding hangs off whatever is last in it. The pause
+  // row went in after the buttons and took their :last-child, which left the
+  // sheet ending flush against the hint and the buttons no longer sticky.
+  // Both come from the footer that wraps the two now.
+  const foot = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const inner = root.querySelector('.sheet .inner');
+    const footer = inner.querySelector(':scope > .sheetfoot');
+    const hint = footer && footer.querySelector('.pauserow .hint');
+    return {
+      footerIsLast: !!footer && footer === inner.lastElementChild,
+      position: footer ? getComputedStyle(footer).position : null,
+      hasButtons: !!(footer && footer.querySelector('.btnrow .btn')),
+      gapUnderHint: hint
+        ? Math.round(inner.getBoundingClientRect().bottom - hint.getBoundingClientRect().bottom)
+        : null,
+    };
+  });
+  check('the sheet ends in one footer', [foot.footerIsLast, foot.hasButtons], [true, true]);
+  check('which is the sticky one', foot.position, 'sticky');
+  ok('and leaves room under the pause note', foot.gapUnderHint >= 12,
+    `${foot.gapUnderHint}px under it`);
+
   await page.click(el('.sheet [data-act="pause"]'));
   await page.waitForTimeout(260);
 
@@ -2855,21 +2879,21 @@ async function main() {
 
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(140);
-  check('the desktop menu offers two, three and four',
+  check('the desktop menu offers two or three',
     await page.$$eval(el('select[data-act="set-cards"] option'), (n) => n.map((x) => x.value)),
-    ['2', '3', '4']);
+    ['2', '3']);
   check('and the mobile menu only one or two',
     await page.$$eval(el('select[data-act="set-cards-narrow"] option'), (n) => n.map((x) => x.value)),
     ['1', '2']);
 
-  // Four on the desktop must not follow us onto the phone: the whole reason
+  // Three on the desktop must not follow us onto the phone: the whole reason
   // there are two of these.
-  await page.selectOption(el('select[data-act="set-cards"]'), '4');
+  await page.selectOption(el('select[data-act="set-cards"]'), '3');
   await page.waitForTimeout(220);
   await page.click(el('.tab[data-value="parts"]'));
   await page.waitForTimeout(180);
   const phoneStill = await columns();
-  check('four chosen for the desktop leaves the phone at two', phoneStill.cols, 2);
+  check('three chosen for the desktop leaves the phone at two', phoneStill.cols, 2);
 
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(140);
@@ -2891,12 +2915,12 @@ async function main() {
   await page.waitForTimeout(220);
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(140);
-  await page.selectOption(el('select[data-act="set-cards"]'), '4');
+  await page.selectOption(el('select[data-act="set-cards"]'), '3');
   await page.waitForTimeout(220);
   await page.click(el('.tab[data-value="parts"]'));
   await page.waitForTimeout(180);
   const wide = await columns();
-  check('a desktop honours the desktop count', wide.cols, 4);
+  check('a desktop honours the desktop count', wide.cols, 3);
   ok('with the cards still filling the row', Math.abs(wide.spans) <= 1, String(wide.spans));
   ok('and still equal to each other', wide.equal, JSON.stringify(wide.widths));
 

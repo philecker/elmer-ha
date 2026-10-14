@@ -53,9 +53,9 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "viewParts": "list",
     # How many cards sit in a row of the card view. Two of them for the same
     # reason the text sizes split: a fixed count applies at every width unless
-    # told otherwise, and four across a phone leaves each card about 82px
-    # wide — narrower than the word it has to hold. The ranges differ because
-    # the screens do; a phone has room for one or two and no more.
+    # told otherwise, and a phone has nothing like the room a monitor has. The
+    # ranges differ because the screens do — two or three on a desktop, one or
+    # two on a phone, past which a card is narrower than the name on it.
     "cardsWide": 3,
     "cardsNarrow": 2,
     # How the equipment and parts lists are ordered, and which way round.
@@ -191,9 +191,9 @@ def normalize(raw: Any) -> dict[str, Any]:
     # nothing, so anything unrecognised goes back to the default rather than
     # through. The allowed sets are the panel's SORT_FIELDS, kept in step by
     # verify-store.py rather than by memory.
-    # Clamped rather than rejected: a file naming 6 wanted as many as it could
-    # get, and 4 is as many as there are. The ranges are the panel's.
-    settings["cardsWide"] = min(4, max(2, _int(settings.get("cardsWide"), 3)))
+    # Clamped rather than rejected: a file naming 6 wanted as many as it
+    # could get, and 3 is as many as there are. The ranges are the panel's.
+    settings["cardsWide"] = min(3, max(2, _int(settings.get("cardsWide"), 3)))
     settings["cardsNarrow"] = min(2, max(1, _int(settings.get("cardsNarrow"), 2)))
     if settings.get("sortEquipment") not in ("name", "date"):
         settings["sortEquipment"] = DEFAULT_SETTINGS["sortEquipment"]

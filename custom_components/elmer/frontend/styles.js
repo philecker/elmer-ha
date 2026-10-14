@@ -1512,7 +1512,8 @@ a.btn { text-decoration: none; }
    taller than a phone no matter how much of the window the sheet is given, and
    a Save or Delete you have to go looking for reads as missing. Sticky keeps
    the row in flow, so it also sits at the natural end of a short form. */
-.sheet .inner > .btnrow:last-child {
+.sheet .inner > .btnrow:last-child,
+.sheet .inner > .sheetfoot:last-child {
   position: sticky;
   bottom: 0;
   margin-top: 16px;
@@ -1520,6 +1521,11 @@ a.btn { text-decoration: none; }
   background: var(--paper);
   border-top: 1px solid var(--line);
 }
+/* A footer that carries more than the buttons: the row inside it is already
+   spaced by the footer's own padding, and the rule across the top belongs to
+   the footer rather than to each thing in it. */
+.sheet .inner > .sheetfoot > .btnrow { margin-top: 0; }
+.sheet .inner > .sheetfoot > .pauserow { border-top: 0; }
 
 /* ---------- toast ---------- */
 
@@ -1659,15 +1665,14 @@ a.btn { text-decoration: none; }
 }
 
 /* Cards per row, on exactly the arrangement above and for the same reason: a
-   count chosen at a desk should not follow you onto a phone, where four
-   across leaves each card narrower than the name it carries. data-cards
+   count chosen at a desk should not follow you onto a phone, where a third
+   column leaves each card narrower than the name it carries. data-cards
    applies at every width and data-cards-narrow takes over below the
    breakpoint, so the two can never disagree and nothing has to listen for a
    resize. Both are always set, "3" and "2" included, or the wide rule would
    go on winning on a phone. */
 :host([data-cards="2"]) { --cards: 2; }
 :host([data-cards="3"]) { --cards: 3; }
-:host([data-cards="4"]) { --cards: 4; }
 
 @media (max-width: 759px) {
   :host([data-cards-narrow="1"]) { --cards: 1; }
