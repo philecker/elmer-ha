@@ -15,6 +15,9 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
 import http from 'node:http';
+// The stylesheet itself, for the checks that are about what the source asks
+// for rather than about what one rendered screen happens to show.
+import { CSS } from '../custom_components/elmer/frontend/styles.js';
 
 // This container ships Chromium at a fixed path; CI and a normal checkout get
 // it from Playwright's own download. Preferring the env var keeps both working
@@ -765,6 +768,44 @@ async function main() {
   ok('a date field shows a calendar glyph', /svg/.test(glyph.image), glyph.image);
   ok('with room reserved for it', glyph.padRight > 24, String(glyph.padRight));
 
+  // A select's arrow is the engine's, and the engine decides where to put it:
+  // Chromium hangs it off the right border with nothing in between, WebKit
+  // insets it. The same form therefore read as crowded in a desktop browser
+  // and fine in the Home Assistant app. Ours is drawn here, so it sits the
+  // same distance in on both — which is only true while the appearance is
+  // stripped, because that is what stops the engine drawing its own.
+  const fields = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const read = (sel) => {
+      const n = root.querySelector(sel);
+      if (!n) return null;
+      const cs = getComputedStyle(n);
+      return {
+        left: parseFloat(cs.paddingLeft),
+        right: parseFloat(cs.paddingRight),
+        appearance: cs.appearance,
+        image: cs.backgroundImage,
+      };
+    };
+    return {
+      text: read('.sheet input[name="name"]'),
+      select: read('.sheet select[name="locationPick"]'),
+      date: read('.sheet input[type="date"]'),
+    };
+  });
+  check('a select draws its own arrow rather than the engine’s',
+    fields.select.appearance, 'none');
+  ok('and it is a glyph of ours', /svg/.test(fields.select.image), fields.select.image);
+  check('every field indents its text by the same amount',
+    [...new Set([fields.text.left, fields.select.left, fields.date.left])].length, 1);
+  // The two controls that carry a glyph hold the same room for it, so the
+  // caret and the calendar line up down a column of fields.
+  check('and the two with a glyph reserve the same room for it',
+    fields.select.right, fields.date.right);
+  ok('which is more than the plain text field needs',
+    fields.select.right > fields.text.right,
+    `${fields.text.right} vs ${fields.select.right}`);
+
   // --- the icon picker ---------------------------------------------------
   // icon() falls back to the generic crate for a name it does not know, and
   // the list of names is kept apart from the drawings — so a typo in one does
@@ -1296,9 +1337,56 @@ async function main() {
   // --- parts ------------------------------------------------------------
   await page.click(el('.tab[data-value="parts"]'));
   await page.waitForSelector(el('.qty'));
-  // Out of stock sorts to the top.
-  check('out of stock first',
+  // Parts are grouped by where they are kept, so the most urgent part in the
+  // house is no longer necessarily the first row — it is the first row of its
+  // own shelf. That is the cost of grouping, and it is the reason urgency has
+  // to survive inside a group rather than only across the whole list. The
+  // quantity pill is still tinted by stock wherever the part sits, and the
+  // reorder sensor is unaffected.
+  const partOrder = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const out = [];
+    for (const card of root.querySelectorAll('.pad .card')) {
+      const label = card.previousElementSibling;
+      out.push({
+        where: label && label.classList.contains('label') ? label.textContent.trim() : null,
+        rows: [...card.querySelectorAll('.row')].map((r) => ({
+          name: r.querySelector('.title').textContent.trim(),
+          tone: r.querySelector('.qty').dataset.tone,
+        })),
+      });
+    }
+    return out;
+  });
+  ok('parts are grouped by where they are kept',
+    partOrder.length > 1 && partOrder.every((g) => g.where),
+    JSON.stringify(partOrder.map((g) => g.where)));
+  check('with the unplaced ones last',
+    partOrder[partOrder.length - 1].where, 'Unassigned');
+  // Within a group: out, then low, then fine.
+  const rank = { out: 0, low: 1, ok: 2 };
+  for (const g of partOrder) {
+    const tones = g.rows.map((r) => rank[r.tone]);
+    ok(`${g.where}: what you are out of is at the top of its own shelf`,
+      tones.every((t, i) => i === 0 || tones[i - 1] <= t),
+      JSON.stringify(g.rows));
+  }
+  // And with grouping off it is one list, most urgent first, as it was.
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  await page.selectOption(el('select[data-act="set-locations"]'), '0');
+  await page.waitForTimeout(160);
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(120);
+  check('ungrouped, the most urgent part in the house is first',
     await page.textContent(el('.card .row .title')), 'Fridge Water Filter');
+  check('and it is one list again', await page.$$eval(el('.pad .card'), (n) => n.length), 1);
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  await page.selectOption(el('select[data-act="set-locations"]'), '1');
+  await page.waitForTimeout(160);
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(120);
   const q0 = await page.evaluate(() => window.__snapshot().supplies.find((s) => s.id === 's1').quantity);
   await page.click(el('.row[data-id="s1"] [data-act="stock"][data-delta="1"]'));
   await page.waitForTimeout(90);
@@ -2040,9 +2128,12 @@ async function main() {
     groups.locations.map((r) => r.title), ['Basement', 'Garage', 'Hallway', 'Kitchen']);
   // The count is the whole reason both actions are safe to offer: it says how
   // far the bulk edit behind each button reaches before it is pressed.
-  check('with what carries it', groups.locations.map((r) => r.sub), [
-    '2 pieces of equipment', '1 piece of equipment',
-    '1 piece of equipment', '1 piece of equipment',
+  // A location is carried by parts as well as equipment, and the row says so,
+  // because that is the reach of the two buttons beside it: renaming the room
+  // the furnace is in has to take the spare filters on the shelf with it.
+  check('with what carries it, of both kinds', groups.locations.map((r) => r.sub), [
+    '2 pieces of equipment and 2 parts', '1 piece of equipment',
+    '1 piece of equipment', '1 piece of equipment and 1 part',
   ]);
   ok('and each can be renamed', groups.locations.every((r) => r.rename));
 
@@ -2093,6 +2184,20 @@ async function main() {
   check('renaming loses no equipment', renamed.total, beforeRename);
   check('every piece that carried it was rewritten', renamed.cellar, ['eq1', 'eq3']);
   check('and none still carries the old name', renamed.basement, 0);
+  // The half most likely to be forgotten: parts carry a location too, from
+  // the same list, so a rename that reached only the equipment would leave
+  // every part on that shelf pointing at a room that no longer exists.
+  const movedParts = await page.evaluate(() => {
+    const sup = window.__snapshot().supplies;
+    return {
+      total: sup.length,
+      cellar: sup.filter((p2) => p2.location === 'Cellar').map((p2) => p2.id).sort(),
+      basement: sup.filter((p2) => p2.location === 'Basement').length,
+    };
+  });
+  check('the parts kept there came with it', movedParts.cellar, ['s1', 's3']);
+  check('none of them was left behind', movedParts.basement, 0);
+  check('and no part was lost on the way', movedParts.total, 4);
   check('the sheet closed behind it', await page.$(el('.sheet')), null);
   check('the list shows the new name',
     (await groupRows()).locations.map((r) => r.title),
@@ -2243,8 +2348,62 @@ async function main() {
   check('a section heading keeps its own weight there', phoneWeights.label, deskWeights.label);
   ok('and still outweighs the line it heads', phoneWeights.label > phoneWeights.sub,
     `${phoneWeights.label} vs ${phoneWeights.sub}`);
-  ok('while a routine name still outweighs its own subtitle',
-    phoneWeights.title > phoneWeights.sub, `${phoneWeights.title} vs ${phoneWeights.sub}`);
+  // A routine's name and the line under it share a weight on a phone, which
+  // is deliberate: semibold was resolving to Bold on Home Assistant's Roboto,
+  // and a list of bold titles over bold subtitles is the wall of ink that
+  // started this. So the separation has to come from somewhere else, and the
+  // thing to assert is that it still exists rather than that it is weight.
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.waitForTimeout(140);
+  const pair = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const behind = (n) => {
+      let e = n;
+      while (e) {
+        const c = getComputedStyle(e).backgroundColor;
+        if (c && c !== 'rgba(0, 0, 0, 0)' && c !== 'transparent') return c;
+        e = e.parentElement || (e.getRootNode() && e.getRootNode().host);
+      }
+      return null;
+    };
+    const t = root.querySelector('.row .title');
+    const s = root.querySelector('.row .sub .txt');
+    const cs = (n) => getComputedStyle(n);
+    return {
+      titleSize: parseFloat(cs(t).fontSize),
+      subSize: parseFloat(cs(s).fontSize),
+      titleInk: cs(t).color,
+      subInk: cs(s).color,
+      titleWeight: Number(cs(t).fontWeight),
+      subWeight: Number(cs(s).fontWeight),
+      bg: behind(t),
+    };
+  });
+  await ctx.close();
+  ok('a routine name still reads ahead of its subtitle by size',
+    pair.titleSize > pair.subSize + 2, `${pair.subSize} vs ${pair.titleSize}`);
+  ok('and by ink', contrastRatio(pair.titleInk, pair.bg) > contrastRatio(pair.subInk, pair.bg) * 1.5,
+    `${contrastRatio(pair.titleInk, pair.bg)}:1 vs ${contrastRatio(pair.subInk, pair.bg)}:1`);
+  // Nothing should ask for a weight the font may not carry. Home Assistant
+  // ships Roboto at 100/300/400/500/700/900, and CSS resolves a request above
+  // 500 by searching upward first — so 600 silently arrives as Bold, and 650,
+  // which no static face carries at all, does the same. Read from the
+  // stylesheet rather than from a rendered node, because the point is which
+  // numbers the source asks for, and most of them are on screens this run
+  // never opens.
+  const asked = [...new Set((CSS.match(/font-weight:\s*(\d{3})/g) || [])
+    .map((m) => Number(m.match(/\d{3}/)[0])))].sort((a, b) => a - b);
+  // 650 was in here for a while. No static face carries it, so it resolved to
+  // Bold every time it was ever drawn — a number that could only ever be a
+  // misunderstanding of what it would do.
+  check('no weight is asked for that no font actually carries',
+    asked.filter((w) => ![400, 500, 600, 700].includes(w)), []);
+  // The list is the screen this was reported on and the one that was chosen
+  // from, so it is the one held to Roboto's own set. Elsewhere 600 is still
+  // asked for, and on Home Assistant's font still arrives as Bold — a sweep
+  // worth doing, but not one to make on the quiet.
+  check('and the routine list asks only for weights Home Assistant ships',
+    [pair.titleWeight, pair.subWeight].filter((w) => ![400, 500, 700].includes(w)), []);
 
   /* ------------------------------- one text size per reading distance -- */
   // A phone at arm's length and a monitor at reading distance are different

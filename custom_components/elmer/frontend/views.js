@@ -414,6 +414,7 @@ export function partDetail(state, id) {
   // Not 'On hand' — that is the large figure at the top of the page, and
   // saying it twice makes the reader check whether they differ.
   add('Reorder at', part.reorderAt);
+  add('Kept in', part.location);
   add('Part number', part.partNumber, 'mono');
   // "Buy from" is a free field: a shop name is a fact, a link is a thing to
   // press. Only a real http(s) address becomes the chip — safeHref rejects a
@@ -479,7 +480,7 @@ export function partsView(state) {
 
   const needle = (state.query || '').trim().toLowerCase();
   const matched = state.supplies.filter((p) => !needle || haystack(
-    p.name, p.partNumber,
+    p.name, p.partNumber, p.location, p.purchasedFrom,
   ).includes(needle));
 
   if (!matched.length) {
@@ -521,9 +522,37 @@ export function partsView(state) {
     </div>`;
   });
 
+  // Grouped by where they are kept, on the same switch and the same rule the
+  // equipment list uses: rooms alphabetically, and whatever has no room last.
+  // Within a group the urgency order above is kept, so the thing you are out
+  // of is still at the top of its own shelf.
+  if (!state.settings.showLocations) {
+    return html`<div class="scroll"><div class="pad">
+      ${raw(searchBox(state, 'Search parts'))}
+      <div class="card">${rows}</div>
+    </div></div>`;
+  }
+
+  const UNPLACED = Symbol('unplaced');
+  const groups = new Map();
+  sorted.forEach((part, i) => {
+    const key = (part.location || '').trim() || UNPLACED;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(rows[i]);
+  });
+
+  const sections = [...groups.entries()]
+    .sort((a, b) => {
+      if (a[0] === UNPLACED) return 1;
+      if (b[0] === UNPLACED) return -1;
+      return String(a[0]).localeCompare(String(b[0]));
+    })
+    .map(([key, items]) => html`<div class="label">${key === UNPLACED ? 'Unassigned' : key}</div>
+      <div class="card">${raw(items.join(''))}</div>`);
+
   return html`<div class="scroll"><div class="pad">
     ${raw(searchBox(state, 'Search parts'))}
-    <div class="card">${rows}</div>
+    ${sections}
   </div></div>`;
 }
 
@@ -642,20 +671,44 @@ export function historyView(state) {
  */
 export function groupsInUse(state, field) {
   const counts = new Map();
-  for (const eq of state.equipment) {
-    const value = (eq[field] || '').trim();
-    if (!value) continue;
-    counts.set(value, (counts.get(value) || 0) + 1);
-  }
+  // Locations are carried by parts as well as equipment, and the editor has
+  // to see all of it: a rename that reached only the equipment would leave
+  // every part in that room pointing at a name nothing else uses any more.
+  // Category is equipment's alone. Counted separately so the row can say what
+  // a rename is about to touch rather than give one number for two kinds.
+  const tally = (list, key) => {
+    for (const r of list) {
+      const value = (r[field] || '').trim();
+      if (!value) continue;
+      const at = counts.get(value) || { equipment: 0, parts: 0 };
+      at[key] += 1;
+      counts.set(value, at);
+    }
+  };
+  tally(state.equipment, 'equipment');
+  if (field === 'location') tally(state.supplies, 'parts');
+
   return [...counts.entries()]
-    .map(([value, count]) => {
+    .map(([value, at]) => {
+      const count = at.equipment + at.parts;
       // A category is either one of Elmer's own — which carries an icon and a
       // name of its own, and is not ours to rename — or free text somebody
       // typed, which is. A location is always free text.
       const built = field === 'category' ? categoryLabel(value) : null;
-      return { value, count, label: built || value, builtIn: !!built };
+      return {
+        value, count, equipment: at.equipment, parts: at.parts,
+        label: built || value, builtIn: !!built,
+      };
     })
     .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+/** "2 pieces of equipment and 3 parts" — how far an edit to this one reaches. */
+function reachText(g) {
+  const bits = [];
+  if (g.equipment) bits.push(`${g.equipment} ${g.equipment === 1 ? 'piece' : 'pieces'} of equipment`);
+  if (g.parts) bits.push(`${g.parts} ${g.parts === 1 ? 'part' : 'parts'}`);
+  return bits.join(' and ') || 'nothing';
 }
 
 function groupCard(state, field, empty) {
@@ -663,7 +716,7 @@ function groupCard(state, field, empty) {
   if (!rows.length) return html`<div class="card"><div class="note">${empty}</div></div>`;
 
   return html`<div class="card">${rows.map((g) => {
-    const tally = `${g.count} ${g.count === 1 ? 'piece' : 'pieces'} of equipment`;
+    const tally = reachText(g);
     return html`<div class="row groprow">
     <div class="body">
       <div class="title">${g.label}</div>
@@ -679,13 +732,14 @@ function groupCard(state, field, empty) {
 
 /** Renaming one of them, in a form rather than a browser prompt. */
 export function groupForm(state, field, value) {
-  const found = groupsInUse(state, field).find((g) => g.value === value) || { count: 0 };
-  const n = found.count;
+  const found = groupsInUse(state, field).find((g) => g.value === value)
+    || { count: 0, equipment: 0, parts: 0 };
   const what = field === 'location' ? 'location' : 'category';
+  const owner = field === 'location' ? 'what is in it' : 'the equipment';
   return html`<div class="field">
       <label for="f-group">Name</label>
       <input id="f-group" name="groupName" value="${value}" data-titlecase autocomplete="off">
-      <div class="hint">Renaming changes it on ${n} ${raw(n === 1 ? 'piece' : 'pieces')} of equipment. A ${what} is not stored on its own — it is whatever the equipment says it is.</div>
+      <div class="hint">Renaming changes it on ${reachText(found)}. A ${what} is not stored on its own — it is whatever ${owner} says it is.</div>
     </div>
     <div class="btnrow">
       <button class="btn" data-act="close">Cancel</button>
@@ -849,20 +903,36 @@ export function pickOrNew({ label, id, pickName, newName, known, current, newLab
 }
 
 /** Where a piece of equipment is. */
-export function locationField(state, equipment) {
-  const known = [...new Set(
-    state.equipment.map((x) => (x.location || '').trim()).filter(Boolean),
-  )].sort((a, b) => a.localeCompare(b)).map((l) => [l, l]);
+/**
+ * Every location anything is in, equipment and parts together.
+ *
+ * One vocabulary, not two. A house has the rooms it has: the shelf the spare
+ * filters sit on is in the same basement as the furnace they go in, and
+ * offering a separate list of part-places would mean typing "Basement" twice
+ * and renaming it twice. It also means the Settings editor governs both.
+ */
+export function knownLocations(state) {
+  const all = [
+    ...state.equipment.map((x) => (x.location || '').trim()),
+    ...state.supplies.map((x) => (x.location || '').trim()),
+  ].filter(Boolean);
+  return [...new Set(all)].sort((a, b) => a.localeCompare(b));
+}
 
+/**
+ * The Located picker. Takes any record with a location — a piece of equipment
+ * or a part — because the two draw from the same list.
+ */
+export function locationField(state, record, opts = {}) {
   return pickOrNew({
-    label: 'Located',
+    label: opts.label || 'Located',
     id: 'f-location',
     pickName: 'locationPick',
     newName: 'locationNew',
-    known,
-    current: (equipment.location || '').trim(),
+    known: knownLocations(state).map((l) => [l, l]),
+    current: ((record && record.location) || '').trim(),
     newLabel: 'New Location…',
-    placeholder: 'Kitchen',
+    placeholder: opts.placeholder || 'Kitchen',
   });
 }
 
@@ -1109,6 +1179,9 @@ export function partForm(state, part) {
         <input id="f-pfrom" name="purchasedFrom" value="${p.purchasedFrom || ''}" autocomplete="off">
       </div>
     </div>
+    <!-- Where the part is kept, from the same list of rooms the equipment
+         uses: "on the shelf in the basement" is the same basement. -->
+    ${raw(locationField(state, p, { label: 'Kept in', placeholder: 'Garage shelf' }))}
     <div class="field">
       <label for="f-pnotes">Notes</label>
       <textarea id="f-pnotes" name="notes">${p.notes || ''}</textarea>

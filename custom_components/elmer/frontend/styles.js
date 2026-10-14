@@ -265,7 +265,7 @@ export const CSS = `
 /* On a detail screen the title replaces the wordmark; it is a name, not a mark. */
 .brand .title {
   font-size: calc(15.5px * var(--ui-scale));
-  font-weight: 650;
+  font-weight: 600;
   color: var(--ink);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1019,7 +1019,7 @@ a.btn { text-decoration: none; }
   color: var(--accent-ink);
   font: inherit;
   font-size: calc(13px * var(--ui-scale));
-  font-weight: 650;
+  font-weight: 600;
   white-space: nowrap;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -1074,52 +1074,72 @@ a.btn { text-decoration: none; }
 .two > .field { min-width: 0; }
 .field input, .field select, .field textarea { min-width: 0; max-width: 100%; }
 
-/* A date field is a native control, and that is the whole difficulty: the
-   platform wants to draw the box, the value and the calendar, and each
-   engine wants to draw them differently.
+/* The two fields the platform wants to decorate itself: a date input and a
+   select. Both have the appearance stripped and both get a glyph drawn here
+   instead, so they are the same control on every engine.
 
-   The appearance is stripped, because iOS treats a date input the way it
-   treats a select — it keeps its own intrinsic box and ignores the height
-   set above, so the field came out half again as tall as every other one and
-   the pair in a row no longer lined up. Stripping it is the only way the
-   height here is obeyed.
+   Appearance first. iOS keeps a native control's own intrinsic box and
+   ignores the height set above, so a date field came out half again as tall
+   as everything around it; stripping it is the only way that height is
+   obeyed. Then the glyph, because stripping it also takes the platform's own
+   calendar button and dropdown arrow away.
 
-   Stripping it also takes the calendar button away, which is what made the
-   field read as a bare text box on the Mac. So the glyph is drawn here
-   instead, as a background image: ours on every platform, in the ink of the
-   theme, rather than whatever the engine felt like supplying. The field
-   reserves room for it on the right.
+   Drawing them ourselves is the fix for the other half of this too. A
+   select's arrow is the engine's, and the engine decides where to put it:
+   Chromium hangs it off the right border with nothing between the two, while
+   WebKit insets it — so the same form looked right in the Home Assistant app
+   on a phone and crowded in a desktop browser. Ours sits at the same 12px
+   from the edge that the text sits from the other one, in both controls, on
+   every engine.
 
-   "color-scheme" is declared on the control rather than left to inherit from
-   :host. The calendar that drops out of it is an OS panel, not part of the
-   page, and WebKit resolves its appearance per control — inherited from a
+   The glyphs are held as whole url() values in custom properties so the two
+   themes are declared once each rather than once per control. A colour
+   cannot be interpolated into a data URI, which is why they are a pair of
+   fixed inks rather than a var.
+
+   "color-scheme" is declared on the date control rather than left to inherit
+   from :host. The calendar that drops out of it is an OS panel, not part of
+   the page, and WebKit resolves its appearance per control — inherited from a
    shadow host it was drawn for light mode over a dark material, which is how
    October arrived as near-black digits on a near-black sheet.
 
    What Chromium shows here is the geometry, which the panel suite checks.
    The picker panel's own colours are WebKit's and are checked on a device. */
-.field input[type="date"] {
+:host {
+  --glyph-calendar: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+  --glyph-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+:host([data-theme="dark"]), :host([data-pinned][data-theme="dark"]) {
+  --glyph-calendar: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a2b0ac' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+  --glyph-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a2b0ac' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+:host([data-pinned][data-theme="light"]) {
+  --glyph-calendar: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+  --glyph-caret: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.9' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.field input[type="date"], .field select {
   -webkit-appearance: none;
   appearance: none;
-  display: block;
   width: 100%;
   text-align: left;
-  color-scheme: light;
+  /* Room for the glyph, so a long value is clipped before it reaches it
+     rather than running underneath. */
   padding-right: calc(38px * var(--ui-scale));
   background-repeat: no-repeat;
   background-position: right calc(12px * var(--ui-scale)) center;
   background-size: calc(16px * var(--ui-scale));
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
 }
-:host([data-theme="dark"]) .field input[type="date"],
-:host([data-pinned][data-theme="dark"]) .field input[type="date"] {
-  color-scheme: dark;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a2b0ac' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
-}
-:host([data-pinned][data-theme="light"]) .field input[type="date"] {
+.field input[type="date"] {
+  display: block;
   color-scheme: light;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234a5a56' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M8 2v4M16 2v4M3 10h18'/%3E%3Crect x='3' y='4' width='18' height='18' rx='2'/%3E%3C/svg%3E");
+  background-image: var(--glyph-calendar);
 }
+.field select { background-image: var(--glyph-caret); }
+:host([data-theme="dark"]) .field input[type="date"],
+:host([data-pinned][data-theme="dark"]) .field input[type="date"] { color-scheme: dark; }
+:host([data-pinned][data-theme="light"]) .field input[type="date"] { color-scheme: light; }
+
 /* WebKit gives the value a tall line box of its own and centres it. */
 .field input[type="date"]::-webkit-date-and-time-value {
   text-align: left;
@@ -1130,12 +1150,14 @@ a.btn { text-decoration: none; }
   padding: 0;
   line-height: normal;
 }
-/* The native button is gone with the appearance; the glyph above stands in
-   for it, and the whole field is the target. */
+/* The native controls are gone with the appearance; the glyphs above stand
+   in for them, and the whole field is the target. */
 .field input[type="date"]::-webkit-calendar-picker-indicator {
   display: none;
   -webkit-appearance: none;
 }
+.field select::-ms-expand { display: none; }
+
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
@@ -1326,7 +1348,7 @@ a.btn { text-decoration: none; }
 .sheet > header h2 {
   margin: 0;
   font-size: calc(15px * var(--ui-scale));
-  font-weight: 650;
+  font-weight: 600;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -1453,6 +1475,18 @@ a.btn { text-decoration: none; }
      the section headings, which are bold caps, and quietly thins them — the
      opposite of the point. */
   .row .sub, .hint, .note { font-weight: 500; }
+
+  /* And the titles come down to meet them. Semibold was asking for a weight
+     Home Assistant does not ship — its Roboto is 100/300/400/500/700/900,
+     and CSS resolves a request above 500 by looking upward first, so 600
+     arrived as Bold. Three tiers of ours collapsed into one and every title
+     rendered a full step heavier than drawn. 500 exists in Roboto and in the
+     system font both, so it lands as asked wherever Elmer runs.
+
+     Title and subtitle share a weight here. What separates them is size and
+     ink, which is enough at this scale and is what keeps a phone list from
+     reading as a wall of bold. */
+  .row .title { font-weight: 500; }
 }
 
 /* The reader's own preference, multiplied on top of whatever the width chose.

@@ -119,13 +119,17 @@ const SEED = {
       intervalCount: 3, intervalUnit: 'months', partsUsed: [] },
   ],
   supplies: [
+    // Locations here on purpose: parts are grouped by where they are kept,
+    // from the same list of rooms the equipment uses. One is left without so
+    // the Unassigned group has something in it.
     { id: 's1', name: '20x25x1 MERV 11', quantity: 3, reorderAt: 2, partNumber: 'AF-2025',
-      purchasedFrom: 'Home Depot' },
+      purchasedFrom: 'Home Depot', location: 'Basement' },
     // One shop name and one link, because "Buy from" takes either and they
     // are shown differently: a name is a fact, a link is a chip to press.
     { id: 's2', name: 'Fridge Water Filter', quantity: 0, reorderAt: 1, partNumber: 'WF-100',
-      purchasedFrom: 'https://www.example.com/parts/wf-100?ref=long_and_unreadable&variant=1' },
-    { id: 's3', name: 'Softener Salt (40 lb)', quantity: 2, reorderAt: 2 },
+      purchasedFrom: 'https://www.example.com/parts/wf-100?ref=long_and_unreadable&variant=1',
+      location: 'Kitchen' },
+    { id: 's3', name: 'Softener Salt (40 lb)', quantity: 2, reorderAt: 2, location: 'Basement' },
     { id: 's4', name: '9V Battery', quantity: 8, reorderAt: 2 },
   ],
   log: [
@@ -358,7 +362,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.1.0' } };
+panel.panel = { config: { version: '1.2.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

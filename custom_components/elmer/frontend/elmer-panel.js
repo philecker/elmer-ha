@@ -1039,14 +1039,36 @@ class ElmerPanel extends HTMLElement {
    * The picker then drops the option, so the same part cannot be added twice.
    */
   /**
-   * Every piece of equipment carrying a given location or category.
+   * Everything carrying a given location or category, as the ops that would
+   * change it.
    *
-   * Neither is a record of its own: they are whatever the equipment says they
-   * are. So renaming one is a bulk edit of everything that carries it, and
-   * removing one clears the field on each — there is nothing else to delete.
+   * Neither is a record of its own: they are whatever the things in the house
+   * say they are. So renaming one is a bulk edit of everything that carries
+   * it, and removing one clears the field on each — there is nothing else to
+   * delete.
+   *
+   * A location is carried by parts as well as equipment, and both have to
+   * move together: renaming the room the furnace is in has to take the spare
+   * filters on the shelf with it, or they are left pointing at a name nothing
+   * else uses. A category is equipment's alone.
    */
-  _equipmentWith(field, value) {
-    return this.data.equipment.filter((eq) => (eq[field] || '').trim() === value);
+  _recordsWith(field, value) {
+    const hit = (r) => (r[field] || '').trim() === value;
+    const out = this.data.equipment.filter(hit).map((r) => ({ kind: 'equipment.put', record: r }));
+    if (field === 'location') {
+      out.push(...this.data.supplies.filter(hit).map((r) => ({ kind: 'part.put', record: r })));
+    }
+    return out;
+  }
+
+  /** "3 pieces of equipment and 2 parts" — what a bulk edit is about to touch. */
+  static _reach(affected) {
+    const eq = affected.filter((a) => a.kind === 'equipment.put').length;
+    const parts = affected.length - eq;
+    const bits = [];
+    if (eq) bits.push(`${eq} ${eq === 1 ? 'piece' : 'pieces'} of equipment`);
+    if (parts) bits.push(`${parts} ${parts === 1 ? 'part' : 'parts'}`);
+    return bits.join(' and ') || 'nothing';
   }
 
   async _saveGroup(field, value) {
@@ -1054,31 +1076,31 @@ class ElmerPanel extends HTMLElement {
     if (!next) return this._flash('Give it a name first.', 'error');
     if (next === value) { this._closeSheet(); return undefined; }
 
-    const affected = this._equipmentWith(field, value);
-    const ok = await this._apply(affected.map((eq) => ({
-      kind: 'equipment.put',
-      payload: { ...eq, [field]: next },
+    const affected = this._recordsWith(field, value);
+    const ok = await this._apply(affected.map(({ kind, record }) => ({
+      kind,
+      payload: { ...record, [field]: next },
     })));
     if (!ok) return undefined;
     this._closeSheet();
-    return this._flash(`Renamed on ${affected.length} ${affected.length === 1 ? 'piece' : 'pieces'}`);
+    return this._flash(`Renamed on ${ElmerPanel._reach(affected)}`);
   }
 
   async _clearGroup(field, value, label) {
-    const affected = this._equipmentWith(field, value);
+    const affected = this._recordsWith(field, value);
     const what = field === 'location' ? 'location' : 'category';
-    const n = `${affected.length} ${affected.length === 1 ? 'piece' : 'pieces'} of equipment`;
+    const n = ElmerPanel._reach(affected);
     // Spelled out: it is a bulk edit, and nothing else says how far it reaches
     // until after it has happened.
     if (!window.confirm(
       `Remove the ${what} "${label || value}"?\n\n`
-      + `It is cleared from ${n}. No equipment is deleted — they simply stop `
+      + `It is cleared from ${n}. Nothing is deleted — they simply stop `
       + `having a ${what}.`,
     )) return undefined;
 
-    const ok = await this._apply(affected.map((eq) => ({
-      kind: 'equipment.put',
-      payload: { ...eq, [field]: '' },
+    const ok = await this._apply(affected.map(({ kind, record }) => ({
+      kind,
+      payload: { ...record, [field]: '' },
     })));
     if (!ok) return undefined;
     return this._flash(`Removed from ${n}`);
@@ -1185,11 +1207,7 @@ class ElmerPanel extends HTMLElement {
     const record = {
       id: id || uid('eq'),
       name: titleCase(name),
-      // Either the picker or the new-location box, depending on which the form
-      // is showing; "__new__" means the box.
-      location: titleCase(
-        (f.locationPick && f.locationPick !== '__new__' ? f.locationPick : f.locationNew || '').trim(),
-      ),
+      location: this._locationField(f),
       // Either the picker or the new-category box, the same way Located
       // works; "__new__" means the box.
       category: (f.categoryPick && f.categoryPick !== '__new__'
@@ -1257,6 +1275,20 @@ class ElmerPanel extends HTMLElement {
     this._closeSheet();
   }
 
+  /**
+   * The Located control as the form has it.
+   *
+   * Either the picker or the new-location box, depending on which the form is
+   * showing; "__new__" means the box. Shared by equipment and parts, which
+   * draw from one list of rooms.
+   */
+  _locationField(f) {
+    const picked = f.locationPick && f.locationPick !== '__new__'
+      ? f.locationPick
+      : f.locationNew || '';
+    return titleCase(picked.trim());
+  }
+
   async _savePart(id) {
     const f = this._fields();
     const name = (f.name || '').trim();
@@ -1268,6 +1300,7 @@ class ElmerPanel extends HTMLElement {
       reorderAt: Math.max(0, parseInt(f.reorderAt, 10) || 0),
       partNumber: (f.partNumber || '').trim(),
       purchasedFrom: (f.purchasedFrom || '').trim(),
+      location: this._locationField(f),
       notes: f.notes || '',
       updatedAt: Date.now(),
     };
