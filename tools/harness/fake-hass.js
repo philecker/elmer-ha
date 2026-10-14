@@ -44,6 +44,16 @@ function daysBetween(a, b) {
   return Math.round((y - x) / 86400000);
 }
 function taskState(task, soon = 14) {
+  // Mirrors the short-circuit in schedule.py: paused wins over everything and
+  // takes daysLeft with it. The harness computes this itself, so a change to
+  // the real one that is not made here shows up as the panel behaving
+  // correctly against a store that disagrees with the shipped one.
+  if (task && task.paused) {
+    const was = task.lastDone
+      ? addInterval(task.lastDone, task.intervalCount, task.intervalUnit)
+      : null;
+    return { due: was, daysLeft: null, status: 'paused', progress: 0, cycle: null };
+  }
   if (!task || !task.lastDone) {
     return { due: null, daysLeft: null, status: 'new', progress: 0, cycle: null };
   }
@@ -88,11 +98,15 @@ const SEED = {
       parts: [{ label: 'Filter, online', url: 'example.com/parts/af-2025' },
         { label: 'Manual', url: 'example.com/manuals/hx-400' }] },
     { id: 'eq2', name: 'Kitchen Refrigerator', location: 'Kitchen', category: 'appliance',
-      brand: 'LG', model: 'RF-900X', partNumber: 'WF-100', icon: 'refrigerator', parts: [] },
+      brand: 'LG', model: 'RF-900X', partNumber: 'WF-100', icon: 'refrigerator',
+      purchasedOn: '2022-05-14', installedOn: '2022-05-16', parts: [] },
+    // Bought and never given an installed date, which is the ordinary way a
+    // record ends up half filled in — and what the chronological order falls
+    // back on.
     { id: 'eq3', name: 'Water Softener', location: 'Basement', category: 'water',
-      brand: 'Culligan', icon: 'water', parts: [] },
+      brand: 'Culligan', purchasedOn: '2017-07-20', icon: 'water', parts: [] },
     { id: 'eq4', name: 'Smoke Alarms', location: 'Hallway', category: 'safety',
-      icon: 'alarm', parts: [] },
+      installedOn: '2023-01-09', icon: 'alarm', parts: [] },
     { id: 'eq5', name: 'Riding Mower', location: 'Garage', category: 'vehicle',
       brand: 'John Deere', model: 'LT-21', icon: 'mower', parts: [] },
   ],
@@ -153,7 +167,7 @@ const SEED = {
       doneOn: ago(470), notes: 'A lot of sediment. Worth doing every year.',
       cost: '', recordedAt: Date.now() - 4e10, previousLastDone: null, usedParts: [] },
   ],
-  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', dueSoonDays: 14, notifyOverdue: true },
+  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true },
 };
 
 /* ---------------------------------------------------------------- store -- */
@@ -210,6 +224,7 @@ function snapshot() {
       states,
       stock,
       counts: {
+        paused: vals.filter((s) => s.status === 'paused').length,
         overdue: vals.filter((s) => s.status === 'overdue').length,
         due: vals.filter((s) => s.status === 'due').length,
         new: vals.filter((s) => s.status === 'new').length,
@@ -362,7 +377,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.2.0' } };
+panel.panel = { config: { version: '1.3.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

@@ -27,7 +27,7 @@ from typing import Any
 DUE_SOON_DAYS = 14
 
 # Mirrors STATUS_RANK in the renderer's model.js.
-STATUS_RANK = {"overdue": 0, "due": 1, "new": 2, "ok": 3}
+STATUS_RANK = {"overdue": 0, "due": 1, "new": 2, "ok": 3, "paused": 4}
 
 
 def parse_day(iso: Any) -> date | None:
@@ -121,8 +121,29 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
     """Due date, days left, status and cycle progress for one routine.
 
     ``status`` is one of ``new`` (never completed, so nothing is scheduled),
-    ``overdue``, ``due`` (within ``due_soon_days``) or ``ok``.
+    ``overdue``, ``due`` (within ``due_soon_days``), ``ok``, or ``paused``.
+
+    Paused short-circuits everything else, and ``daysLeft`` comes back None
+    with it. That is the whole point rather than a convenience: days-left is
+    what a routine's own sensor reports and what a ``numeric_state`` condition
+    compares, so a paused routine whose number kept counting down would go on
+    firing the automation it was paused to silence. None reaches Home
+    Assistant as ``unknown``, which no numeric condition matches. The same
+    None takes it out of the counts, out of the next-due sensor and out of
+    the parts a routine needs, all of which already skip it.
+
+    The date it would have been due is still returned, because the panel has
+    to be able to say what was paused rather than just that something was.
     """
+    if task and task.get("paused"):
+        return {
+            "due": next_due(task),
+            "daysLeft": None,
+            "status": "paused",
+            "progress": 0,
+            "cycle": None,
+        }
+
     due = next_due(task)
     if due is None:
         return {
@@ -150,6 +171,37 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
         "progress": progress,
         "cycle": cycle,
     }
+
+
+def overdue_notice(rows: list[dict], limit: int = 5) -> tuple[str, str] | None:
+    """The title and body of the overdue notification, or None for nothing.
+
+    Pure on purpose. The Home Assistant half of this is three lines of create
+    and dismiss; the part worth testing is what it says, and keeping the
+    wording here means it can be checked without a Home Assistant running.
+
+    Rows come in already sorted by urgency, so the first few are the most
+    overdue. Paused routines never reach here — they are not overdue, they
+    are set aside — which is the whole arrangement working as one piece.
+    """
+    late = [r for r in rows if r["state"]["status"] == "overdue"]
+    if not late:
+        return None
+
+    def line(row: dict) -> str:
+        name = (row["task"].get("name") or "").strip() or "Something"
+        eq = row.get("equipment") or {}
+        where = (eq.get("name") or "").strip()
+        days = row["state"]["daysLeft"]
+        ago = "today" if days == 0 else f"{abs(days)} day{'' if abs(days) == 1 else 's'} ago"
+        return f"- {name}{f' ({where})' if where else ''} — due {ago}"
+
+    n = len(late)
+    title = f"{n} overdue" if n > 1 else "1 overdue"
+    body = [line(r) for r in late[:limit]]
+    if n > limit:
+        body.append(f"...and {n - limit} more")
+    return title, "\n".join(body)
 
 
 def sort_key(row: dict):

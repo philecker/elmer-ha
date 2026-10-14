@@ -223,3 +223,84 @@ function parse(iso) {
   if (!y || !m || !d) return null;
   return new Date(y, m - 1, d, 12, 0, 0, 0);
 }
+
+/* -------------------------------------------------------------------- sort --
+ * How the equipment and parts lists are ordered. Routines and history are
+ * deliberately not here: a routine list ordered by anything but urgency stops
+ * answering the question it is for, and history is already a timeline.
+ *
+ * Two orders, alphabetical and chronological, and each field is
+ * [value, label, kind, columns]. The columns are tried in order and the first
+ * one filled in wins, which is how a piece of equipment that was bought but
+ * never given an installed date still sorts by date rather than dropping out.
+ *
+ * Parts offer only the alphabetical one. They carry no date at all, and an
+ * option that quietly sorted by nothing would be worse than not offering it.
+ */
+export const SORT_FIELDS = {
+  equipment: [
+    ['name', 'Alphabetical', 'text', ['name']],
+    ['date', 'Chronological', 'date', ['installedOn', 'purchasedOn']],
+  ],
+  parts: [
+    ['name', 'Alphabetical', 'text', ['name']],
+  ],
+};
+
+/** What the two directions are called, which depends on what is being sorted. */
+export function sortDirections(kind) {
+  if (kind === 'date') return [['asc', 'Oldest first'], ['desc', 'Newest first']];
+  return [['asc', 'A to Z'], ['desc', 'Z to A']];
+}
+
+/** The field definition a setting names, falling back to the first one. */
+export function sortField(tab, key) {
+  const fields = SORT_FIELDS[tab] || SORT_FIELDS.equipment;
+  return fields.find(([value]) => value === key) || fields[0];
+}
+
+// numeric:true so "Filter 2" comes before "Filter 10" rather than after it.
+// sensitivity:'base' so case and accents do not split names that read as the
+// same word.
+const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+/** The first of a field's columns that is actually filled in. */
+function valueOf(record, columns) {
+  for (const column of columns) {
+    const value = record[column];
+    if (value !== null && value !== undefined && String(value).trim() !== '') return String(value);
+  }
+  return '';
+}
+
+/**
+ * Order a list by one of its fields.
+ *
+ * Two rules that are not the direction's business:
+ *
+ * Blanks go last whichever way round the list is. A piece of equipment with no
+ * dates on it is not the oldest thing in the house, and flipping to newest
+ * first should not drag a row of dashes to the top.
+ *
+ * Name breaks every tie, ascending, always. Without it two things bought on
+ * the same day would swap places between repaints, and a list that reshuffles
+ * under you while you read it is worse than one ordered slightly differently
+ * to taste.
+ */
+export function sortRecords(items, tab, key, dir) {
+  const [, , kind, columns] = sortField(tab, key);
+  const sign = dir === 'desc' ? -1 : 1;
+  return items.slice().sort((a, b) => {
+    const av = valueOf(a, columns);
+    const bv = valueOf(b, columns);
+    if (!av !== !bv) return av ? -1 : 1;
+    if (av) {
+      // ISO days, so plain string order is date order.
+      const d = kind === 'date'
+        ? (av < bv ? -1 : av > bv ? 1 : 0)
+        : COLLATOR.compare(av, bv);
+      if (d) return d * sign;
+    }
+    return COLLATOR.compare(String(a.name || ''), String(b.name || ''));
+  });
+}

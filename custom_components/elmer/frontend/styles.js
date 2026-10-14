@@ -507,6 +507,141 @@ export const CSS = `
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
+/* --- paused ------------------------------------------------------------
+   A paused routine is still listed — it has to be, or pausing one would be
+   indistinguishable from deleting it — but it should read as set aside
+   rather than as something waiting on you. Dimmed as a whole, which carries
+   over to a tile without a second rule, and the ring inside it goes to the
+   line colour so it stops reporting a state it is no longer in.
+
+   Not opacity on the row: that would fade the resume button with it, and the
+   one control a paused routine needs is the one that brings it back. */
+.row[data-paused] .title,
+.row[data-paused] .sub,
+.tile[data-paused] .name,
+.tile[data-paused] .meta { opacity: 0.55; }
+.row[data-paused] .meter,
+.tile[data-paused] .meter { opacity: 0.4; }
+.row[data-paused] .sub b,
+.tile[data-paused] .meta b { color: var(--ink-3); font-style: italic; }
+
+/* The way out of a form, under the buttons rather than among them: pausing
+   is rare and deliberate, and should not sit where the thumb lands for the
+   thing you do every time. */
+.pauserow { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
+.linkbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2);
+  font: inherit;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 500;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.linkbtn:hover { color: var(--ink); }
+
+/* The search box shares its row with the way of drawing what it filters.
+   min-width:0 on the box, or a flex item refuses to go below its own content
+   and shoves the toggle off the row instead of letting the placeholder clip. */
+.findrow { display: flex; align-items: stretch; gap: 8px; margin: 0 0 12px; }
+/* The box gives up its fixed height so the row can be as tall as the control
+   beside it needs, and stretches back to match. */
+.findrow .search { flex: 1 1 auto; min-width: 0; margin: 0; height: auto; min-height: calc(42px * var(--ui-scale)); }
+.viewseg { padding: 3px; }
+/* A floor in real pixels, not scaled ones: a tap target is a thumb, and a
+   thumb is the same size whatever the text is set to. The scaled value wins
+   once it is the larger of the two. */
+.viewseg button {
+  display: grid;
+  place-items: center;
+  width: max(44px, calc(40px * var(--ui-scale)));
+  min-height: 44px;
+  padding: 0;
+}
+
+/* --- cards -------------------------------------------------------------
+   The same rows as tiles. auto-fill rather than a fixed count, so the shape
+   follows the width it is given: two across a phone, as many as fit on a
+   desktop, and never narrower than the 150px that keeps a name on two lines
+   rather than five. */
+.tiles {
+  display: grid;
+  /* A chosen number of equal columns rather than as many as happen to fit.
+     minmax(0, 1fr) and not just 1fr: a grid track's default floor is its
+     content, so a long unbroken part number would push a column wider than
+     its share and shove the rest off the row. */
+  grid-template-columns: repeat(var(--cards, 3), minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  min-height: calc(112px * var(--ui-scale));
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--card-shadow);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  -webkit-tap-highlight-color: transparent;
+}
+/* The same answer a row gives under the pointer, drawn the same way: a ring
+   inside the edge, so nothing moves as it appears. */
+.tile:hover { box-shadow: inset 0 0 0 1px var(--line-strong), var(--card-shadow); }
+.tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tile .top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.tile .name {
+  font-size: calc(14.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--ink);
+}
+/* Pushed to the bottom so tiles of different name lengths still line their
+   facts up with each other. */
+.tile .meta {
+  margin-top: auto;
+  font-size: calc(11.5px * var(--ui-scale));
+  font-weight: 500;
+  line-height: 1.45;
+  color: var(--ink-3);
+}
+.tile .meta b { font-weight: 600; color: var(--ink-2); }
+.tile .meta b[data-tone="overdue"] { color: var(--rust); }
+.tile .meta b[data-tone="due"] { color: var(--brass); }
+.tile .glyph {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(38px * var(--ui-scale));
+  height: calc(38px * var(--ui-scale));
+  border-radius: var(--r-md);
+  background: var(--surface-3);
+  color: var(--ink-2);
+}
+.tile .big {
+  font-size: calc(26px * var(--ui-scale));
+  font-weight: 600;
+  line-height: 1;
+  color: var(--ink);
+}
+.tile .big[data-tone="out"] { color: var(--rust); }
+.tile .big[data-tone="low"] { color: var(--brass); }
+.tile .foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+/* The stepper and the tick act on the spot; the tile behind them opens a
+   page. A click resolves to the nearest thing that handles one. */
+.tile .stepper, .tile .tick { cursor: pointer; }
+
 /* A log read top to bottom is a chronology, so it is drawn as one: a rail
    down the left with a dot per entry, rather than a stack of cards. */
 .timeline {
@@ -1038,8 +1173,20 @@ a.btn { text-decoration: none; }
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
+  line-height: 1.45;
   margin-bottom: 5px;
 }
+/* Settings that come in a desktop and a mobile pair name the screen on its
+   own line above the thing it sets. Two short lines beat one long one here:
+   the pair sits in a two-column row, and "Cards per row, desktop" wrapped
+   anyway — in the middle of the phrase rather than between its two halves.
+   Reading down a column now gives Desktop, Desktop and Mobile, Mobile, which
+   is the comparison being made.
+
+   One label element, not two, so the screen name is part of what the control
+   is called rather than a stray word beside it: a screen reader announces
+   "Desktop Font size" and the whole thing stays one hit target. */
+.field > label .scope { display: block; color: var(--ink-2); }
 .field input, .field select, .field textarea {
   width: 100%;
   min-height: calc(42px * var(--ui-scale));
@@ -1509,6 +1656,22 @@ a.btn { text-decoration: none; }
   :host([data-text-narrow="small"]) { --ui-user: 0.92; }
   :host([data-text-narrow="large"]) { --ui-user: 1.12; }
   :host([data-text-narrow="larger"]) { --ui-user: 1.26; }
+}
+
+/* Cards per row, on exactly the arrangement above and for the same reason: a
+   count chosen at a desk should not follow you onto a phone, where four
+   across leaves each card narrower than the name it carries. data-cards
+   applies at every width and data-cards-narrow takes over below the
+   breakpoint, so the two can never disagree and nothing has to listen for a
+   resize. Both are always set, "3" and "2" included, or the wide rule would
+   go on winning on a phone. */
+:host([data-cards="2"]) { --cards: 2; }
+:host([data-cards="3"]) { --cards: 3; }
+:host([data-cards="4"]) { --cards: 4; }
+
+@media (max-width: 759px) {
+  :host([data-cards-narrow="1"]) { --cards: 1; }
+  :host([data-cards-narrow="2"]) { --cards: 2; }
 }
 
 @media (min-width: 760px) {

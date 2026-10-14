@@ -34,6 +34,7 @@ STATUS_ICON = {
     "due": "mdi:clock-alert-outline",
     "new": "mdi:help-circle-outline",
     "ok": "mdi:check-circle-outline",
+    "paused": "mdi:pause-circle-outline",
 }
 
 
@@ -256,6 +257,7 @@ class ElmerRoutineSensor(ElmerEntity):
         eq = self._store.equipment(task.get("equipmentId")) or {}
         return {
             "status": state["status"],
+            "paused": bool(task.get("paused")),
             "due": state["due"],
             "last_done": task.get("lastDone"),
             "interval": f"{task.get('intervalCount')} {task.get('intervalUnit')}",

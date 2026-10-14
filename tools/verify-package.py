@@ -290,14 +290,35 @@ def main() -> int:
             const = fh.read()
 
         check("it registers an icon set", "window.customIconsets" in js)
-        # It is loaded on every Home Assistant page, including pages that have
-        # nothing to do with Elmer, so it declares an icon and does nothing
-        # else. Anything reaching for the document or the network does not
-        # belong in a file with that reach.
+        # This file is loaded on every Home Assistant page, including pages
+        # that have nothing to do with Elmer, so what it is allowed to do is
+        # kept narrow on purpose.
+        #
+        # It used to be allowed nothing at all — no document, no listeners.
+        # That had to give: ha-icon resolves an icon set once and never again,
+        # so an icon that drew before this file arrived stays blank for the
+        # life of the page, and putting it right means reaching for the
+        # elements that gave up. The rule is now about reach rather than
+        # abstinence.
+        #
+        # Still forbidden, because none of it could be part of drawing an
+        # icon: the network, stored state, navigation, and anything that keeps
+        # running after the repair — a timer or an observer would make every
+        # page in the house pay rent for Elmer's sidebar row forever.
+        banned = [t for t in (
+            "fetch(", "XMLHttpRequest", "localStorage", "sessionStorage",
+            "document.write", "document.cookie", "location.", "setInterval(",
+            "MutationObserver", "import(",
+        ) if t in js]
+        check("it keeps off the network, storage and navigation", not banned, ", ".join(banned))
         check(
-            "and does nothing else on pages that are not Elmer's",
-            not any(t in js for t in ("document.", "fetch(", "localStorage", "addEventListener")),
+            "and leaves nothing running behind it",
+            js.count("addEventListener") <= 1 and ("addEventListener" not in js or "once: true" in js),
+            f"{js.count('addEventListener')} listener(s)",
         )
+        # The walk has to stop. An unbounded descent through every shadow root
+        # on a big dashboard is the other way this becomes everyone's problem.
+        check("and its walk is bounded", "budget" in js and "--budget" in js)
 
         setname = re.search(r"window\.customIconsets\.(\w+)", js)
         named = re.search(r'PANEL_ICON\s*=\s*"([^"]+)"', const)

@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 import types
 
@@ -156,6 +157,104 @@ async def main() -> int:
     check("without disturbing the other", both["textSize"], "larger")
     fresh = store_mod.normalize({})["settings"]
     check("and a file with neither starts at the default", fresh["textSizeNarrow"], "default")
+
+    # --- cards per row -----------------------------------------------------
+    # Two counts, split at the same breakpoint the text sizes use. Clamped
+    # rather than refused: a file asking for more columns than exist wanted as
+    # many as it could get.
+    check("the card counts start at three and two",
+          (fresh["cardsWide"], fresh["cardsNarrow"]), (3, 2))
+    for given, want in ((2, 2), (3, 3), (4, 4), (6, 4), (1, 2), (0, 2), ("x", 3), (None, 3)):
+        got = store_mod.normalize({"settings": {"cardsWide": given}})["settings"]["cardsWide"]
+        check(f"a desktop count of {given!r} lands on {want}", got, want)
+    for given, want in ((1, 1), (2, 2), (4, 2), (0, 1), ("x", 2)):
+        got = store_mod.normalize({"settings": {"cardsNarrow": given}})["settings"]["cardsNarrow"]
+        check(f"a mobile count of {given!r} lands on {want}", got, want)
+    # Whole numbers only: a fractional column is not a thing a grid can draw.
+    check("and they survive a round trip as integers",
+          [type(fresh["cardsWide"]).__name__, type(fresh["cardsNarrow"]).__name__],
+          ["int", "int"])
+
+    # --- sorting -----------------------------------------------------------
+    # The store's job here is only to refuse a field that does not exist; the
+    # ordering itself is the panel's and is tested there. The allowed sets are
+    # read back out of the panel's own SORT_FIELDS rather than retyped, so
+    # adding a field on one side and not the other fails here.
+    check("equipment starts sorted by name", fresh["sortEquipment"], "name")
+    check("both start ascending",
+          (fresh["sortEquipmentDir"], fresh["sortPartsDir"]), ("asc", "asc"))
+    # Parts have one order, so there is no field setting to go with their
+    # direction. A key with one legal value is not a setting.
+    check("parts have a direction and no field",
+          ("sortPartsDir" in fresh, "sortParts" in fresh), (True, False))
+
+    util_js = open(os.path.join(PKG, "frontend", "util.js"), encoding="utf-8").read()
+    block = util_js.split("export const SORT_FIELDS")[1].split("\n};")[0]
+    # Each list's array runs to the line that closes it. Counted as well as
+    # compared, because an extraction that quietly matches one entry would let
+    # the rest of this pass without testing anything.
+    for tab, expected in (("equipment", 2), ("parts", 1)):
+        arr = block.split(f"{tab}: [")[1].split("\n  ],")[0]
+        # Anchored to the line start, so the columns nested inside an entry
+        # are not counted as entries of their own.
+        fields = re.findall(r"^\s*\['([a-zA-Z]+)',", arr, re.MULTILINE)
+        check(f"{tab} offers {expected} order(s)", len(fields), expected)
+        if tab != "equipment":
+            continue
+        for field in fields:
+            got = store_mod.normalize({"settings": {"sortEquipment": field}})["settings"]["sortEquipment"]
+            check(f"the store accepts equipment sorted by {field}", got, field)
+        check("and refuses an equipment order that is neither",
+              store_mod.normalize({"settings": {"sortEquipment": "nonesuch"}})["settings"]["sortEquipment"],
+              store_mod.DEFAULT_SETTINGS["sortEquipment"])
+
+    check("a direction that is neither falls back to ascending",
+          store_mod.normalize({"settings": {"sortPartsDir": "sideways"}})["settings"]["sortPartsDir"],
+          "asc")
+    check("and a real one survives",
+          store_mod.normalize({"settings": {"sortPartsDir": "desc"}})["settings"]["sortPartsDir"],
+          "desc")
+
+    # --- the overdue notice ----------------------------------------------
+    # The Home Assistant half of the badge is three lines of create and
+    # dismiss; what is worth checking is what it says, which is why the
+    # wording lives in a pure function.
+    check("the badge is off unless asked for", fresh["badgeOverdue"], False)
+    check("and is always a boolean",
+          store_mod.normalize({"settings": {"badgeOverdue": "yes"}})["settings"]["badgeOverdue"], True)
+
+    def _row(name, days, status="overdue", equipment=None):
+        return {"task": {"name": name}, "equipment": equipment,
+                "state": {"status": status, "daysLeft": days}}
+
+    check("nothing overdue says nothing",
+          schedule.overdue_notice([_row("Fine", 5, "ok")]), None)
+    # Paused routines are not overdue, so they never reach the notice. That is
+    # the two features meeting: pausing is meant to stop exactly this.
+    check("and neither does a paused one",
+          schedule.overdue_notice([_row("Set aside", None, "paused")]), None)
+
+    one = schedule.overdue_notice([_row("Test Alarm", -1)])
+    check("one overdue is counted as one", one[0], "1 overdue")
+    check("and a single day is not pluralised", one[1], "- Test Alarm — due 1 day ago")
+
+    many = schedule.overdue_notice([
+        _row("Replace Furnace Filter", -30, equipment={"name": "Furnace"}),
+        _row("Test Alarm", -16),
+        _row("Due today", 0),
+    ])
+    check("several are counted", many[0], "3 overdue")
+    check("the equipment is named when there is one",
+          many[1].splitlines()[0], "- Replace Furnace Filter (Furnace) — due 30 days ago")
+    check("and left out when there is not", many[1].splitlines()[1], "- Test Alarm — due 16 days ago")
+    check("nothing is 0 days ago", many[1].splitlines()[2], "- Due today — due today")
+
+    # A house with forty overdue routines should not get forty lines in a
+    # notification drawer.
+    lots = schedule.overdue_notice([_row(f"R{i}", -i - 1) for i in range(9)], limit=3)
+    check("a long list is cut short", len(lots[1].splitlines()), 4)
+    check("and says how much was left out", lots[1].splitlines()[-1], "...and 6 more")
+    check("while still counting all of them", lots[0], "9 overdue")
 
     check("a purchase date survives a round trip", n["equipment"][2]["purchasedOn"], "2024-05-02")
     check("so does an order number", n["equipment"][2]["orderNumber"], "WO-4471-B")
@@ -316,6 +415,8 @@ async def main() -> int:
                 {"id": "b", "name": "due", "lastDone": schedule.add_interval(today, -25, "days"), "intervalCount": 1, "intervalUnit": "months"},
                 {"id": "c", "name": "ok", "lastDone": today, "intervalCount": 1, "intervalUnit": "years"},
                 {"id": "d", "name": "new", "lastDone": None, "intervalCount": 1, "intervalUnit": "months"},
+                # Would be overdue by two months if it were not paused.
+                {"id": "e", "name": "paused", "lastDone": schedule.add_interval(today, -90, "days"), "intervalCount": 1, "intervalUnit": "months", "paused": True},
             ],
             "supplies": [
                 {"id": "s1", "name": "none left", "quantity": 0, "reorderAt": 1},
@@ -325,11 +426,21 @@ async def main() -> int:
         },
         merge=False,
     )
-    check("counts", s.counts(), {"overdue": 1, "due": 1, "new": 1, "ok": 1, "lowStock": 2,
-                                 "partsShort": 0, "equipment": 0})
+    # A paused routine is counted as paused and nowhere else. It would read as
+    # overdue on its dates alone, so this is the check that pausing actually
+    # stops the nagging rather than only changing how a row is drawn.
+    check("counts", s.counts(), {"paused": 1, "overdue": 1, "due": 1, "new": 1, "ok": 1,
+                                 "lowStock": 2, "partsShort": 0, "equipment": 0})
+    paused_state = schedule.task_state(s.task("e"), s.due_soon_days)
+    check("a paused routine reports no days left", paused_state["daysLeft"], None)
+    check("which is what keeps a numeric condition from matching it",
+          paused_state["status"], "paused")
+    # The date survives, so the panel can say what was paused rather than only
+    # that something was.
+    check("but it still knows when it would have been due", bool(paused_state["due"]), True)
     # Never-done ranks ahead of fine: STATUS_RANK puts 'new' at 2 and 'ok' at 3,
     # because a routine with no date needs attention more than one that is fine.
-    check("urgency order", [r["task"]["id"] for r in s.rows()], ["a", "b", "d", "c"])
+    check("urgency order", [r["task"]["id"] for r in s.rows()], ["a", "b", "d", "c", "e"])
     check("out of stock", schedule.stock_status({"quantity": 0, "reorderAt": 0}), "out")
     check("at the reorder point is low", schedule.stock_status({"quantity": 2, "reorderAt": 2}), "low")
     check("above it is fine", schedule.stock_status({"quantity": 3, "reorderAt": 2}), "ok")

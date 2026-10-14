@@ -6,11 +6,11 @@ import json
 import logging
 import os
 
-from homeassistant.components import frontend, panel_custom
+from homeassistant.components import frontend, panel_custom, persistent_notification
 from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
 
@@ -23,6 +23,7 @@ from .const import (
     PANEL_URL,
     SIDEBAR_ICON_FILE,
 )
+from . import schedule
 from .services import async_setup_services, async_unload_services
 from .store import ElmerStore
 from .websocket import async_register_websocket_api
@@ -70,9 +71,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         async_register_websocket_api(hass)
         domain_data["_ws"] = True
 
+    entry.async_on_unload(_async_watch_overdue(hass, store))
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await async_setup_services(hass)
     return True
+
+
+NOTIFICATION_ID = "elmer_overdue"
+
+
+def _async_watch_overdue(hass: HomeAssistant, store: ElmerStore):
+    """Keep one persistent notification in step with what is overdue.
+
+    Home Assistant gives a custom panel's own sidebar row no badge — only
+    Notifications and Configuration carry one, both from HA's own data — so a
+    persistent notification is the nearest thing, and it badges the
+    Notifications row rather than Elmer's.
+
+    One notification with a fixed id, so it is replaced rather than stacked:
+    ticking something off edits the message instead of leaving a drift of
+    stale ones behind. It is dismissed the moment nothing is overdue, and the
+    moment the setting is turned off, so turning it off is immediate rather
+    than taking effect next time something changes.
+    """
+
+    @callback
+    def refresh() -> None:
+        try:
+            if not store.data["settings"].get("badgeOverdue"):
+                persistent_notification.async_dismiss(hass, NOTIFICATION_ID)
+                return
+            notice = schedule.overdue_notice(store.rows())
+            if notice is None:
+                persistent_notification.async_dismiss(hass, NOTIFICATION_ID)
+                return
+            title, message = notice
+            persistent_notification.async_create(
+                hass, message, title=f"Elmer: {title}", notification_id=NOTIFICATION_ID
+            )
+        except Exception:  # noqa: BLE001
+            # A badge is the least important thing Elmer does. It must never be
+            # the reason a save fails.
+            _LOGGER.exception("could not update the Elmer overdue notification")
+
+    refresh()
+    remove = store.add_listener(refresh)
+
+    def stop() -> None:
+        remove()
+        persistent_notification.async_dismiss(hass, NOTIFICATION_ID)
+
+    return stop
 
 
 async def _async_register_frontend(hass: HomeAssistant) -> None:

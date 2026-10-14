@@ -104,6 +104,10 @@ def build_tasks():
                     "intervalUnit": unit,
                 }
             )
+    # The same routines again, paused. Pausing is a short-circuit in both
+    # implementations, and a short-circuit is exactly the kind of thing that
+    # gets added to one and forgotten in the other.
+    tasks += [dict(t, id=f"{t['id']}p", paused=True) for t in list(tasks)]
     return tasks
 
 

@@ -38,6 +38,39 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # key, so a file written before the split still means what it said.
     "textSize": "default",
     "textSizeNarrow": "default",
+    # How each list is drawn. Per tab, because the three do not suit cards
+    # equally: equipment is scanned by its glyph and reads well as tiles,
+    # while a routine's strength is one wide line of context that a tile has
+    # to wrap. Everything starts as a list, which is what it has always been.
+    # Off. Home Assistant's sidebar gives a custom panel no badge of its own —
+    # only Notifications and Configuration carry one, both from HA's own data
+    # — so the nearest thing is a persistent notification, which badges the
+    # Notifications row. That is a real change in what Elmer does rather than
+    # how it looks, so nobody gets it without asking.
+    "badgeOverdue": False,
+    "viewRoutines": "list",
+    "viewEquipment": "list",
+    "viewParts": "list",
+    # How many cards sit in a row of the card view. Two of them for the same
+    # reason the text sizes split: a fixed count applies at every width unless
+    # told otherwise, and four across a phone leaves each card about 82px
+    # wide — narrower than the word it has to hold. The ranges differ because
+    # the screens do; a phone has room for one or two and no more.
+    "cardsWide": 3,
+    "cardsNarrow": 2,
+    # How the equipment and parts lists are ordered, and which way round.
+    #
+    # Equipment can go alphabetically or by date; parts only alphabetically,
+    # since they carry no date and an option that sorted by nothing would be
+    # worse than not offering one. That is why there is no "sortParts" to go
+    # with the direction — one legal value is not a setting.
+    #
+    # Routines and history are not sortable on purpose: a routine list ordered
+    # by anything other than urgency stops answering the question it is for,
+    # and history is a timeline.
+    "sortEquipment": "name",
+    "sortEquipmentDir": "asc",
+    "sortPartsDir": "asc",
     "dueSoonDays": DEFAULT_DUE_SOON_DAYS,
     # Home Assistant handles delivery, so notification settings from an older
     # file are not carried over. They stay in the data untouched if an import
@@ -124,6 +157,9 @@ def normalize(raw: Any) -> dict[str, Any]:
         if not isinstance(t, dict):
             continue
         item = {k: v for k, v in t.items() if k != "partNumber"}
+        # A routine is paused or it is not; anything truthy in a file counts
+        # as paused, and the value stored is always a boolean.
+        item["paused"] = bool(t.get("paused"))
         used = t.get("partsUsed") if isinstance(t.get("partsUsed"), list) else []
         item["partsUsed"] = [
             {"supplyId": u.get("supplyId"), "quantity": max(1, _int(u.get("quantity"), 1))}
@@ -145,6 +181,25 @@ def normalize(raw: Any) -> dict[str, Any]:
     if isinstance(raw.get("settings"), dict):
         settings.update(raw["settings"])
     settings["dueSoonDays"] = max(0, _int(settings.get("dueSoonDays"), DEFAULT_DUE_SOON_DAYS))
+    # Only two shapes exist; anything else in a hand-edited file or an older
+    # export falls back to the list rather than rendering nothing.
+    for key in ("viewRoutines", "viewEquipment", "viewParts"):
+        if settings.get(key) not in ("list", "cards"):
+            settings[key] = "list"
+    settings["badgeOverdue"] = bool(settings.get("badgeOverdue"))
+    # A sort field naming a column that does not exist would silently order by
+    # nothing, so anything unrecognised goes back to the default rather than
+    # through. The allowed sets are the panel's SORT_FIELDS, kept in step by
+    # verify-store.py rather than by memory.
+    # Clamped rather than rejected: a file naming 6 wanted as many as it could
+    # get, and 4 is as many as there are. The ranges are the panel's.
+    settings["cardsWide"] = min(4, max(2, _int(settings.get("cardsWide"), 3)))
+    settings["cardsNarrow"] = min(2, max(1, _int(settings.get("cardsNarrow"), 2)))
+    if settings.get("sortEquipment") not in ("name", "date"):
+        settings["sortEquipment"] = DEFAULT_SETTINGS["sortEquipment"]
+    for key in ("sortEquipmentDir", "sortPartsDir"):
+        if settings.get(key) not in ("asc", "desc"):
+            settings[key] = "asc"
     # A file from before the two sizes split carries one of them. Whatever it
     # chose was chosen on some screen and meant for every screen, so it applies
     # to both rather than leaving the phone silently back at Default.
@@ -298,6 +353,7 @@ class ElmerStore:
     def counts(self) -> dict[str, int]:
         rows = self.rows()
         return {
+            "paused": sum(1 for r in rows if r["state"]["status"] == "paused"),
             "overdue": sum(1 for r in rows if r["state"]["status"] == "overdue"),
             "due": sum(1 for r in rows if r["state"]["status"] == "due"),
             "new": sum(1 for r in rows if r["state"]["status"] == "new"),

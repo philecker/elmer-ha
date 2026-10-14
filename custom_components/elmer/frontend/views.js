@@ -14,6 +14,7 @@ import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
   INTERVAL_UNITS, intervalText, safeHref, asLink, linkLabel, daysBetween, MONTHS,
+  SORT_FIELDS, sortDirections, sortField, sortRecords,
 } from './util.js';
 
 /* ------------------------------------------------------------------ bits -- */
@@ -46,6 +47,35 @@ export function searchBox(state, placeholder) {
     ${raw(state.query
       ? `<button class="clear" data-act="search-clear" aria-label="Clear search">${icon('x', 15)}</button>`
       : '')}
+  </div>`;
+}
+
+/** Which shape a tab is drawn in. Anything unrecognised reads as a list. */
+export function viewOf(state, tab) {
+  const key = { routines: 'viewRoutines', equipment: 'viewEquipment', parts: 'viewParts' }[tab];
+  return state.settings[key] === 'cards' ? 'cards' : 'list';
+}
+
+/**
+ * The search box and the two ways of drawing what it filters, on one row.
+ *
+ * The toggle is the same segmented control the history ranges use, with the
+ * buttons squared off for glyphs. The search box has to be allowed to shrink
+ * — a flex item will not go below its own content otherwise, and the second
+ * button gets pushed off the row rather than the placeholder being clipped.
+ */
+export function findRow(state, tab, placeholder) {
+  const now = viewOf(state, tab);
+  const button = (value, glyph, label) => `<button data-act="set-view" data-tab="${esc(tab)}"
+    data-value="${value}" aria-pressed="${now === value}" aria-label="${esc(label)}"
+    title="${esc(label)}">${icon(glyph, 17)}</button>`;
+
+  return html`<div class="findrow">
+    ${raw(searchBox(state, placeholder))}
+    <div class="seg viewseg" role="group" aria-label="How this list is drawn">
+      ${raw(button('list', 'viewlist', 'List view'))}
+      ${raw(button('cards', 'viewcards', 'Card view'))}
+    </div>
   </div>`;
 }
 
@@ -102,18 +132,55 @@ export function routineRow(row, state, opts = {}) {
     : whereLine(eq, state.settings.showLocations);
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
+  const off = st.status === 'paused';
 
-  return html`<div class="row" data-act="routine" data-id="${t.id}" role="button" tabindex="0">
+  return html`<div class="row" data-act="routine" data-id="${t.id}" role="button" tabindex="0"${raw(off ? ' data-paused="1"' : '')}>
     ${raw(meter(st))}
     <div class="body">
       <div class="title">${t.name}</div>
       <div class="sub"${raw(tone ? ` data-tone="${esc(tone)}"` : '')}>
-        <b>${relative(st.daysLeft)}</b>
+        <b>${raw(off ? 'Paused' : esc(relative(st.daysLeft)))}</b>
         ${raw(where ? `<span class="dot">·</span><span class="txt">${esc(where)}</span>` : '')}
       </div>
     </div>
-    <button class="tick" data-act="complete" data-id="${t.id}"${raw(busy)}
-      title="Mark done today" aria-label="Mark ${t.name} done today">${raw(icon('check', 17))}</button>
+    ${raw(off
+      ? `<button class="tick" data-act="resume" data-id="${esc(t.id)}"
+          title="Resume this routine" aria-label="Resume ${esc(t.name)}">${icon('play', 17)}</button>`
+      : `<button class="tick" data-act="complete" data-id="${esc(t.id)}"${busy}
+          title="Mark done today" aria-label="Mark ${esc(t.name)} done today">${icon('check', 17)}</button>`)}
+  </div>`;
+}
+
+/**
+ * The same routine as a tile.
+ *
+ * The ring and the tick keep the corners a thumb already reaches for. What a
+ * tile cannot keep is the row's one wide line of context, so it wraps under
+ * the name instead of being truncated into uselessness.
+ */
+export function routineTile(row, state, opts = {}) {
+  const t = row.task;
+  const st = row.state;
+  const where = opts.hideEquipment
+    ? `every ${intervalText(t.intervalCount, t.intervalUnit)}`
+    : whereLine(row.equipment, state.settings.showLocations);
+  const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
+  const busy = opts.busy ? ' data-busy="1"' : '';
+  const off = st.status === 'paused';
+
+  return html`<div class="tile" data-act="routine" data-id="${t.id}" role="button" tabindex="0"${raw(off ? ' data-paused="1"' : '')}>
+    <div class="top">
+      ${raw(meter(st))}
+      ${raw(off
+        ? `<button class="tick" data-act="resume" data-id="${esc(t.id)}"
+            title="Resume this routine" aria-label="Resume ${esc(t.name)}">${icon('play', 17)}</button>`
+        : `<button class="tick" data-act="complete" data-id="${esc(t.id)}"${busy}
+            title="Mark done today" aria-label="Mark ${esc(t.name)} done today">${icon('check', 17)}</button>`)}
+    </div>
+    <div class="name">${t.name}</div>
+    <div class="meta"><b${raw(tone ? ` data-tone="${esc(tone)}"` : '')}>${raw(off ? 'Paused' : esc(relative(st.daysLeft)))}</b>${raw(
+      where ? `<br>${esc(where)}` : ''
+    )}</div>
   </div>`;
 }
 
@@ -126,8 +193,16 @@ const FILTERS = [
   ['ok', 'Up to date'],
 ];
 
-/** The four real states, in the order they matter. 'all' is not a group. */
-const GROUPS = FILTERS.filter(([key]) => key !== 'all');
+/**
+ * The groups the All view is cut into, in the order they matter.
+ *
+ * Paused is last and has no pill of its own. It is not a state a routine is
+ * in so much as a state it has been taken out of, and a sixth pill counting
+ * things nobody wants counted is the opposite of the point. But it does need
+ * a heading: without one, pausing a routine would make it disappear from the
+ * only screen that lists everything.
+ */
+const GROUPS = [...FILTERS.filter(([key]) => key !== 'all'), ['paused', 'Paused']];
 
 /**
  * Does this routine answer to what was typed?
@@ -167,7 +242,14 @@ export function routinesView(state) {
     </button>`;
   });
 
-  const search = searchBox(state, 'Search routines, equipment or location');
+  // Shorter than it was: the toggle takes the right-hand end of the row, and
+  // the old placeholder named all three things it searches, which no longer
+  // fits a phone. It still searches all three.
+  const search = findRow(state, 'routines', 'Search routines');
+  const shape = viewOf(state, 'routines');
+  const draw = (group) => (shape === 'cards'
+    ? html`<div class="tiles">${group.map((r) => routineTile(r, state, { busy: state.busy[r.task.id] }))}</div>`
+    : html`<div class="card">${group.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] }))}</div>`);
 
   let body;
   if (!state.tasks.length) {
@@ -204,10 +286,10 @@ export function routinesView(state) {
       const group = rows.filter((r) => r.state.status === key);
       if (!group.length) return '';
       return html`<div class="label">${label}<span class="count">${group.length}</span></div>
-        <div class="card">${group.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] }))}</div>`;
+        ${raw(draw(group))}`;
     }).join(''));
   } else {
-    body = html`<div class="card">${rows.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] }))}</div>`;
+    body = draw(rows);
   }
 
   // The banner, stat strip and pills scroll with the list rather than being
@@ -241,7 +323,7 @@ export function equipmentView(state) {
 
   if (!matched.length) {
     return html`<div class="scroll"><div class="pad">
-      ${raw(searchBox(state, 'Search equipment'))}
+      ${raw(findRow(state, 'equipment', 'Search equipment'))}
       ${raw(emptyState({
         ic: 'search',
         title: 'Nothing matches that',
@@ -256,6 +338,7 @@ export function equipmentView(state) {
   // Keyed by the location as stored, with the leftovers under a key of their
   // own rather than under the word "Unassigned" — otherwise a house with a
   // room actually called that would merge the two.
+  const shape = viewOf(state, 'equipment');
   const UNPLACED = Symbol('unplaced');
   const groups = new Map();
   for (const eq of matched) {
@@ -281,33 +364,45 @@ export function equipmentView(state) {
     })
     .map(([key, items]) => {
       const where = key === UNPLACED ? 'Unassigned' : key;
-      const rows = items
-        .slice()
-        .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+      const rows = sortRecords(items, 'equipment', state.settings.sortEquipment, state.settings.sortEquipmentDir)
         .map((eq) => {
           const tasks = state.tasks.filter((t) => t.equipmentId === eq.id);
           const worst = rollUp(tasks, state);
           const n = tasks.length;
+          const routines = `${n} ${n === 1 ? 'routine' : 'routines'}`;
+          const made = [eq.brand, eq.model].filter(Boolean).join(' ');
+          const tag = worst === 'idle' ? '' : `<span class="tag" data-tone="${esc(worst)}">${esc(worst)}</span>`;
+
+          // As a tile the glyph stops being decoration and becomes the thing
+          // you scan for, which is why this list suits cards best of the
+          // three. The chevron goes: a tile is plainly a thing to press, and
+          // an arrow in a corner only competes with the status tag.
+          if (shape === 'cards') {
+            return html`<div class="tile" data-act="equipment" data-id="${eq.id}" role="button" tabindex="0">
+              <div class="top">${raw(equipmentGlyph(eq, 21))}${raw(tag)}</div>
+              <div class="name">${eq.name}</div>
+              <div class="meta">${routines}${raw(made ? `<br>${esc(made)}` : '')}</div>
+            </div>`;
+          }
+
           return html`<div class="row" data-act="equipment" data-id="${eq.id}" role="button" tabindex="0">
             ${raw(equipmentGlyph(eq))}
             <div class="body">
               <div class="title">${eq.name}</div>
               <div class="sub">
-                <span class="txt">${n} ${raw(n === 1 ? 'routine' : 'routines')}${raw(
-                  eq.brand || eq.model ? ` · ${esc([eq.brand, eq.model].filter(Boolean).join(' '))}` : ''
-                )}</span>
+                <span class="txt">${routines}${raw(made ? ` · ${esc(made)}` : '')}</span>
               </div>
             </div>
-            ${raw(worst === 'idle' ? '' : `<span class="tag" data-tone="${esc(worst)}">${esc(worst)}</span>`)}
+            ${raw(tag)}
             ${raw(icon('chevron', 16))}
           </div>`;
         });
       return html`${raw(where ? `<div class="label">${esc(where)}</div>` : '')}
-        <div class="card">${rows}</div>`;
+        <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${rows}</div>`;
     });
 
   return html`<div class="scroll"><div class="pad">
-    ${raw(searchBox(state, 'Search equipment'))}
+    ${raw(findRow(state, 'equipment', 'Search equipment'))}
     ${sections}
   </div></div>`;
 }
@@ -485,7 +580,7 @@ export function partsView(state) {
 
   if (!matched.length) {
     return html`<div class="scroll"><div class="pad">
-      ${raw(searchBox(state, 'Search parts'))}
+      ${raw(findRow(state, 'parts', 'Search parts'))}
       ${raw(emptyState({
         ic: 'search',
         title: 'Nothing matches that',
@@ -494,12 +589,9 @@ export function partsView(state) {
     </div></div>`;
   }
 
-  const order = { out: 0, low: 1, ok: 2 };
-  const sorted = matched.slice().sort((a, b) => {
-    const d = order[state.computed.stock[a.id] || 'ok'] - order[state.computed.stock[b.id] || 'ok'];
-    return d !== 0 ? d : String(a.name || '').localeCompare(String(b.name || ''));
-  });
+  const sorted = sortRecords(matched, 'parts', 'name', state.settings.sortPartsDir);
 
+  const shape = viewOf(state, 'parts');
   const rows = sorted.map((p) => {
     const tone = state.computed.stock[p.id] || 'ok';
     const uses = state.tasks.filter((t) => (t.partsUsed || []).some((u) => u.supplyId === p.id)).length;
@@ -507,29 +599,44 @@ export function partsView(state) {
     if (p.reorderAt) bits.push(`reorder at ${p.reorderAt}`);
     if (uses) bits.push(`${uses} ${uses === 1 ? 'routine' : 'routines'}`);
     if (p.partNumber) bits.push(p.partNumber);
+    const facts = bits.length ? esc(bits.join(' · ')) : 'on hand';
+    const stepper = `<div class="stepper">
+        <button class="iconbtn" data-act="stock" data-id="${esc(p.id)}" data-delta="-1"
+          aria-label="One fewer ${esc(p.name)}">${icon('minus', 16)}</button>
+        <button class="iconbtn" data-act="stock" data-id="${esc(p.id)}" data-delta="1"
+          aria-label="One more ${esc(p.name)}">${icon('plus', 16)}</button>
+      </div>`;
+
+    // As a tile the count is the headline rather than a pill at the left
+    // edge, tinted by stock the same way. The stepper still has to be
+    // reachable without opening the part, which is what sets the height.
+    if (shape === 'cards') {
+      return html`<div class="tile" data-act="part" data-id="${p.id}" role="button" tabindex="0">
+        <div class="top"><div class="big" data-tone="${tone}">${p.quantity}</div></div>
+        <div class="name">${p.name}</div>
+        <div class="meta">${raw(facts)}</div>
+        <div class="foot">${raw(stepper)}</div>
+      </div>`;
+    }
+
     return html`<div class="row" data-act="part" data-id="${p.id}" role="button" tabindex="0">
       <div class="qty" data-tone="${tone}">${p.quantity}</div>
       <div class="body">
         <div class="title">${p.name}</div>
-        <div class="sub"><span class="txt">${raw(bits.length ? esc(bits.join(' · ')) : 'on hand')}</span></div>
+        <div class="sub"><span class="txt">${raw(facts)}</span></div>
       </div>
-      <div class="stepper">
-        <button class="iconbtn" data-act="stock" data-id="${p.id}" data-delta="-1"
-          aria-label="One fewer ${p.name}">${raw(icon('minus', 16))}</button>
-        <button class="iconbtn" data-act="stock" data-id="${p.id}" data-delta="1"
-          aria-label="One more ${p.name}">${raw(icon('plus', 16))}</button>
-      </div>
+      ${raw(stepper)}
     </div>`;
   });
 
   // Grouped by where they are kept, on the same switch and the same rule the
   // equipment list uses: rooms alphabetically, and whatever has no room last.
-  // Within a group the urgency order above is kept, so the thing you are out
-  // of is still at the top of its own shelf.
+  // The chosen order above applies inside each group rather than across the
+  // whole list, so a shelf is ordered against itself.
   if (!state.settings.showLocations) {
     return html`<div class="scroll"><div class="pad">
-      ${raw(searchBox(state, 'Search parts'))}
-      <div class="card">${rows}</div>
+      ${raw(findRow(state, 'parts', 'Search parts'))}
+      <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${rows}</div>
     </div></div>`;
   }
 
@@ -548,10 +655,10 @@ export function partsView(state) {
       return String(a[0]).localeCompare(String(b[0]));
     })
     .map(([key, items]) => html`<div class="label">${key === UNPLACED ? 'Unassigned' : key}</div>
-      <div class="card">${raw(items.join(''))}</div>`);
+      <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${raw(items.join(''))}</div>`);
 
   return html`<div class="scroll"><div class="pad">
-    ${raw(searchBox(state, 'Search parts'))}
+    ${raw(findRow(state, 'parts', 'Search parts'))}
     ${sections}
   </div></div>`;
 }
@@ -748,6 +855,45 @@ export function groupForm(state, field, value) {
     </div>`;
 }
 
+/**
+ * One list's order: the field, and which way round it runs.
+ *
+ * The direction menu is named after the field rather than reading "Ascending"
+ * — "Oldest first" is the same instruction said in the words of the thing
+ * being sorted, and it changes under you when you change the field above it.
+ */
+function sortRow(s, tab, label) {
+  const fields = SORT_FIELDS[tab];
+  const dirKey = tab === 'parts' ? 'sortPartsDir' : 'sortEquipmentDir';
+  const chosen = tab === 'parts' ? 'name' : s.sortEquipment;
+  const [, , kind] = sortField(tab, chosen);
+  const direction = html`<select id="sortdir-${tab}" data-act="set-sort-dir" data-tab="${tab}">
+      ${sortDirections(kind).map(([v, l]) => html`<option value="${v}"${raw((s[dirKey] || 'asc') === v ? ' selected' : '')}>${l}</option>`)}
+    </select>`;
+
+  // Parts have one order, so they get one menu under their own name rather
+  // than a menu of one beside it.
+  if (fields.length < 2) {
+    return html`<div class="field">
+      <label for="sortdir-${tab}">${label}</label>
+      ${raw(direction)}
+    </div>`;
+  }
+
+  return html`<div class="two">
+    <div class="field">
+      <label for="sort-${tab}">${label}</label>
+      <select id="sort-${tab}" data-act="set-sort" data-tab="${tab}">
+        ${fields.map(([v, l]) => html`<option value="${v}"${raw(chosen === v ? ' selected' : '')}>${l}</option>`)}
+      </select>
+    </div>
+    <div class="field">
+      <label for="sortdir-${tab}">Order</label>
+      ${raw(direction)}
+    </div>
+  </div>`;
+}
+
 export function settingsView(state) {
   const s = state.settings;
   const themes = [['system', 'Follow Home Assistant'], ['light', 'Light'], ['dark', 'Dark']];
@@ -769,13 +915,13 @@ export function settingsView(state) {
          finding the phone. -->
     <div class="two">
       <div class="field">
-        <label for="textsize">Desktop size</label>
+        <label for="textsize"><span class="scope">Desktop</span>Font size</label>
         <select id="textsize" data-act="set-text">
           ${SIZES.map(([v, l]) => html`<option value="${v}"${raw((s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
         </select>
       </div>
       <div class="field">
-        <label for="textsize-n">Mobile size</label>
+        <label for="textsize-n"><span class="scope">Mobile</span>Font size</label>
         <select id="textsize-n" data-act="set-text-narrow">
           ${SIZES.map(([v, l]) => html`<option value="${v}"${raw((s.textSizeNarrow || s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
         </select>
@@ -784,12 +930,54 @@ export function settingsView(state) {
       <div class="field">
         <div class="hint">Type and icons are already a little larger on a narrow screen than on a wide one, since a phone is held further away. These shift each further. Which applies follows the width of the window, so a desktop browser dragged narrow reads as a phone.</div>
       </div>
+      <!-- Split the same way and for the same reason: four across a phone
+           leaves each card narrower than the name on it. -->
+      <div class="two">
+        <div class="field">
+          <label for="cards"><span class="scope">Desktop</span>Cards per row</label>
+          <select id="cards" data-act="set-cards">
+            ${[2, 3, 4].map((n) => html`<option value="${n}"${raw((s.cardsWide || 3) === n ? ' selected' : '')}>${n}</option>`)}
+          </select>
+        </div>
+        <div class="field">
+          <label for="cards-n"><span class="scope">Mobile</span>Cards per row</label>
+          <select id="cards-n" data-act="set-cards-narrow">
+            ${[1, 2].map((n) => html`<option value="${n}"${raw((s.cardsNarrow || 2) === n ? ' selected' : '')}>${n}</option>`)}
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. A phone is offered fewer because it has less to give: at four across, a card is about 82px wide.</div>
+      </div>
+      <!-- Named for where the badge actually appears. Home Assistant gives a
+           custom panel's own sidebar row no badge, so this is the nearest
+           thing and it lands on the Notifications row. -->
+      <div class="field">
+        <label for="badge">Badge the sidebar when overdue</label>
+        <select id="badge" data-act="set-badge">
+          <option value="0"${raw(!s.badgeOverdue ? ' selected' : '')}>No</option>
+          <option value="1"${raw(s.badgeOverdue ? ' selected' : '')}>Yes, as a notification</option>
+        </select>
+        <div class="hint">Keeps one notification listing what is overdue, which puts a count on Home Assistant's Notifications row. It is replaced as things change and cleared when nothing is overdue. Paused routines are never in it.</div>
+      </div>
       <div class="field">
         <label for="locs">Show locations</label>
         <select id="locs" data-act="set-locations">
           <option value="1"${raw(s.showLocations ? ' selected' : '')}>Yes, group by location</option>
           <option value="0"${raw(!s.showLocations ? ' selected' : '')}>No, one flat list</option>
         </select>
+      </div>
+    </div></div>
+
+    <!-- One per list rather than one for both: equipment has dates to sort by
+         and parts have none, so a shared menu would have to offer the parts
+         list an order it cannot actually produce. -->
+    <div class="label">Sorting</div>
+    <div class="card"><div style="padding:4px 12px 14px">
+      ${raw(sortRow(s, 'equipment', 'Equipment'))}
+      ${raw(sortRow(s, 'parts', 'Parts'))}
+      <div class="field">
+        <div class="hint">Chronological equipment goes by its installed date, or by the purchased date when there is no installed one. Lists grouped by location are sorted inside each group, so a room is ordered against itself; rooms stay alphabetical with Unassigned last. Anything with no date goes to the bottom either way round.</div>
       </div>
     </div></div>
 
@@ -1239,7 +1427,20 @@ export function logForm(state, taskId) {
     </div>` : '')}
     <div class="btnrow">
       <button class="btn" data-act="edit-routine" data-id="${task.id}">${raw(icon('edit', 16))}Edit</button>
-      <button class="btn" data-variant="primary" data-act="save-log" data-id="${task.id}">${raw(icon('check', 16))}Mark done</button>
+      ${raw(task.paused
+        ? `<button class="btn" data-variant="primary" data-act="resume" data-id="${esc(task.id)}">${icon('play', 16)}Resume</button>`
+        : `<button class="btn" data-variant="primary" data-act="save-log" data-id="${esc(task.id)}">${icon('check', 16)}Mark done</button>`)}
+    </div>
+    <!-- Below the buttons rather than among them: pausing is a thing you do
+         rarely and on purpose, and it should not sit where the thumb lands
+         for the thing you do every time. -->
+    <div class="pauserow">
+      ${raw(task.paused
+        ? `<button class="linkbtn" data-act="resume" data-id="${esc(task.id)}">${icon('play', 14)}Resume this routine</button>`
+        : `<button class="linkbtn" data-act="pause" data-id="${esc(task.id)}">${icon('pause', 14)}Pause this routine</button>`)}
+      <div class="hint">${raw(task.paused
+        ? 'It is counting again, and its sensor reports days until due.'
+        : 'Elmer stops counting it: no overdue badge, and its sensor reads unknown so an automation will not fire on it. Its history is kept.')}</div>
     </div>`;
 }
 

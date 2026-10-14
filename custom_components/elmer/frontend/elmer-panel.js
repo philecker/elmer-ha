@@ -418,23 +418,28 @@ class ElmerPanel extends HTMLElement {
    * and the panel should match the dashboard around it, not the OS.
    */
   /**
-   * The reader's text-size preferences, as attributes the stylesheet reads.
+   * The preferences that depend on screen width — text size, and how many
+   * cards go in a row — as attributes the stylesheet reads.
    *
-   * Two of them, one for a wide screen and one for a narrow one. Which applies
-   * is settled in CSS, at the same breakpoint --ui-base uses, so this does not
-   * have to know how wide the window is or notice when it changes.
+   * A pair of each, one for a wide screen and one for a narrow one. Which
+   * applies is settled in CSS, at the same breakpoint --ui-base uses, so this
+   * does not have to know how wide the window is or notice when it changes.
    *
    * The narrow one is always set, "default" included: the wide rule applies at
    * every width, so an absent narrow attribute would leave it in force on a
    * phone and the phone setting would appear to do nothing whenever the
    * desktop one was not Default.
    */
-  _applyTextSize() {
+  _applyScreenPrefs() {
     const s = (this.data && this.data.settings) || {};
     const wide = s.textSize || 'default';
     if (wide === 'default') this.removeAttribute('data-text');
     else this.setAttribute('data-text', wide);
     this.setAttribute('data-text-narrow', s.textSizeNarrow || wide);
+    // Both always set, defaults included: an absent data-cards-narrow would
+    // leave a phone on whatever the desktop chose.
+    this.setAttribute('data-cards', String(s.cardsWide || 3));
+    this.setAttribute('data-cards-narrow', String(s.cardsNarrow || 2));
   }
 
   _applyTheme() {
@@ -455,7 +460,7 @@ class ElmerPanel extends HTMLElement {
     // which carry HA's mode rather than the one that was asked for.
     if (pref === 'system') this.removeAttribute('data-pinned');
     else this.setAttribute('data-pinned', '');
-    this._applyTextSize();
+    this._applyScreenPrefs();
   }
 
   /* -------------------------------------------------------------- state -- */
@@ -868,7 +873,7 @@ class ElmerPanel extends HTMLElement {
       this._apply([{ kind: 'settings.put', payload: { [key]: el.value } }]);
       // Repaint at the new size immediately rather than after the round trip.
       this.data.settings[key] = el.value;
-      this._applyTextSize();
+      this._applyScreenPrefs();
     } else if (act === 'pick-part') {
       this._pickPart(el);
     } else if (act === 'pick-or-new') {
@@ -881,6 +886,27 @@ class ElmerPanel extends HTMLElement {
         if (adding) box.focus();
         else box.value = '';
       }
+    } else if (act === 'set-cards' || act === 'set-cards-narrow') {
+      const key = act === 'set-cards' ? 'cardsWide' : 'cardsNarrow';
+      const n = parseInt(el.value, 10) || (key === 'cardsWide' ? 3 : 2);
+      this._apply([{ kind: 'settings.put', payload: { [key]: n } }]);
+      // Re-lay the grid now rather than after the round trip: this one is
+      // visible the moment the menu closes, the way the text sizes are.
+      this.data.settings[key] = n;
+      this._applyScreenPrefs();
+    } else if (act === 'set-sort' || act === 'set-sort-dir') {
+      // Changing the field can change what the direction beside it is called —
+      // a date reads "Oldest first" where a count reads "Fewest first" — and
+      // the relabelling rides on the repaint the saved settings trigger, the
+      // same way the location switch redraws its groups. The stored direction
+      // is left alone, since asc and desc mean the same thing under any name.
+      // Parts have one order and so only a direction; equipment has both.
+      const key = act === 'set-sort-dir'
+        ? (el.dataset.tab === 'parts' ? 'sortPartsDir' : 'sortEquipmentDir')
+        : 'sortEquipment';
+      this._apply([{ kind: 'settings.put', payload: { [key]: el.value } }]);
+    } else if (act === 'set-badge') {
+      this._apply([{ kind: 'settings.put', payload: { badgeOverdue: el.value === '1' } }]);
     } else if (act === 'set-locations') {
       this._apply([{ kind: 'settings.put', payload: { showLocations: el.value === '1' } }]);
     } else if (act === 'set-soon') {
@@ -915,6 +941,15 @@ class ElmerPanel extends HTMLElement {
       case 'range':
         this.range = el.dataset.value;
         this._render();
+        return;
+      case 'pause':
+        this._setPaused(id, true);
+        return;
+      case 'resume':
+        this._setPaused(id, false);
+        return;
+      case 'set-view':
+        this._setView(el.dataset.tab, el.dataset.value);
         return;
       case 'rename-group':
         this._openSheet({ kind: 'group-form', field: el.dataset.field, value: el.dataset.value });
@@ -1069,6 +1104,45 @@ class ElmerPanel extends HTMLElement {
     if (eq) bits.push(`${eq} ${eq === 1 ? 'piece' : 'pieces'} of equipment`);
     if (parts) bits.push(`${parts} ${parts === 1 ? 'part' : 'parts'}`);
     return bits.join(' and ') || 'nothing';
+  }
+
+  /**
+   * List or cards, for one tab.
+   *
+   * Per tab rather than one switch for all three: the three lists do not suit
+   * cards equally, and the point of offering both is being able to use each
+   * where it reads better. Painted before the round trip, because a view
+   * toggle that waits on the network feels broken rather than slow.
+   */
+  /**
+   * Stop counting a routine, or start again.
+   *
+   * The record is written whole rather than patched, because routine.put is
+   * an upsert of the thing itself; sending only the flag would be read as a
+   * routine with no name and no interval.
+   *
+   * Nothing else is touched. The dates stay, the history stays, the parts it
+   * uses stay — pausing is Elmer looking away, not the routine being
+   * dismantled, and resuming has to put it back exactly as it was.
+   */
+  async _setPaused(id, paused) {
+    const task = this.data.tasks.find((t) => t.id === id);
+    if (!task || Boolean(task.paused) === paused) return undefined;
+    const ok = await this._apply([
+      { kind: 'routine.put', payload: { ...task, paused } },
+    ]);
+    if (!ok) return undefined;
+    if (this.sheet && this.sheet.kind === 'routine' && this.sheet.id === id) this._closeSheet();
+    return this._flash(paused ? `${task.name} paused` : `${task.name} resumed`);
+  }
+
+  _setView(tab, value) {
+    const key = { routines: 'viewRoutines', equipment: 'viewEquipment', parts: 'viewParts' }[tab];
+    if (!key || (value !== 'list' && value !== 'cards')) return;
+    if (this.data.settings[key] === value) return;
+    this.data.settings[key] = value;
+    this._render();
+    this._apply([{ kind: 'settings.put', payload: { [key]: value } }]);
   }
 
   async _saveGroup(field, value) {
@@ -1270,6 +1344,11 @@ class ElmerPanel extends HTMLElement {
       intervalUnit: f.intervalUnit || 'months',
       lastDone: f.lastDone || null,
       partsUsed,
+      // Nothing about pausing here on purpose. A put patches by id rather
+      // than replacing, so a field the form does not carry survives the save
+      // — which is what keeps editing the interval on a paused routine from
+      // quietly starting it counting again. There is a test on that, because
+      // it is a property of the store rather than of this form.
     };
     await this._apply([{ kind: 'routine.put', payload: record }]);
     this._closeSheet();

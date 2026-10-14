@@ -54,6 +54,13 @@ function nextDue(task) {
 }
 
 function taskState(task, dueSoonDays = 14) {
+  // Paused short-circuits the rest, and daysLeft comes back null with it:
+  // that null is what reaches Home Assistant as unknown, which no numeric
+  // condition matches, so a paused routine stops firing the automation it
+  // was paused to silence. The date it would have been due survives.
+  if (task && task.paused) {
+    return { due: nextDue(task), daysLeft: null, status: 'paused', progress: 0, cycle: null };
+  }
   const due = nextDue(task);
   if (!due) return { due: null, daysLeft: null, status: 'new', progress: 0 };
   const now = today();

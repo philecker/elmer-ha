@@ -1363,24 +1363,45 @@ async function main() {
     JSON.stringify(partOrder.map((g) => g.where)));
   check('with the unplaced ones last',
     partOrder[partOrder.length - 1].where, 'Unassigned');
-  // Within a group: out, then low, then fine.
-  const rank = { out: 0, low: 1, ok: 2 };
+  // Within a group: by name. Parts carry no date, so alphabetical is the only
+  // order they have, and the stock tint on the count is what marks the urgent
+  // ones now rather than their position in the list.
   for (const g of partOrder) {
-    const tones = g.rows.map((r) => rank[r.tone]);
-    ok(`${g.where}: what you are out of is at the top of its own shelf`,
-      tones.every((t, i) => i === 0 || tones[i - 1] <= t),
-      JSON.stringify(g.rows));
+    const names = g.rows.map((r) => r.name);
+    const sorted = [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+    check(`${g.where}: its shelf reads alphabetically`, names, sorted);
   }
-  // And with grouping off it is one list, most urgent first, as it was.
+  // And with grouping off it is one list, still alphabetical.
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(90);
   await page.selectOption(el('select[data-act="set-locations"]'), '0');
   await page.waitForTimeout(160);
   await page.click(el('.tab[data-value="parts"]'));
   await page.waitForTimeout(120);
-  check('ungrouped, the most urgent part in the house is first',
-    await page.textContent(el('.card .row .title')), 'Fridge Water Filter');
+  check('ungrouped, the whole shelf reads alphabetically',
+    await page.$$eval(el('.pad .card .row .title'), (n) => n.map((x) => x.textContent.trim())),
+    await page.$$eval(el('.pad .card .row .title'), (n) => n
+      .map((x) => x.textContent.trim())
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }))));
   check('and it is one list again', await page.$$eval(el('.pad .card'), (n) => n.length), 1);
+
+  // Flipping the parts direction reverses that list, which is the only order
+  // control parts have.
+  const partNames = async () => {
+    await page.click(el('.tab[data-value="parts"]'));
+    await page.waitForTimeout(160);
+    return page.$$eval(el('.pad .card .row .title'), (n) => n.map((x) => x.textContent.trim()));
+  };
+  const azParts = await partNames();
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  await page.selectOption(el('select[data-act="set-sort-dir"][data-tab="parts"]'), 'desc');
+  await page.waitForTimeout(200);
+  check('Z to A reverses the parts list', await partNames(), [...azParts].reverse());
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(90);
+  await page.selectOption(el('select[data-act="set-sort-dir"][data-tab="parts"]'), 'asc');
+  await page.waitForTimeout(200);
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(90);
   await page.selectOption(el('select[data-act="set-locations"]'), '1');
@@ -1821,9 +1842,126 @@ async function main() {
   await page.waitForTimeout(160);
 
   const sections = await page.$$eval(el('.pad .label'), (n) => n.map((x) => x.textContent.trim()));
+  // The badge is off until asked for: Home Assistant gives a custom panel's
+  // own sidebar row no badge, so this one lands on the Notifications row, and
+  // that is a change in what Elmer does rather than how it looks.
+  check('the overdue badge is off by default',
+    await page.evaluate(() => window.__snapshot().settings.badgeOverdue), false);
+  await page.selectOption(el('select[data-act="set-badge"]'), '1');
+  await page.waitForTimeout(200);
+  check('and can be turned on',
+    await page.evaluate(() => window.__snapshot().settings.badgeOverdue), true);
+  await page.selectOption(el('select[data-act="set-badge"]'), '0');
+  await page.waitForTimeout(200);
+  check('and off again',
+    await page.evaluate(() => window.__snapshot().settings.badgeOverdue), false);
+
   check('settings sections read in order', sections,
-    ['Appearance', 'Locations', 'Categories', 'Scheduling', 'Where your data lives',
+    ['Appearance', 'Sorting', 'Locations', 'Categories', 'Scheduling', 'Where your data lives',
       'Data export', 'About', 'Support']);
+
+  // --- sorting ------------------------------------------------------------
+  // Equipment gets both orders; parts carry no date, so they get a direction
+  // and no field menu at all rather than a menu of one. Routines and history
+  // have no control anywhere and must not grow one.
+  check('only equipment offers a choice of order',
+    await page.$$eval(el('select[data-act="set-sort"]'), (n) => n.map((x) => x.dataset.tab)),
+    ['equipment']);
+  check('and both lists offer a direction',
+    await page.$$eval(el('select[data-act="set-sort-dir"]'), (n) => n.map((x) => x.dataset.tab)),
+    ['equipment', 'parts']);
+  check('equipment sorts alphabetically out of the box',
+    await page.evaluate(() => window.__snapshot().settings.sortEquipment), 'name');
+  check('the two orders are the two that exist',
+    await page.$$eval(el('select[data-act="set-sort"] option'), (n) => n.map((x) => x.textContent.trim())),
+    ['Alphabetical', 'Chronological']);
+
+  // The direction menu is named after the order above it and renames itself
+  // when that changes. This is the whole reason the control repaints.
+  const dirLabels = async (tab) => page.$$eval(
+    el(`select[data-act="set-sort-dir"][data-tab="${tab}"] option`),
+    (n) => n.map((x) => x.textContent.trim()),
+  );
+  check('alphabetical reads A to Z', await dirLabels('equipment'), ['A to Z', 'Z to A']);
+  check('and parts, having only that, read the same', await dirLabels('parts'), ['A to Z', 'Z to A']);
+  await page.selectOption(el('select[data-act="set-sort"][data-tab="equipment"]'), 'date');
+  await page.waitForTimeout(220);
+  check('chronological renames it', await dirLabels('equipment'), ['Oldest first', 'Newest first']);
+  check('and the order was stored',
+    await page.evaluate(() => window.__snapshot().settings.sortEquipment), 'date');
+
+  // Order actually applied to the list, not just stored. Read off the rendered
+  // rows, grouped, so this also proves the sort runs inside each group rather
+  // than across the whole tab.
+  const equipNames = async () => page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const out = [];
+    for (const node of root.querySelectorAll('.pad > .label, .pad .card .row .title')) {
+      out.push(node.classList.contains('label') ? `# ${node.textContent.trim()}` : node.textContent.trim());
+    }
+    return out;
+  });
+
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(200);
+  const byDate = await equipNames();
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(150);
+  await page.selectOption(el('select[data-act="set-sort-dir"][data-tab="equipment"]'), 'desc');
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(200);
+  const byDateDesc = await equipNames();
+
+  check('flipping the direction keeps the same group headings', byDateDesc.filter((x) => x.startsWith('#')),
+    byDate.filter((x) => x.startsWith('#')));
+  ok('and reorders the rows under them', JSON.stringify(byDate) !== JSON.stringify(byDateDesc),
+    'the list did not change at all');
+
+  // Blanks last whichever way round: equipment with no date on it at all is
+  // not the oldest thing in the house and should not lead when newest comes
+  // first. Undated means neither date, since the order falls back from one to
+  // the other.
+  //
+  // Checked on the flat list rather than the grouped one. Grouped, no single
+  // room happens to hold both a dated and an undated record, so a per-group
+  // check would pass without ever comparing the two.
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(150);
+  await page.selectOption(el('select[data-act="set-locations"]'), '0');
+  await page.waitForTimeout(220);
+
+  const undatedLast = async () => {
+    await page.click(el('.tab[data-value="equipment"]'));
+    await page.waitForTimeout(200);
+    return page.evaluate(() => {
+      const s = window.__snapshot();
+      const undated = new Set(
+        s.equipment.filter((e) => !e.installedOn && !e.purchasedOn).map((e) => e.name),
+      );
+      if (!undated.size) return 'no undated equipment to test with';
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const names = [...root.querySelectorAll('.pad .card .row .title')].map((n) => n.textContent.trim());
+      const firstBlank = names.findIndex((n) => undated.has(n));
+      const lastDated = names.map((n) => !undated.has(n)).lastIndexOf(true);
+      if (firstBlank === -1 || lastDated === -1) return 'the list was not mixed';
+      return firstBlank > lastDated ? true : `${names[firstBlank]} came before ${names[lastDated]}`;
+    });
+  };
+
+  ok('undated equipment sits at the bottom, newest first', await undatedLast() === true,
+    String(await undatedLast()));
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(150);
+  await page.selectOption(el('select[data-act="set-sort-dir"][data-tab="equipment"]'), 'asc');
+  await page.waitForTimeout(220);
+  ok('and stays there oldest first', await undatedLast() === true, String(await undatedLast()));
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(150);
+  await page.selectOption(el('select[data-act="set-locations"]'), '1');
+  await page.selectOption(el('select[data-act="set-sort"][data-tab="equipment"]'), 'name');
+  await page.waitForTimeout(220);
 
   // The support link leaves Home Assistant, so it opens in a new tab and must
   // not hand the opener over with it.
@@ -2473,6 +2611,306 @@ async function main() {
     getComputedStyle(document.querySelector('elmer-panel')).getPropertyValue('--ui-user')));
   check('and dragging it narrow hands over to the phone one, with no reload',
     afterDrag, 0.92);
+  await ctx.close();
+
+  /* --------------------------------------------- pausing a routine ---- */
+  // Pausing is Elmer looking away, not the routine being dismantled: the
+  // dates, the history and the parts it uses all stay, and resuming has to
+  // put it back exactly as it was. What changes is that nothing counts it.
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.waitForTimeout(140);
+
+  const wasOverdue = await page.evaluate(() => {
+    const s = window.__snapshot();
+    const t = s.tasks.find((x) => x.name === 'Professional Service');
+    return {
+      id: t.id,
+      counts: s.computed.counts,
+      status: s.computed.states[t.id].status,
+      parts: (t.partsUsed || []).length,
+    };
+  });
+  check('the routine starts overdue', wasOverdue.status, 'overdue');
+
+  await page.click(el(`.row[data-id="${wasOverdue.id}"]`));
+  await page.waitForSelector(el('.sheet [data-act="pause"]'));
+  await page.click(el('.sheet [data-act="pause"]'));
+  await page.waitForTimeout(260);
+
+  const nowPaused = await page.evaluate((id) => {
+    const s = window.__snapshot();
+    const t = s.tasks.find((x) => x.id === id);
+    return {
+      paused: t.paused,
+      status: s.computed.states[id].status,
+      daysLeft: s.computed.states[id].daysLeft,
+      due: s.computed.states[id].due,
+      counts: s.computed.counts,
+      lastDone: t.lastDone,
+      parts: (t.partsUsed || []).length,
+    };
+  }, wasOverdue.id);
+
+  check('it is paused', nowPaused.paused, true);
+  check('and reads as paused', nowPaused.status, 'paused');
+  // The one that matters for anything outside the panel: days-left is what a
+  // routine's own sensor reports and what a numeric_state condition compares.
+  // A paused routine whose number kept counting down would go on firing the
+  // automation it was paused to silence. None reaches Home Assistant as
+  // unknown, which no numeric condition matches.
+  check('with no days left for an automation to match on', nowPaused.daysLeft, null);
+  check('it stops being counted as overdue', nowPaused.counts.overdue, wasOverdue.counts.overdue - 1);
+  check('and is counted as paused instead', nowPaused.counts.paused, 1);
+  // Set aside, not dismantled.
+  ok('its last-done date is untouched', !!nowPaused.lastDone, String(nowPaused.lastDone));
+  ok('it still knows when it would have been due', !!nowPaused.due, String(nowPaused.due));
+  // Unchanged rather than non-empty: this particular routine happens to use
+  // no parts, and asserting it had some was the test being wrong about the
+  // fixture rather than the code being wrong about pausing.
+  check('and the parts it uses are untouched', nowPaused.parts, wasOverdue.parts);
+
+  // Listed, dimmed, under a heading of its own. Without the heading it would
+  // belong to no state group and simply vanish from the one screen that
+  // lists everything, which is indistinguishable from having been deleted.
+  const shown = await page.evaluate((id) => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const row = root.querySelector(`.row[data-id="${id}"]`);
+    if (!row) return null;
+    const label = row.closest('.card').previousElementSibling;
+    return {
+      heading: label && label.classList.contains('label') ? label.textContent.replace(/\d+$/, '').trim() : null,
+      says: row.querySelector('.sub b').textContent.trim(),
+      dimmed: parseFloat(getComputedStyle(row.querySelector('.title')).opacity),
+      offersResume: !!row.querySelector('[data-act="resume"]'),
+      offersTick: !!row.querySelector('[data-act="complete"]'),
+    };
+  }, wasOverdue.id);
+  ok('a paused routine is still listed', shown !== null);
+  check('under a heading of its own', shown.heading, 'Paused');
+  check('saying so', shown.says, 'Paused');
+  ok('drawn as set aside', shown.dimmed < 0.8, String(shown.dimmed));
+  // The one control it needs is the one that brings it back, and it must not
+  // be dimmed along with the rest.
+  ok('offering the way back', shown.offersResume);
+  check('and not the tick it is no longer waiting for', shown.offersTick, false);
+  check('the resume button is not dimmed with it',
+    await page.evaluate((id) => getComputedStyle(document.querySelector('elmer-panel')
+      .shadowRoot.querySelector(`.row[data-id="${id}"] [data-act="resume"]`)).opacity,
+    wasOverdue.id), '1');
+
+  // Editing a paused routine must not quietly start it counting again. The
+  // form carries no pause control, so this is really a check that a put
+  // patches by id rather than replacing — the property the form relies on
+  // without saying so.
+  await page.click(el(`.row[data-id="${wasOverdue.id}"]`));
+  await page.waitForSelector(el('.sheet [data-act="edit-routine"]'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet input[name="intervalCount"]'));
+  await page.fill(el('.sheet input[name="intervalCount"]'), '2');
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(260);
+  check('editing it leaves it paused',
+    await page.evaluate((id) => window.__snapshot().tasks.find((t) => t.id === id).paused, wasOverdue.id),
+    true);
+
+  // And back again.
+  await page.click(el(`.row[data-id="${wasOverdue.id}"] [data-act="resume"]`));
+  await page.waitForTimeout(260);
+  const resumed = await page.evaluate((id) => {
+    const s = window.__snapshot();
+    return {
+      paused: s.tasks.find((t) => t.id === id).paused,
+      status: s.computed.states[id].status,
+      daysLeft: s.computed.states[id].daysLeft,
+      paused_count: s.computed.counts.paused,
+    };
+  }, wasOverdue.id);
+  check('resuming clears the flag', resumed.paused, false);
+  // Counting again, which is the claim — not back to the status it started
+  // with, because the edit above moved its interval and so its due date.
+  ok('and it is counting again', resumed.status !== 'paused' && resumed.daysLeft !== null,
+    `${resumed.status} / ${resumed.daysLeft}`);
+  check('with nothing left paused', resumed.paused_count, 0);
+  await ctx.close();
+
+  /* --------------------------------- list or cards, per tab ----------- */
+  // Three lists, three choices. Per tab because the three do not suit cards
+  // equally — equipment is scanned by its glyph and reads well as tiles,
+  // while a routine's strength is one wide line of context that a tile has
+  // to wrap — so the point of offering both is using each where it reads
+  // better. Everything starts as a list, which is what it has always been.
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.waitForTimeout(140);
+
+  const shapeOf = async (tab) => {
+    await page.click(el(`.tab[data-value="${tab}"]`));
+    await page.waitForTimeout(110);
+    return page.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const seg = root.querySelector('.viewseg');
+      return {
+        tiles: root.querySelectorAll('.tiles').length,
+        cards: root.querySelectorAll('.pad > .card').length,
+        pressed: seg
+          ? [...seg.querySelectorAll('button')].find((b) => b.getAttribute('aria-pressed') === 'true').dataset.value
+          : null,
+        labels: [...root.querySelectorAll('.pad .label')].map((n) => n.textContent.trim()),
+      };
+    });
+  };
+
+  for (const tab of ['routines', 'equipment', 'parts']) {
+    const at = await shapeOf(tab);
+    check(`${tab} opens as a list`, at.pressed, 'list');
+    check(`and draws no tiles`, at.tiles, 0);
+  }
+
+  // Switching one must not switch the others.
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(110);
+  const groupedAsList = (await shapeOf('equipment')).labels;
+  await page.click(el('.viewseg button[data-value="cards"]'));
+  await page.waitForTimeout(220);
+  const eqCards = await shapeOf('equipment');
+  check('equipment switches to cards', eqCards.pressed, 'cards');
+  ok('and draws tiles', eqCards.tiles > 0, String(eqCards.tiles));
+  // The headings are the point of the grouping; cards must not drop them.
+  check('keeping the rooms it was grouped by', eqCards.labels, groupedAsList);
+  check('the choice is saved',
+    await page.evaluate(() => window.__snapshot().settings.viewEquipment), 'cards');
+  check('and the other two are left alone',
+    await page.evaluate(() => {
+      const s = window.__snapshot().settings;
+      return [s.viewRoutines, s.viewParts];
+    }), ['list', 'list']);
+  check('routines is still a list', (await shapeOf('routines')).pressed, 'list');
+
+  // A tile has to be the same thing the row was: it opens the same page, and
+  // the control inside it still acts on the spot.
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(110);
+  await page.click(el('.viewseg button[data-value="cards"]'));
+  await page.waitForTimeout(220);
+  const beforeStock = await page.evaluate(
+    () => window.__snapshot().supplies.find((s) => s.id === 's1').quantity);
+  await page.click(el('.tile[data-id="s1"] [data-act="stock"][data-delta="1"]'));
+  await page.waitForTimeout(200);
+  check('the stepper on a tile still adds one',
+    await page.evaluate(() => window.__snapshot().supplies.find((s) => s.id === 's1').quantity),
+    beforeStock + 1);
+  check('and did not open the part', await page.$(el('.crumb')), null);
+  await page.click(el('.tile[data-id="s1"] .name'));
+  await page.waitForTimeout(200);
+  ok('while the tile itself opens it', await page.$(el('[data-act="edit-part"]')) !== null);
+
+  // The toggle is pressed often and lives beside a text field, so it has to
+  // be a target rather than a detail.
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(140);
+  const target = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const b2 = root.querySelector('.viewseg button');
+    const r = b2.getBoundingClientRect();
+    const search = root.querySelector('.findrow .search').getBoundingClientRect();
+    return {
+      w: Math.round(r.width), h: Math.round(r.height),
+      overflow: Math.round(search.left + search.width) > Math.round(r.left),
+    };
+  });
+  ok('each half of the toggle is big enough to hit',
+    target.w >= 44 && target.h >= 44, `${target.w}×${target.h}`);
+  check('and the search box does not run under it', target.overflow, false);
+
+  // --- cards per row ------------------------------------------------------
+  // How many columns the grid actually draws, counted off the laid-out tiles
+  // rather than read back from the setting: a stored number that never
+  // reached the stylesheet would look right and change nothing.
+  // Read off the grid's own tracks rather than by counting tiles on a row:
+  // a group with three parts in it fills three of four columns, and counting
+  // tiles would call that a three-column grid.
+  const columns = async () => page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const grid = root.querySelector('.tiles');
+    if (!grid) return { cols: 0 };
+    const tracks = getComputedStyle(grid).gridTemplateColumns.split(' ').map(parseFloat);
+    const gap = parseFloat(getComputedStyle(grid).columnGap) || 0;
+    const total = tracks.reduce((a, b) => a + b, 0) + gap * (tracks.length - 1);
+    return {
+      cols: tracks.length,
+      widths: tracks.map((t) => Math.round(t)),
+      // Equal shares that between them fill the row, rather than fixed-width
+      // cards leaving a gap at the end.
+      equal: Math.max(...tracks) - Math.min(...tracks) <= 1,
+      spans: Math.round(grid.getBoundingClientRect().width - total),
+    };
+  });
+
+  // On a phone first, where the narrow setting is the one in force.
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(160);
+  const phone2 = await columns();
+  check('a phone draws two cards across by default', phone2.cols, 2);
+  ok('and they are the same width as each other', phone2.equal, JSON.stringify(phone2.widths));
+  ok('filling the row between them', Math.abs(phone2.spans) <= 1, String(phone2.spans));
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  check('the desktop menu offers two, three and four',
+    await page.$$eval(el('select[data-act="set-cards"] option'), (n) => n.map((x) => x.value)),
+    ['2', '3', '4']);
+  check('and the mobile menu only one or two',
+    await page.$$eval(el('select[data-act="set-cards-narrow"] option'), (n) => n.map((x) => x.value)),
+    ['1', '2']);
+
+  // Four on the desktop must not follow us onto the phone: the whole reason
+  // there are two of these.
+  await page.selectOption(el('select[data-act="set-cards"]'), '4');
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(180);
+  const phoneStill = await columns();
+  check('four chosen for the desktop leaves the phone at two', phoneStill.cols, 2);
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  await page.selectOption(el('select[data-act="set-cards-narrow"]'), '1');
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(180);
+  check('while the phone setting does move it', (await columns()).cols, 1);
+  await ctx.close();
+
+  // The same panel on a desktop, where the wide setting takes over. A fresh
+  // context starts from the seed again, so the card view and the count are
+  // both set here rather than carried over.
+  ({ ctx, page } = await open({ narrow: false, viewport: DESKTOP }));
+  await page.waitForTimeout(160);
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(140);
+  await page.click(el('.viewseg button[data-value="cards"]'));
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  await page.selectOption(el('select[data-act="set-cards"]'), '4');
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="parts"]'));
+  await page.waitForTimeout(180);
+  const wide = await columns();
+  check('a desktop honours the desktop count', wide.cols, 4);
+  ok('with the cards still filling the row', Math.abs(wide.spans) <= 1, String(wide.spans));
+  ok('and still equal to each other', wide.equal, JSON.stringify(wide.widths));
+
+  for (const n of ['2', '3']) {
+    await page.click(el('.tab[data-value="settings"]'));
+    await page.waitForTimeout(140);
+    await page.selectOption(el('select[data-act="set-cards"]'), n);
+    await page.waitForTimeout(220);
+    await page.click(el('.tab[data-value="parts"]'));
+    await page.waitForTimeout(180);
+    const at = await columns();
+    check(`${n} across draws ${n} across`, at.cols, Number(n));
+    ok(`and ${n} still fills the row`, Math.abs(at.spans) <= 1, String(at.spans));
+  }
   await ctx.close();
 
   /* ------------------------------------------- a fresh install, empty -- */

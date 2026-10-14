@@ -66,6 +66,105 @@ window.customIconsets = window.customIconsets || {};
 window.customIconsets.elmer = async () => ({
   path: '${d}',
 });
+
+/* Home Assistant looks an icon set up once and never again.
+
+   ha-icon resolves in willUpdate, and only when its own icon property
+   changes. If the set is missing at that moment it sets a legacy flag and
+   renders <iron-icon>, an element the frontend no longer ships, so nothing is
+   drawn. There is no event, no retry and nothing that notices the set
+   arriving later — the row stays empty for the life of the page, which is why
+   a reload appears to fix it.
+
+   This file is fetched over the network on every page load, so whether it
+   wins the race against the sidebar's first paint varies with the
+   connection. Losing it should not cost the icon until the next reload.
+
+   So: having registered, go and find any icon of ours that already gave up,
+   and change its icon property to something else and back. That is the one
+   thing ha-icon watches, and resolution now succeeds because the registry is
+   read live. The walk is bounded and only descends into shadow roots.
+
+   An icon that resolved perfectly well is left alone, which is nearly all of
+   them: ha-icon hands the path it found down to the ha-svg-icon it renders,
+   so one with a path is working and one without is not. That is read as a
+   property rather than by looking for the <iron-icon> the legacy branch
+   renders, because the property survives a frontend that stops rendering
+   that element while the symptom stays the same. */
+(() => {
+  const PREFIX = 'elmer:';
+
+  /* Has this one actually got a drawing in it? */
+  function drawn(el) {
+    try {
+      const svg = el.shadowRoot && el.shadowRoot.querySelector('ha-svg-icon');
+      return !!(svg && svg.path);
+    } catch {
+      return false;
+    }
+  }
+
+  function repair() {
+    const roots = [document];
+    const seen = new Set();
+    const stale = [];
+    let budget = 4000;
+
+    while (roots.length && budget > 0) {
+      const root = roots.pop();
+      if (!root || seen.has(root)) continue;
+      seen.add(root);
+      let nodes;
+      try {
+        nodes = root.querySelectorAll('*');
+      } catch {
+        continue;
+      }
+      for (const el of nodes) {
+        if (--budget <= 0) break;
+        // An element that has not upgraded yet has no icon property, and it
+        // will resolve correctly on its own once it does. Only one that has
+        // already run and come back empty needs anything doing to it.
+        if (el.localName === 'ha-icon'
+          && typeof el.icon === 'string'
+          && el.icon.startsWith(PREFIX)
+          && !drawn(el)) {
+          stale.push(el);
+        }
+        if (el.shadowRoot) roots.push(el.shadowRoot);
+      }
+    }
+
+    for (const el of stale) {
+      const icon = el.icon;
+      try {
+        el.icon = '';
+        el.icon = icon;
+      } catch {
+        /* Not ours to fix if the property will not take. */
+      }
+    }
+    return stale.length;
+  }
+
+  // Now, for a sidebar that drew before this file arrived. Again at load for
+  // one that is drawing right now: a second pass over a handful of elements
+  // is cheaper than being wrong until the next reload.
+  try {
+    repair();
+    if (document.readyState !== 'complete') {
+      window.addEventListener('load', () => {
+        try {
+          repair();
+        } catch {
+          /* ignored */
+        }
+      }, { once: true });
+    }
+  } catch {
+    /* An icon is not worth throwing on somebody else's page. */
+  }
+})();
 `;
 
 const rel = path.relative(ROOT, OUT);

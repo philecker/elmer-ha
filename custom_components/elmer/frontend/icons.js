@@ -29,7 +29,17 @@ const P = {
   download: '<path d="M12 3v12M7 11l5 5 5-5M4 20h16"/>',
   upload: '<path d="M12 20V8M7 12l5-5 5 5M4 20h16"/>',
   undo: '<path d="M3 12a9 9 0 1 1 3 6.7"/><path d="M3 6v6h6"/>',
+  // Pausing a routine and starting it again. Drawn as outlines rather than
+  // the solid shapes a media player uses, so they sit with the rest of the
+  // set rather than reading as a transport control.
+  pause: '<rect x="6.5" y="4.5" width="4" height="15" rx="1.4"/><rect x="13.5" y="4.5" width="4" height="15" rx="1.4"/>',
+  play: '<path d="M7.5 5.2a1 1 0 0 1 1.5-.86l9.2 5.8a1 1 0 0 1 0 1.72l-9.2 5.8a1 1 0 0 1-1.5-.86z"/>',
   menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
+  // The two ways a list can be drawn, for the toggle beside the search box.
+  // Rows carry a bullet so they are not mistaken for the menu above, and the
+  // tiles are square so the pair reads as a choice between two shapes.
+  viewlist: '<path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4.6" cy="6" r="1.15" fill="currentColor" stroke="none"/><circle cx="4.6" cy="12" r="1.15" fill="currentColor" stroke="none"/><circle cx="4.6" cy="18" r="1.15" fill="currentColor" stroke="none"/>',
+  viewcards: '<rect x="3" y="3" width="7.6" height="7.6" rx="1.7"/><rect x="13.4" y="3" width="7.6" height="7.6" rx="1.7"/><rect x="3" y="13.4" width="7.6" height="7.6" rx="1.7"/><rect x="13.4" y="13.4" width="7.6" height="7.6" rx="1.7"/>',
   phone: '<path d="M5 3h3l2 5-2.5 1.5a11 11 0 0 0 5 5L14 12l5 2v3a2 2 0 0 1-2 2A14 14 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
   mail: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6 8.5-6"/>',
 
