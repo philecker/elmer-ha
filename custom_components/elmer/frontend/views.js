@@ -13,7 +13,8 @@
 import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
-  INTERVAL_UNITS, intervalText, safeHref, asLink, linkLabel, daysBetween, MONTHS,
+  INTERVAL_UNITS, intervalText, scheduleText, monthsText, MONTHS_LONG,
+  safeHref, asLink, linkLabel, daysBetween, MONTHS,
   SORT_FIELDS, sortDirections, sortField, sortRecords,
 } from './util.js';
 
@@ -104,6 +105,46 @@ function haystack(...parts) {
   return parts.filter(Boolean).join(' ').toLowerCase();
 }
 
+/** The heading the leftovers sit under, and the key they are filed by. */
+const UNPLACED = Symbol('unplaced');
+export const UNPLACED_LABEL = 'Unassigned';
+
+/**
+ * Split a list into rooms, in the order the headings should read.
+ *
+ * Keyed by the location as stored, with the leftovers under a symbol of their
+ * own rather than under the word "Unassigned" — otherwise a house with a room
+ * actually called that would merge the two.
+ *
+ * Rooms come out alphabetically and whatever has no room comes last. That
+ * heading is the one that is not a place: it is a leftovers pile rather than a
+ * section of the house, so it reads as a footnote instead of sitting between
+ * the O's and the U's.
+ *
+ * Grouping off returns the whole list under one heading of `null`, so a caller
+ * can draw both shapes with one loop rather than branching around this.
+ *
+ * Returns `[heading, items]` pairs, heading being a room name or null.
+ */
+export function groupByLocation(items, { grouped = true, locationOf = (x) => x && x.location } = {}) {
+  if (!grouped) return items.length ? [[null, items]] : [];
+
+  const groups = new Map();
+  for (const item of items) {
+    const key = String(locationOf(item) || '').trim() || UNPLACED;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+
+  return [...groups.entries()]
+    .sort((a, b) => {
+      if (a[0] === UNPLACED) return 1;
+      if (b[0] === UNPLACED) return -1;
+      return String(a[0]).localeCompare(String(b[0]));
+    })
+    .map(([key, group]) => [key === UNPLACED ? UNPLACED_LABEL : key, group]);
+}
+
 function equipmentGlyph(eq, size = 19) {
   const name = eq && eq.icon && hasIcon(eq.icon)
     ? eq.icon
@@ -128,19 +169,35 @@ export function routineRow(row, state, opts = {}) {
   // Inside a piece of equipment, naming it on every row says nothing — the
   // interval is what you actually want there.
   const where = opts.hideEquipment
-    ? `every ${intervalText(t.intervalCount, t.intervalUnit)}`
+    ? `every ${scheduleText(t)}`
     : whereLine(eq, state.settings.showLocations);
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
   const off = st.status === 'paused';
+  // Snoozed, not wrong: no colour, and not dimmed the way a paused one is.
+  // What it really is stays on the line beside it, so putting something off
+  // never hides how long it has been waiting.
+  const snoozed = st.status === 'snoozed';
+  const lead = off
+    ? 'Paused'
+    : (snoozed ? `Snoozed until ${shortDay(t.snoozedUntil)}` : relative(st.daysLeft));
+  // Snoozed, the line says when it wakes and what it is underneath, in one
+  // word. The full "due 30 days ago" and the equipment name both wanted room
+  // this row does not have on a phone; which state it is in is the part the
+  // snooze is hiding, and the sheet has the detail.
+  const realDays = snoozed && st.due ? daysBetween(state.computed.today, st.due) : null;
+  const context = snoozed
+    ? (realDays === null || realDays > (state.settings.dueSoonDays ?? 14)
+      ? '' : (realDays < 0 ? 'overdue' : 'due soon'))
+    : where;
 
   return html`<div class="row" data-act="routine" data-id="${t.id}" role="button" tabindex="0"${raw(off ? ' data-paused="1"' : '')}>
     ${raw(meter(st))}
     <div class="body">
       <div class="title">${t.name}</div>
       <div class="sub"${raw(tone ? ` data-tone="${esc(tone)}"` : '')}>
-        <b>${raw(off ? 'Paused' : esc(relative(st.daysLeft)))}</b>
-        ${raw(where ? `<span class="dot">·</span><span class="txt">${esc(where)}</span>` : '')}
+        <b>${lead}</b>
+        ${raw(context ? `<span class="dot">·</span><span class="txt">${esc(context)}</span>` : '')}
       </div>
     </div>
     ${raw(off
@@ -162,7 +219,7 @@ export function routineTile(row, state, opts = {}) {
   const t = row.task;
   const st = row.state;
   const where = opts.hideEquipment
-    ? `every ${intervalText(t.intervalCount, t.intervalUnit)}`
+    ? `every ${scheduleText(t)}`
     : whereLine(row.equipment, state.settings.showLocations);
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
@@ -202,7 +259,14 @@ const FILTERS = [
  * a heading: without one, pausing a routine would make it disappear from the
  * only screen that lists everything.
  */
-const GROUPS = [...FILTERS.filter(([key]) => key !== 'all'), ['paused', 'Paused']];
+const GROUPS = [
+  ...FILTERS.filter(([key]) => key !== 'all'),
+  // Snoozed sits between the on-track ones and the paused ones, the same
+  // order the statuses sort in. A snooze that left the thing at the top of
+  // the list would not have been a snooze.
+  ['snoozed', 'Snoozed'],
+  ['paused', 'Paused'],
+];
 
 /**
  * Does this routine answer to what was typed?
@@ -334,36 +398,9 @@ export function equipmentView(state) {
 
   // Grouped by location when locations are in use, so the basement reads
   // together. One flat list otherwise.
-  //
-  // Keyed by the location as stored, with the leftovers under a key of their
-  // own rather than under the word "Unassigned" — otherwise a house with a
-  // room actually called that would merge the two.
   const shape = viewOf(state, 'equipment');
-  const UNPLACED = Symbol('unplaced');
-  const groups = new Map();
-  for (const eq of matched) {
-    if (!state.settings.showLocations) {
-      if (!groups.has('')) groups.set('', []);
-      groups.get('').push(eq);
-      continue;
-    }
-    const key = (eq.location || '').trim() || UNPLACED;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(eq);
-  }
-
-  // Rooms alphabetically, and whatever has no room at the end. It is the one
-  // heading that is not a place, and it is a leftovers pile rather than a
-  // section of the house, so it reads as a footnote rather than sitting
-  // between the O's and the U's.
-  const sections = [...groups.entries()]
-    .sort((a, b) => {
-      if (a[0] === UNPLACED) return 1;
-      if (b[0] === UNPLACED) return -1;
-      return String(a[0]).localeCompare(String(b[0]));
-    })
-    .map(([key, items]) => {
-      const where = key === UNPLACED ? 'Unassigned' : key;
+  const sections = groupByLocation(matched, { grouped: state.settings.showLocations })
+    .map(([where, items]) => {
       const rows = sortRecords(items, 'equipment', state.settings.sortEquipment, state.settings.sortEquipmentDir)
         .map((eq) => {
           const tasks = state.tasks.filter((t) => t.equipmentId === eq.id);
@@ -633,29 +670,15 @@ export function partsView(state) {
   // equipment list uses: rooms alphabetically, and whatever has no room last.
   // The chosen order above applies inside each group rather than across the
   // whole list, so a shelf is ordered against itself.
-  if (!state.settings.showLocations) {
-    return html`<div class="scroll"><div class="pad">
-      ${raw(findRow(state, 'parts', 'Search parts'))}
-      <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${rows}</div>
-    </div></div>`;
-  }
-
-  const UNPLACED = Symbol('unplaced');
-  const groups = new Map();
-  sorted.forEach((part, i) => {
-    const key = (part.location || '').trim() || UNPLACED;
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(rows[i]);
-  });
-
-  const sections = [...groups.entries()]
-    .sort((a, b) => {
-      if (a[0] === UNPLACED) return 1;
-      if (b[0] === UNPLACED) return -1;
-      return String(a[0]).localeCompare(String(b[0]));
-    })
-    .map(([key, items]) => html`<div class="label">${key === UNPLACED ? 'Unassigned' : key}</div>
-      <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${raw(items.join(''))}</div>`);
+  //
+  // Each part carried with the markup already made for it, so the grouping
+  // can be done on the record while what gets drawn is the row. Grouping off
+  // comes back as one unheaded section, which is why there is no branch here.
+  const sections = groupByLocation(
+    sorted.map((part, i) => ({ part, markup: rows[i] })),
+    { grouped: state.settings.showLocations, locationOf: (x) => x.part.location },
+  ).map(([where, items]) => html`${raw(where ? `<div class="label">${esc(where)}</div>` : '')}
+      <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${raw(items.map((x) => x.markup).join(''))}</div>`);
 
   return html`<div class="scroll"><div class="pad">
     ${raw(findRow(state, 'parts', 'Search parts'))}
@@ -856,6 +879,28 @@ export function groupForm(state, field, value) {
 }
 
 /**
+ * A labelled menu in Settings.
+ *
+ * Every control there is the same four things — a label, a menu, the option
+ * that is currently set, and sometimes a line explaining it — written out
+ * eight times with the words changed. `scope` puts the screen it applies to
+ * on a line of its own above the label; `tab` is for the pair of controls
+ * that are told apart by the list they belong to rather than by their action.
+ *
+ * Options are [value, label]; the value is compared as a string so a count
+ * can be passed as a number and a yes/no as "1" and "0".
+ */
+function selectField({ id, act, label, scope, hint, tab, options, value }) {
+  return html`<div class="field">
+    <label for="${id}">${raw(scope ? `<span class="scope">${esc(scope)}</span>` : '')}${label}</label>
+    <select id="${id}" data-act="${act}"${raw(tab ? ` data-tab="${esc(tab)}"` : '')}>
+      ${options.map(([v, l]) => html`<option value="${v}"${raw(String(value) === String(v) ? ' selected' : '')}>${l}</option>`)}
+    </select>
+    ${raw(hint ? `<div class="hint">${esc(hint)}</div>` : '')}
+  </div>`;
+}
+
+/**
  * One list's order: the field, and which way round it runs.
  *
  * The direction menu is named after the field rather than reading "Ascending"
@@ -867,30 +912,29 @@ function sortRow(s, tab, label) {
   const dirKey = tab === 'parts' ? 'sortPartsDir' : 'sortEquipmentDir';
   const chosen = tab === 'parts' ? 'name' : s.sortEquipment;
   const [, , kind] = sortField(tab, chosen);
-  const direction = html`<select id="sortdir-${tab}" data-act="set-sort-dir" data-tab="${tab}">
-      ${sortDirections(kind).map(([v, l]) => html`<option value="${v}"${raw((s[dirKey] || 'asc') === v ? ' selected' : '')}>${l}</option>`)}
-    </select>`;
+  const direction = (dirLabel) => selectField({
+    id: `sortdir-${tab}`,
+    act: 'set-sort-dir',
+    tab,
+    label: dirLabel,
+    options: sortDirections(kind),
+    value: s[dirKey] || 'asc',
+  });
 
   // Parts have one order, so they get one menu under their own name rather
   // than a menu of one beside it.
-  if (fields.length < 2) {
-    return html`<div class="field">
-      <label for="sortdir-${tab}">${label}</label>
-      ${raw(direction)}
-    </div>`;
-  }
+  if (fields.length < 2) return direction(label);
 
   return html`<div class="two">
-    <div class="field">
-      <label for="sort-${tab}">${label}</label>
-      <select id="sort-${tab}" data-act="set-sort" data-tab="${tab}">
-        ${fields.map(([v, l]) => html`<option value="${v}"${raw(chosen === v ? ' selected' : '')}>${l}</option>`)}
-      </select>
-    </div>
-    <div class="field">
-      <label for="sortdir-${tab}">Order</label>
-      ${raw(direction)}
-    </div>
+    ${raw(selectField({
+    id: `sort-${tab}`,
+    act: 'set-sort',
+    tab,
+    label,
+    options: fields.map(([v, l]) => [v, l]),
+    value: chosen,
+  }))}
+    ${raw(direction('Order'))}
   </div>`;
 }
 
@@ -903,29 +947,34 @@ export function settingsView(state) {
   return html`<div class="scroll"><div class="pad">
     <div class="label">Appearance</div>
     <div class="card"><div style="padding:4px 12px 14px">
-      <div class="field">
-        <label for="theme">Theme</label>
-        <select id="theme" data-act="set-theme">
-          ${themes.map(([v, l]) => html`<option value="${v}"${raw(s.theme === v ? ' selected' : '')}>${l}</option>`)}
-        </select>
-        <div class="hint">Following Home Assistant means Elmer turns dark when the rest of your dashboard does.</div>
-      </div>
+      ${raw(selectField({
+    id: 'theme',
+    act: 'set-theme',
+    label: 'Theme',
+    options: themes,
+    value: s.theme,
+    hint: 'Following Home Assistant means Elmer turns dark when the rest of your dashboard does.',
+  }))}
     <!-- One size per reading distance. Both are editable from either kind of
          screen, so the phone can be fixed from the sofa without going and
          finding the phone. -->
     <div class="two">
-      <div class="field">
-        <label for="textsize"><span class="scope">Desktop</span>Font size</label>
-        <select id="textsize" data-act="set-text">
-          ${SIZES.map(([v, l]) => html`<option value="${v}"${raw((s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
-        </select>
-      </div>
-      <div class="field">
-        <label for="textsize-n"><span class="scope">Mobile</span>Font size</label>
-        <select id="textsize-n" data-act="set-text-narrow">
-          ${SIZES.map(([v, l]) => html`<option value="${v}"${raw((s.textSizeNarrow || s.textSize || 'default') === v ? ' selected' : '')}>${l}</option>`)}
-        </select>
-      </div>
+      ${raw(selectField({
+    id: 'textsize',
+    act: 'set-text',
+    scope: 'Desktop',
+    label: 'Font size',
+    options: SIZES,
+    value: s.textSize || 'default',
+  }))}
+      ${raw(selectField({
+    id: 'textsize-n',
+    act: 'set-text-narrow',
+    scope: 'Mobile',
+    label: 'Font size',
+    options: SIZES,
+    value: s.textSizeNarrow || s.textSize || 'default',
+  }))}
     </div>
       <div class="field">
         <div class="hint">Type and icons are already a little larger on a narrow screen than on a wide one, since a phone is held further away. These shift each further. Which applies follows the width of the window, so a desktop browser dragged narrow reads as a phone.</div>
@@ -933,18 +982,22 @@ export function settingsView(state) {
       <!-- Split the same way and for the same reason: four across a phone
            leaves each card narrower than the name on it. -->
       <div class="two">
-        <div class="field">
-          <label for="cards"><span class="scope">Desktop</span>Cards per row</label>
-          <select id="cards" data-act="set-cards">
-            ${[2, 3].map((n) => html`<option value="${n}"${raw((s.cardsWide || 3) === n ? ' selected' : '')}>${n}</option>`)}
-          </select>
-        </div>
-        <div class="field">
-          <label for="cards-n"><span class="scope">Mobile</span>Cards per row</label>
-          <select id="cards-n" data-act="set-cards-narrow">
-            ${[1, 2].map((n) => html`<option value="${n}"${raw((s.cardsNarrow || 2) === n ? ' selected' : '')}>${n}</option>`)}
-          </select>
-        </div>
+        ${raw(selectField({
+    id: 'cards',
+    act: 'set-cards',
+    scope: 'Desktop',
+    label: 'Cards per row',
+    options: [[2, '2'], [3, '3']],
+    value: s.cardsWide || 3,
+  }))}
+        ${raw(selectField({
+    id: 'cards-n',
+    act: 'set-cards-narrow',
+    scope: 'Mobile',
+    label: 'Cards per row',
+    options: [[1, '1'], [2, '2']],
+    value: s.cardsNarrow || 2,
+  }))}
       </div>
       <div class="field">
         <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. A phone is offered fewer because it has less to give: two cards across a phone are about 175px each.</div>
@@ -952,21 +1005,21 @@ export function settingsView(state) {
       <!-- Named for where the badge actually appears. Home Assistant gives a
            custom panel's own sidebar row no badge, so this is the nearest
            thing and it lands on the Notifications row. -->
-      <div class="field">
-        <label for="badge">Badge the sidebar when overdue</label>
-        <select id="badge" data-act="set-badge">
-          <option value="0"${raw(!s.badgeOverdue ? ' selected' : '')}>No</option>
-          <option value="1"${raw(s.badgeOverdue ? ' selected' : '')}>Yes, as a notification</option>
-        </select>
-        <div class="hint">Keeps one notification listing what is overdue, which puts a count on Home Assistant's Notifications row. It is replaced as things change and cleared when nothing is overdue. Paused routines are never in it.</div>
-      </div>
-      <div class="field">
-        <label for="locs">Show locations</label>
-        <select id="locs" data-act="set-locations">
-          <option value="1"${raw(s.showLocations ? ' selected' : '')}>Yes, group by location</option>
-          <option value="0"${raw(!s.showLocations ? ' selected' : '')}>No, one flat list</option>
-        </select>
-      </div>
+      ${raw(selectField({
+    id: 'badge',
+    act: 'set-badge',
+    label: 'Badge the sidebar when overdue',
+    options: [['0', 'No'], ['1', 'Yes, as a notification']],
+    value: s.badgeOverdue ? '1' : '0',
+    hint: "Keeps one notification listing what is overdue, which puts a count on Home Assistant's Notifications row. It is replaced as things change and cleared when nothing is overdue. Paused routines are never in it.",
+  }))}
+      ${raw(selectField({
+    id: 'locs',
+    act: 'set-locations',
+    label: 'Show locations',
+    options: [['1', 'Yes, group by location'], ['0', 'No, one flat list']],
+    value: s.showLocations ? '1' : '0',
+  }))}
     </div></div>
 
     <!-- One per list rather than one for both: equipment has dates to sort by
@@ -1290,6 +1343,10 @@ export function routineForm(state, task, equipmentId) {
   const t = task || {};
   const eqId = t.equipmentId || equipmentId || '';
   const used = t.partsUsed || [];
+  // Months on the record are what make it seasonal; there is no separate
+  // flag to keep in step with them.
+  const chosen = new Set(t.months || []);
+  const seasonal = chosen.size > 0;
   return html`<div class="field">
       <label for="f-rname">Routine</label>
       <input id="f-rname" name="name" value="${t.name || ''}" placeholder="Replace air filter"
@@ -1302,7 +1359,19 @@ export function routineForm(state, task, equipmentId) {
         ${state.equipment.map((e) => html`<option value="${e.id}"${raw(eqId === e.id ? ' selected' : '')}>${e.name}</option>`)}
       </select>
     </div>
-    <div class="two">
+    <!-- Two ways to be due, and only one showing at a time. An interval
+         walks forward from whenever you last did it, which is right for a
+         filter and wrong for anything tied to the weather: winterizing done
+         late one November slides later every year after. Months do not
+         drift. -->
+    ${raw(selectField({
+    id: 'f-schedkind',
+    act: 'pick-schedule',
+    label: 'Schedule',
+    options: [['interval', 'Every so often'], ['seasonal', 'In certain months']],
+    value: seasonal ? 'seasonal' : 'interval',
+  }))}
+    <div class="two" data-sched="interval"${raw(seasonal ? ' hidden' : '')}>
       <div class="field">
         <label for="f-count">Every</label>
         <input id="f-count" name="intervalCount" type="number" inputmode="numeric" min="1" max="999"
@@ -1314,6 +1383,17 @@ export function routineForm(state, task, equipmentId) {
           ${INTERVAL_UNITS.map(([v, l]) => html`<option value="${v}"${raw((t.intervalUnit || 'months') === v ? ' selected' : '')}>${l}</option>`)}
         </select>
       </div>
+    </div>
+    <div class="field" data-sched="seasonal"${raw(seasonal ? '' : ' hidden')}>
+      <label id="f-months-label">Months</label>
+      <div class="monthgrid" role="group" aria-labelledby="f-months-label">
+        ${MONTHS.map((short, i) => html`<label class="chip">
+          <input type="checkbox" name="month:${i + 1}"${raw(chosen.has(i + 1) ? ' checked' : '')}
+            aria-label="${MONTHS_LONG[i]}">
+          <span>${short}</span>
+        </label>`)}
+      </div>
+      <div class="hint">Due on the first of each month you pick, every year. Pick more than one for something you do twice a year. Warn-ahead under Settings is what gives you notice before the month arrives.</div>
     </div>
     <div class="field">
       <label for="f-lastDone">Last done</label>
@@ -1381,6 +1461,66 @@ export function partForm(state, part) {
     </div>`;
 }
 
+/** How long a snooze lasts, as the buttons offer it. */
+export const SNOOZES = [
+  [3, '3 days'],
+  [7, '1 week'],
+  [14, '2 weeks'],
+  [30, '1 month'],
+];
+
+/**
+ * The row of actions at the bottom of a routine.
+ *
+ * Three buttons where there were two, which is one more than the width can
+ * take: every button in a .btnrow is flex:1 1 0, so three of them get 113px
+ * each on a 390px phone while "Mark done" and its tick want 137. Edit gives
+ * up its word and stops flexing, which hands those pixels to the two that
+ * need them. The glyph is the one already used for editing everywhere else,
+ * and the delete button in these forms is icon-only too.
+ *
+ * While the durations are showing they replace the row rather than appearing
+ * under it: nothing below moves, and the routine you are reading stays where
+ * it was.
+ */
+export function routineActions(state, task, st) {
+  const id = esc(task.id);
+  const edit = `<button class="btn iconly" data-act="edit-routine" data-id="${id}"
+    aria-label="Edit this routine" title="Edit">${icon('edit', 16)}</button>`;
+
+  if (state.snoozing === task.id) {
+    return html`<div class="label" style="margin:0 0 6px">Remind me in</div>
+      <div class="btnrow">
+        ${SNOOZES.slice(0, 3).map(([days, label]) => html`<button class="btn"
+          data-act="snooze" data-id="${task.id}" data-days="${days}">${label}</button>`)}
+      </div>
+      <div class="btnrow" style="margin-top:8px">
+        ${SNOOZES.slice(3).map(([days, label]) => html`<button class="btn"
+          data-act="snooze" data-id="${task.id}" data-days="${days}">${label}</button>`)}
+        <button class="btn iconly" data-act="snooze-cancel" aria-label="Never mind" title="Never mind">${raw(icon('x', 16))}</button>
+      </div>`;
+  }
+
+  // Paused takes the whole row: a paused routine is not due, so there is
+  // nothing to put off and nothing to tick.
+  if (task.paused) {
+    return html`<div class="btnrow">
+      ${raw(edit)}
+      <button class="btn" data-variant="primary" data-act="resume" data-id="${task.id}">${raw(icon('play', 16))}Resume</button>
+    </div>`;
+  }
+
+  const snoozed = st && st.status === 'snoozed';
+  return html`<div class="btnrow">
+    ${raw(edit)}
+    ${raw(snoozed
+      ? `<button class="btn" data-act="wake" data-id="${id}">${icon('undo', 16)}Wake up</button>`
+      : `<button class="btn" data-act="snooze-open" data-id="${id}">${icon('today', 16)}Snooze</button>`)}
+    <button class="btn" data-variant="primary" data-act="save-log" data-id="${task.id}">${raw(icon('check', 16))}Mark done</button>
+  </div>
+  ${raw(snoozed ? `<div class="hint" style="margin-top:8px">Snoozed until ${esc(formatDay(task.snoozedUntil, state.computed.today))}. It will say what it really is again when it wakes.</div>` : '')}`;
+}
+
 /** The dialog behind a long-press or a row tap: log a service with detail. */
 export function logForm(state, taskId) {
   const task = state.tasks.find((t) => t.id === taskId);
@@ -1391,7 +1531,7 @@ export function logForm(state, taskId) {
 
   return html`<dl class="kv" style="padding:4px 0 10px">
       ${raw(eq ? `<dt>Equipment</dt><dd>${esc(eq.name)}</dd>` : '')}
-      <dt>Every</dt><dd>${intervalText(task.intervalCount, task.intervalUnit)}</dd>
+      <dt>Every</dt><dd>${scheduleText(task)}</dd>
       <dt>Last done</dt><dd>${raw(task.lastDone ? esc(formatDay(task.lastDone, state.computed.today)) : 'never')}</dd>
       ${raw(st.due ? `<dt>Due</dt><dd>${esc(formatDay(st.due, state.computed.today))} · ${esc(relative(st.daysLeft))}</dd>` : '')}
       ${raw(eq && eq.partNumber ? `<dt>Part number</dt><dd class="mono">${esc(eq.partNumber)}</dd>` : '')}
@@ -1431,12 +1571,11 @@ export function logForm(state, taskId) {
          buttons sticky on their own would then pin them over the pause row
          rather than above it. -->
     <div class="sheetfoot">
-      <div class="btnrow">
-        <button class="btn" data-act="edit-routine" data-id="${task.id}">${raw(icon('edit', 16))}Edit</button>
-        ${raw(task.paused
-          ? `<button class="btn" data-variant="primary" data-act="resume" data-id="${esc(task.id)}">${icon('play', 16)}Resume</button>`
-          : `<button class="btn" data-variant="primary" data-act="save-log" data-id="${esc(task.id)}">${icon('check', 16)}Mark done</button>`)}
-      </div>
+      <!-- Its own box so the panel can swap the buttons for the snooze
+           durations without touching the log fields above or the pause row
+           below: the sheet is only re-rendered when it changes identity,
+           which is what stops a repaint wiping a half-typed note. -->
+      <div class="actions">${raw(routineActions(state, task, st))}</div>
       <!-- Below the buttons rather than among them: pausing is a thing you do
            rarely and on purpose, and it should not sit where the thumb lands
            for the thing you do every time. -->

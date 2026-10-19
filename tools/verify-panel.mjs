@@ -1123,6 +1123,92 @@ async function main() {
     await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').partsUsed),
     [{ supplyId: 's4', quantity: 2 }]);
 
+  // --- seasonal routines --------------------------------------------------
+  // An interval walks forward from whenever you did it; months do not. The
+  // arithmetic is held against the reference implementation elsewhere, so
+  // what matters here is the form: picking months, what gets stored, and
+  // that switching back puts the interval in charge again.
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.waitForTimeout(80);
+  await page.click(el('.row[data-id="t1"]'));
+  await page.waitForSelector(el('.sheet'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet [data-act="pick-schedule"]'));
+  // Measured, not read off the attribute. The hidden attribute only hides
+  // what no author rule has given a display to, and .two is a grid — so the
+  // interval fields stayed on screen while `hidden` was perfectly true.
+  const schedBlocks = async () => page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const out = {};
+    for (const b of root.querySelectorAll('.sheet [data-sched]')) {
+      out[b.dataset.sched] = b.getBoundingClientRect().height > 0;
+    }
+    return out;
+  });
+  check('a routine opens on the interval half', await schedBlocks(), { interval: true, seasonal: false });
+
+  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'seasonal');
+  await page.waitForTimeout(120);
+  check('choosing months swaps which half shows', await schedBlocks(), { interval: false, seasonal: true });
+  check('and offers all twelve',
+    await page.$$eval(el('.sheet .monthgrid input'), (n) => n.length), 12);
+
+  // Saving with none ticked would silently make it an interval routine
+  // again, so it is refused instead.
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(200);
+  ok('saving with no month picked is refused',
+    await page.$(el('.sheet [data-act="pick-schedule"]')) !== null,
+    'the sheet closed anyway');
+  check('and nothing was stored',
+    await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').months || []), []);
+
+  await page.click(el('.sheet .monthgrid input[name="month:4"]'));
+  await page.click(el('.sheet .monthgrid input[name="month:10"]'));
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(220);
+  check('the months saved, in order',
+    await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').months),
+    [4, 10]);
+  check('and the interval it had is kept rather than thrown away',
+    await page.evaluate(() => {
+      const t = window.__snapshot().tasks.find((x) => x.id === 't1');
+      return [typeof t.intervalCount, typeof t.intervalUnit];
+    }), ['number', 'string']);
+
+  // What the list calls it. "every 3 months" on a routine anchored to April
+  // and October would be a plain lie.
+  await page.click(el('.tab[data-value="equipment"]'));
+  await page.waitForTimeout(140);
+  await page.click(el('.row[data-act="equipment"][data-id="eq1"]'));
+  await page.waitForTimeout(160);
+  const said = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const r = root.querySelector('.row[data-id="t1"] .sub .txt');
+    return r ? r.textContent.trim() : null;
+  });
+  check('the row reads the months rather than an interval', said, 'every April and October');
+
+  // Back to an interval: the months have to be cleared, not merely hidden.
+  // A put patches, so leaving them out would leave them winning.
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.waitForTimeout(80);
+  await page.click(el('.row[data-id="t1"]'));
+  await page.waitForSelector(el('.sheet'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet [data-act="pick-schedule"]'));
+  check('it reopens on the seasonal half', await schedBlocks(), { interval: false, seasonal: true });
+  check('with the months it was given still ticked',
+    await page.$$eval(el('.sheet .monthgrid input'),
+      (n) => n.filter((x) => x.checked).map((x) => x.name)),
+    ['month:4', 'month:10']);
+  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'interval');
+  await page.waitForTimeout(120);
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(220);
+  check('switching back clears the months',
+    await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').months), []);
+
   // --- the chrome does not change on a detail page ----------------------
   // The header used to turn into a back arrow and the thing's name, so the one
   // fixed point in the panel disappeared exactly when you had navigated away
@@ -2755,6 +2841,112 @@ async function main() {
   ok('and it is counting again', resumed.status !== 'paused' && resumed.daysLeft !== null,
     `${resumed.status} / ${resumed.daysLeft}`);
   check('with nothing left paused', resumed.paused_count, 0);
+
+  // --- snoozing -----------------------------------------------------------
+  // Pausing says stop tracking this; snoozing says not now, and undoes
+  // itself. The arithmetic is held against the reference implementation
+  // elsewhere; what is checked here is the sheet, the row and the width.
+  const sleeper = await page.evaluate(() => {
+    const s = window.__snapshot();
+    const hit = Object.entries(s.computed.states).find(([, st]) => st.status === 'overdue');
+    return hit ? hit[0] : null;
+  });
+  ok('there is an overdue routine to put off', sleeper !== null);
+
+  await page.click(el(`.row[data-id="${sleeper}"]`));
+  await page.waitForSelector(el('.sheet [data-act="snooze-open"]'));
+
+  // The reason Edit lost its word: three buttons sharing a row equally leave
+  // the primary one 113px when it wants 137. Edit stops flexing instead.
+  const row = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const btns = [...root.querySelectorAll('.sheet .actions .btnrow .btn')];
+    return {
+      acts: btns.map((b) => b.dataset.act),
+      heights: btns.map((b) => Math.round(b.getBoundingClientRect().height)),
+      widths: btns.map((b) => Math.round(b.getBoundingClientRect().width)),
+      labels: btns.map((b) => b.textContent.trim()),
+      editLabelled: !!btns[0].getAttribute('aria-label'),
+    };
+  });
+  check('three actions, edit first', row.acts, ['edit-routine', 'snooze-open', 'save-log']);
+  check('and edit carries a glyph alone', row.labels[0], '');
+  ok('named for anyone not looking at it', row.editLabelled);
+  ok('every button on one line', new Set(row.heights).size === 1, JSON.stringify(row.heights));
+  ok('edit is the narrow one', row.widths[0] < row.widths[2], JSON.stringify(row.widths));
+  ok('and all three are still worth tapping',
+    Math.min(...row.heights) >= 42 && Math.min(...row.widths) >= 44, JSON.stringify(row));
+
+  // Opening the durations must not disturb the log fields above it: the
+  // sheet is only rebuilt when it changes identity, so this swaps one row.
+  await page.fill(el('.sheet input[name="notes"]'), 'half typed');
+  await page.click(el('.sheet [data-act="snooze-open"]'));
+  await page.waitForTimeout(220);
+  check('the durations replace the buttons',
+    await page.$$eval(el('.sheet .actions [data-act="snooze"]'), (n) => n.map((x) => x.dataset.days)),
+    ['3', '7', '14', '30']);
+  check('and what was being typed survives',
+    await page.inputValue(el('.sheet input[name="notes"]')), 'half typed');
+
+  await page.click(el('.sheet [data-act="snooze-cancel"]'));
+  await page.waitForTimeout(200);
+  ok('cancelling puts the buttons back',
+    await page.$(el('.sheet [data-act="snooze-open"]')) !== null);
+
+  await page.click(el('.sheet [data-act="snooze-open"]'));
+  await page.waitForTimeout(200);
+  await page.click(el('.sheet [data-act="snooze"][data-days="14"]'));
+  await page.waitForTimeout(320);
+
+  const slept = await page.evaluate((id) => {
+    const s = window.__snapshot();
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const r = root.querySelector(`.row[data-id="${id}"]`);
+    return {
+      until: s.tasks.find((t) => t.id === id).snoozedUntil,
+      status: s.computed.states[id].status,
+      daysLeft: s.computed.states[id].daysLeft,
+      counted: s.computed.counts.snoozed,
+      overdue: s.computed.counts.overdue,
+      lead: r ? r.querySelector('.sub b').textContent.trim() : null,
+      headings: [...root.querySelectorAll('.pad .label')].map((n) => n.textContent.replace(/\d+$/, '').trim()),
+    };
+  }, sleeper);
+  ok('it is asleep until a real day', /^\d{4}-\d{2}-\d{2}$/.test(slept.until || ''), String(slept.until));
+  check('and reads as asleep', slept.status, 'snoozed');
+  // The same reasoning as pausing: days-left is what the sensor reports, so
+  // an automation must not go on firing about what you just set aside.
+  check('with no days left for an automation to match', slept.daysLeft, null);
+  check('counted as asleep', slept.counted, 1);
+  ok('and out of the overdue band, which is the whole point',
+    slept.headings.includes('Snoozed'), JSON.stringify(slept.headings));
+  ok('the row says when it wakes', /^Snoozed until /.test(slept.lead || ''), String(slept.lead));
+
+  // Still visibly overdue underneath: putting something off must not hide
+  // how long it has been waiting.
+  check('and what it really is, in a word',
+    await page.evaluate((id) => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const t = root.querySelector(`.row[data-id="${id}"] .sub .txt`);
+      return t ? t.textContent.trim() : null;
+    }, sleeper), 'overdue');
+
+  // Waking it puts it back exactly where it was.
+  await page.click(el(`.row[data-id="${sleeper}"]`));
+  await page.waitForSelector(el('.sheet [data-act="wake"]'));
+  await page.click(el('.sheet [data-act="wake"]'));
+  await page.waitForTimeout(320);
+  const woke = await page.evaluate((id) => {
+    const s = window.__snapshot();
+    return {
+      until: s.tasks.find((t) => t.id === id).snoozedUntil,
+      status: s.computed.states[id].status,
+      counted: s.computed.counts.snoozed,
+    };
+  }, sleeper);
+  check('waking clears the date', woke.until, null);
+  check('and it is overdue again', woke.status, 'overdue');
+  check('with nothing left asleep', woke.counted, 0);
   await ctx.close();
 
   /* --------------------------------- list or cards, per tab ----------- */

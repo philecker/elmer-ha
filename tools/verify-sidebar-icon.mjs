@@ -109,8 +109,17 @@ async function main() {
   };
 
   // --- the control: registered first, which is the race going our way ------
+  // The icon is created only once the file has finished everything it does,
+  // its second pass at load included. Created in between, it can be caught
+  // mid-resolution — its lookup is a promise, so for a tick it has an icon
+  // name and nothing drawn yet, which is indistinguishable from one that
+  // gave up. The repair pokes it, harmlessly, and the count below reads 3.
+  // That is the test being unlucky rather than the file being wrong, but an
+  // assertion that fails one run in ten teaches you to ignore it.
   await blank();
   await page.addScriptTag({ content: source, type: 'module' });
+  await page.waitForLoadState('load');
+  await page.waitForTimeout(80);
   await page.evaluate(() => {
     const el = document.createElement('ha-icon');
     el.icon = 'elmer:elmer';

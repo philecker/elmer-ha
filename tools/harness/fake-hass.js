@@ -43,21 +43,48 @@ function daysBetween(a, b) {
   if (!x || !y) return 0;
   return Math.round((y - x) / 86400000);
 }
+/** Months win over the interval, mirroring next_due in schedule.py. */
+function nextSeasonal(months, lastDone) {
+  const d = parseDay(lastDone);
+  if (!d || !months || !months.length) return null;
+  for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
+    for (const month of months) {
+      const candidate = new Date(year, Number(month) - 1, 1);
+      if (candidate > d) return toDay(candidate);
+    }
+  }
+  return null;
+}
+
+function nextDue(task) {
+  if (!task || !task.lastDone) return null;
+  if (task.months && task.months.length) return nextSeasonal(task.months, task.lastDone);
+  return addInterval(task.lastDone, task.intervalCount, task.intervalUnit);
+}
+
 function taskState(task, soon = 14) {
   // Mirrors the short-circuit in schedule.py: paused wins over everything and
   // takes daysLeft with it. The harness computes this itself, so a change to
   // the real one that is not made here shows up as the panel behaving
   // correctly against a store that disagrees with the shipped one.
   if (task && task.paused) {
-    const was = task.lastDone
-      ? addInterval(task.lastDone, task.intervalCount, task.intervalUnit)
-      : null;
-    return { due: was, daysLeft: null, status: 'paused', progress: 0, cycle: null };
+    return { due: nextDue(task), daysLeft: null, status: 'paused', progress: 0, cycle: null };
+  }
+  // Mirrors the snooze short-circuit in schedule.py.
+  if (task && task.snoozedUntil && today() < task.snoozedUntil) {
+    return {
+      due: nextDue(task),
+      daysLeft: null,
+      status: 'snoozed',
+      progress: 0,
+      cycle: null,
+      snoozedUntil: task.snoozedUntil,
+    };
   }
   if (!task || !task.lastDone) {
     return { due: null, daysLeft: null, status: 'new', progress: 0, cycle: null };
   }
-  const due = addInterval(task.lastDone, task.intervalCount, task.intervalUnit);
+  const due = nextDue(task);
   const now = today();
   const daysLeft = daysBetween(now, due);
   const cycle = Math.max(1, daysBetween(task.lastDone, due));
@@ -193,7 +220,8 @@ function applyOp(kind, p) {
   else if (kind === 'routine.delete') data.tasks = data.tasks.filter((t) => t.id !== p.id);
   else if (kind === 'routine.lastDone') {
     const t = data.tasks.find((x) => x.id === p.id);
-    if (t) t.lastDone = p.doneOn;
+    // Doing the job ends a snooze, mirroring apply_op in store.py.
+    if (t) { t.lastDone = p.doneOn; t.snoozedUntil = null; }
   } else if (kind === 'part.put') upsert(data.supplies, p);
   else if (kind === 'part.delete') data.supplies = data.supplies.filter((s) => s.id !== p.id);
   else if (kind === 'part.adjust') {
@@ -225,6 +253,7 @@ function snapshot() {
       stock,
       counts: {
         paused: vals.filter((s) => s.status === 'paused').length,
+        snoozed: vals.filter((s) => s.status === 'snoozed').length,
         overdue: vals.filter((s) => s.status === 'overdue').length,
         due: vals.filter((s) => s.status === 'due').length,
         new: vals.filter((s) => s.status === 'new').length,
@@ -377,7 +406,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.4.0' } };
+panel.panel = { config: { version: '1.5.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

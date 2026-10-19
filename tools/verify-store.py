@@ -223,6 +223,93 @@ async def main() -> int:
     check("and is always a boolean",
           store_mod.normalize({"settings": {"badgeOverdue": "yes"}})["settings"]["badgeOverdue"], True)
 
+    # --- snoozing ----------------------------------------------------------
+    # The arithmetic is held against the reference implementation by
+    # verify-schedule.py, including the day the snooze ends. What is only on
+    # this side is what the store will accept, and that doing the job ends it.
+    for given, want in (
+        ("2026-12-01", "2026-12-01"),
+        ("not-a-date", None),
+        ("2026-13-45", None),
+        ("", None),
+        (None, None),
+        (12345, None),
+    ):
+        got = store_mod.normalize({"tasks": [{"id": "t", "snoozedUntil": given}]})["tasks"][0]
+        check(f"snoozedUntil {given!r} normalises to {want!r}", got["snoozedUntil"], want)
+
+    soon = schedule.add_interval(schedule.today(), 10, "days")
+    asleep = {"id": "t", "lastDone": schedule.add_interval(schedule.today(), -90, "days"),
+              "intervalCount": 1, "intervalUnit": "months", "snoozedUntil": soon}
+    st = schedule.task_state(asleep)
+    check("an asleep routine reads as asleep", st["status"], "snoozed")
+    check("and reports no days left, so no automation fires on it",
+          st["daysLeft"], None)
+    check("while still saying when it was really due",
+          st["due"], schedule.add_interval(asleep["lastDone"], 1, "months"))
+    check("and when it wakes", st["snoozedUntil"], soon)
+    # A snooze that ends today has ended: the comparison is strict, so there
+    # is no day where it is both over and still hiding the routine.
+    check("a snooze ending today is over",
+          schedule.task_state(dict(asleep, snoozedUntil=schedule.today()))["status"],
+          "overdue")
+    check("one ending tomorrow is not",
+          schedule.task_state(dict(asleep, snoozedUntil=schedule.add_interval(schedule.today(), 1, "days")))["status"],
+          "snoozed")
+    # Paused beats asleep: pausing is the deliberate one, and a routine
+    # carrying both should read as the stronger of the two.
+    check("paused wins over asleep",
+          schedule.task_state(dict(asleep, paused=True))["status"], "paused")
+
+    # --- seasonal routines -------------------------------------------------
+    # The arithmetic itself is held against the reference implementation by
+    # verify-schedule.py across hundreds of routines. What is checked here is
+    # the part that is only on this side: what the store will accept as a
+    # month, and that months win over an interval that is still stored.
+    for given, want in (
+        ([10], [10]),
+        ([10, 4], [4, 10]),
+        ([3, 3, 3], [3]),
+        (["4", 10.0], [4, 10]),
+        ([0, 13, -1], []),
+        ([1, 99, 6], [1, 6]),
+        ("october", []),
+        (None, []),
+        ([], []),
+    ):
+        got = store_mod.normalize({"tasks": [{"id": "t", "months": given}]})["tasks"][0]["months"]
+        check(f"months {given!r} normalise to {want}", got, want)
+
+    seasonal = {"id": "t", "lastDone": "2026-09-20", "months": [10],
+                "intervalCount": 3, "intervalUnit": "months"}
+    check("a month anchor beats the interval beside it",
+          schedule.next_due(seasonal), "2026-10-01")
+    check("and the interval is used again once the months go",
+          schedule.next_due(dict(seasonal, months=[])), "2026-12-20")
+    # The point of the whole feature: doing it late must not move next year.
+    check("doing it late in the month does not drag next year later",
+          schedule.next_due(dict(seasonal, lastDone="2026-10-29")), "2027-10-01")
+    check("and doing it early does not either",
+          schedule.next_due(dict(seasonal, lastDone="2026-10-01")), "2027-10-01")
+    check("twice a year alternates",
+          schedule.next_due(dict(seasonal, months=[4, 10], lastDone="2026-04-15")),
+          "2026-10-01")
+    check("and wraps into next year from the last one",
+          schedule.next_due(dict(seasonal, months=[4, 10], lastDone="2026-10-15")),
+          "2027-04-01")
+    check("a December anchor rolls over",
+          schedule.next_due(dict(seasonal, months=[12], lastDone="2026-12-05")),
+          "2027-12-01")
+    check("never done is still never done",
+          schedule.next_due(dict(seasonal, lastDone=None)), None)
+    # Pausing has to keep working on a seasonal routine, since the two
+    # features meet at the same short-circuit.
+    paused_state = schedule.task_state(dict(seasonal, paused=True))
+    check("a paused seasonal routine reports no days left",
+          (paused_state["status"], paused_state["daysLeft"]), ("paused", None))
+    check("but still says when it would have been due",
+          paused_state["due"], "2026-10-01")
+
     def _row(name, days, status="overdue", equipment=None):
         return {"task": {"name": name}, "equipment": equipment,
                 "state": {"status": status, "daysLeft": days}}
@@ -315,6 +402,20 @@ async def main() -> int:
     check("no parts, no drawdown", e2["usedParts"], [])
     check("unknown routine returns None", await s.async_complete("nope"), None)
     check("unknown log returns None", await s.async_undo("nope"), None)
+
+    # --- doing the job ends the snooze ------------------------------------
+    # The clearest possible signal that "not now" is over. Set to None rather
+    # than removed, because normalize guarantees the key is there and a
+    # record that lost it stopped matching its own export coming back in.
+    await s.async_apply([("routine.put", {
+        "id": "t3", "name": "Snoozed one", "lastDone": "2026-01-01",
+        "intervalCount": 1, "intervalUnit": "months", "snoozedUntil": "2099-01-01",
+    })])
+    check("it starts asleep", s.task("t3")["snoozedUntil"], "2099-01-01")
+    await s.async_complete("t3", done_on="2026-10-03")
+    check("marking it done wakes it", s.task("t3")["snoozedUntil"], None)
+    check("and the key is still there to be exported",
+          "snoozedUntil" in s.task("t3"), True)
 
     # --- history stays newest-first --------------------------------------
     s = new_store()
@@ -429,8 +530,9 @@ async def main() -> int:
     # A paused routine is counted as paused and nowhere else. It would read as
     # overdue on its dates alone, so this is the check that pausing actually
     # stops the nagging rather than only changing how a row is drawn.
-    check("counts", s.counts(), {"paused": 1, "overdue": 1, "due": 1, "new": 1, "ok": 1,
-                                 "lowStock": 2, "partsShort": 0, "equipment": 0})
+    check("counts", s.counts(), {"paused": 1, "snoozed": 0, "overdue": 1, "due": 1,
+                                 "new": 1, "ok": 1, "lowStock": 2, "partsShort": 0,
+                                 "equipment": 0})
     paused_state = schedule.task_state(s.task("e"), s.due_soon_days)
     check("a paused routine reports no days left", paused_state["daysLeft"], None)
     check("which is what keeps a numeric condition from matching it",

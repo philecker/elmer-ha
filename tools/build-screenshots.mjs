@@ -68,6 +68,11 @@ async function open({ viewport, dark = false, narrow = true }) {
 }
 
 async function shot(page, name) {
+  // Park the pointer in the corner first. Clicking leaves the mouse where it
+  // landed, and after a re-render some unrelated button can be sitting under
+  // it wearing its hover state — which then ships in the screenshot as if it
+  // were the normal appearance of that control.
+  await page.mouse.move(0, 0);
   // Sheets and the toast animate in; a screenshot taken the instant a selector
   // appears catches them half-transparent.
   await page.waitForTimeout(350);
@@ -82,7 +87,10 @@ async function shot(page, name) {
 // Every phone screen is captured in both themes from one sequence, so a light
 // shot and its dark twin are always the same screen in the same state. They
 // used to be captured separately and only Routines had a dark counterpart.
-const SCREENS = ['routines', 'equipment', 'parts', 'history', 'settings', 'log-service'];
+const SCREENS = [
+  'routines', 'equipment', 'cards', 'parts', 'history', 'settings',
+  'log-service', 'snooze', 'schedule',
+];
 const OWNED = [
   ...SCREENS.map((n) => `${n}.png`),
   ...SCREENS.map((n) => `${n}-dark.png`),
@@ -102,7 +110,15 @@ async function phoneScreens(dark) {
   await page.click('.row[data-id="eq1"]');
   await shot(page, `equipment${suffix}.png`);
 
+  // The card view, on the list it suits best: equipment is scanned by its
+  // glyph. Switched back straight after, so every later shot is the list the
+  // panel opens on rather than whatever this left behind.
   await page.click('[data-act="back"]');
+  await page.click('.viewseg button[data-value="cards"]');
+  await shot(page, `cards${suffix}.png`);
+  await page.click('.viewseg button[data-value="list"]');
+  await page.waitForTimeout(200);
+
   await page.click('.tab[data-value="parts"]');
   await shot(page, `parts${suffix}.png`);
 
@@ -117,6 +133,28 @@ async function phoneScreens(dark) {
   await page.click('.row[data-id="t1"]');
   await page.waitForSelector('.sheet');
   await shot(page, `log-service${suffix}.png`);
+
+  // Snooze, with its durations open. Nothing is saved until one is picked, so
+  // this leaves the data exactly as it found it.
+  await page.click('.sheet [data-act="snooze-open"]');
+  await page.waitForSelector('.sheet [data-act="snooze"]');
+  await shot(page, `snooze${suffix}.png`);
+  await page.click('.sheet [data-act="snooze-cancel"]');
+  await page.waitForTimeout(200);
+
+  // A routine anchored to months rather than an interval. The form is shot
+  // and then cancelled, for the same reason.
+  await page.click('.sheet [data-act="edit-routine"]');
+  await page.waitForSelector('.sheet [data-act="pick-schedule"]');
+  await page.selectOption('.sheet [data-act="pick-schedule"]', 'seasonal');
+  await page.waitForSelector('.sheet .monthgrid');
+  for (const month of ['month:4', 'month:10']) {
+    await page.click(`.sheet .monthgrid input[name="${month}"]`);
+  }
+  await page.waitForTimeout(150);
+  await shot(page, `schedule${suffix}.png`);
+  await page.click('.sheet [data-act="close"]');
+  await page.waitForTimeout(200);
 
   await ctx.close();
 }

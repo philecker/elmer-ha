@@ -104,9 +104,87 @@ def build_tasks():
                     "intervalUnit": unit,
                 }
             )
+    # Seasonal routines, which ignore the interval entirely and land on the
+    # first of a chosen month. Every shape that matters: one month, two, a
+    # month either side of the last-done date, a December anchor that has to
+    # roll into next year, and all twelve.
+    for last in [
+        "2024-02-29",
+        "2025-12-31",
+        "2026-01-01",
+        "2026-06-15",
+        "2026-09-30",
+        "2026-10-01",
+        "2026-10-02",
+        "2026-12-01",
+        None,
+        "",
+    ]:
+        for months in [
+            [1],
+            [10],
+            [12],
+            [4, 10],
+            [3, 6, 9, 12],
+            [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12],
+            [6],
+            [2],
+        ]:
+            tasks.append(
+                {
+                    "id": f"s{len(tasks)}",
+                    "name": "x",
+                    "lastDone": last,
+                    # Carried alongside on purpose: months win, and a routine
+                    # that still remembers its old interval must not use it.
+                    "intervalCount": 3,
+                    "intervalUnit": "months",
+                    "months": months,
+                }
+            )
+
+    # Snoozed, around the fixed today of 2026-10-07: a date well ahead, the
+    # day itself, the day before and after, and one long past. The boundary
+    # is the whole of it — a snooze that ends today has ended, and an
+    # off-by-one there is a day of being told about something you set aside.
+    for until in [
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2026-11-01",
+        "2027-01-01",
+        "2020-01-01",
+        None,
+        "",
+        "not-a-date",
+    ]:
+        for last, count, unit in [
+            ("2026-09-01", 1, "months"),
+            ("2026-10-06", 3, "months"),
+            ("2025-01-01", 1, "years"),
+            (None, 3, "months"),
+        ]:
+            tasks.append(
+                {
+                    "id": f"z{len(tasks)}",
+                    "name": "x",
+                    "lastDone": last,
+                    "intervalCount": count,
+                    "intervalUnit": unit,
+                    "snoozedUntil": until,
+                }
+            )
+    # And one seasonal routine asleep, since the two short-circuits sit next
+    # to each other and the order they are tested in matters.
+    tasks.append({
+        "id": "zs", "name": "x", "lastDone": "2026-09-20", "months": [10],
+        "intervalCount": 3, "intervalUnit": "months", "snoozedUntil": "2026-12-01",
+    })
+
     # The same routines again, paused. Pausing is a short-circuit in both
     # implementations, and a short-circuit is exactly the kind of thing that
-    # gets added to one and forgotten in the other.
+    # gets added to one and forgotten in the other. It also pins the order:
+    # paused wins over asleep, and these carry both.
     tasks += [dict(t, id=f"{t['id']}p", paused=True) for t in list(tasks)]
     return tasks
 
@@ -141,6 +219,9 @@ const out = {
         due: st.due,
         daysLeft: st.daysLeft,
         status: st.status,
+        // Only set while asleep, so undefined has to become null on both
+        // sides or the comparison would differ on a field neither has.
+        snoozedUntil: st.snoozedUntil === undefined ? null : st.snoozedUntil,
         // Round so float formatting can never be the thing that differs.
         progress: Math.round(st.progress * 1e9) / 1e9,
         cycle: st.cycle === undefined ? null : st.cycle,
@@ -230,12 +311,15 @@ def main() -> int:
             "status": got["status"],
             "progress": round(got["progress"], 9),
             "cycle": got["cycle"],
+            "snoozedUntil": got.get("snoozedUntil"),
         }
         check(
             "taskState",
             got,
             want,
-            f"lastDone={t['lastDone']!r} every {t['intervalCount']} {t['intervalUnit']}",
+            f"lastDone={t['lastDone']!r} every {t['intervalCount']} {t['intervalUnit']}"
+            + (f" months={t['months']}" if t.get("months") else "")
+            + (f" asleep until {t['snoozedUntil']!r}" if t.get("snoozedUntil") else ""),
         )
 
     total = len(cases) * 2 + len(spans) + len(tasks)

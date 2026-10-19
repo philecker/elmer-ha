@@ -120,6 +120,36 @@ export function intervalText(count, unit) {
   return n === 1 ? one : `${n} ${one}s`;
 }
 
+export const MONTHS_LONG = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+];
+
+/** "April and October", or "Mar, Jun, Sep and Dec" once there are a few. */
+export function monthsText(months) {
+  const list = (months || []).filter((m) => m >= 1 && m <= 12);
+  if (!list.length) return '';
+  if (list.length === 12) return 'month';
+  // Spelled out while there is room for it, abbreviated once there is not.
+  const names = list.map((m) => (list.length <= 2 ? MONTHS_LONG[m - 1] : MONTHS[m - 1]));
+  if (names.length === 1) return names[0];
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+}
+
+/**
+ * What a routine's schedule is called, for the line that reads "every ...".
+ *
+ * One function for both kinds, so a caller never has to know which it is
+ * holding — which is the thing that would otherwise get missed at one of the
+ * four places this is printed.
+ */
+export function scheduleText(task) {
+  const months = (task && task.months) || [];
+  return months.length
+    ? monthsText(months)
+    : intervalText(task && task.intervalCount, task && task.intervalUnit);
+}
+
 export const CATEGORIES = [
   ['hvac', 'Heating & Cooling'],
   ['water', 'Water'],
@@ -204,6 +234,20 @@ export function uid(prefix = 'id') {
 
 export function todayIso() {
   const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+/**
+ * A day, N days on. Parsed at noon for the same reason daysBetween is: a
+ * date built at midnight and moved across a daylight-saving boundary can
+ * land on the wrong day.
+ */
+export function addDays(iso, n) {
+  const d = parse(iso);
+  if (!d) return null;
+  d.setDate(d.getDate() + Number(n || 0));
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${d.getFullYear()}-${m}-${day}`;

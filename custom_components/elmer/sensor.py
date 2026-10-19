@@ -47,6 +47,11 @@ async def async_setup_entry(
         [
             ElmerCountSensor(store, entry, "overdue", "Overdue", "mdi:alert-circle"),
             ElmerCountSensor(store, entry, "due", "Due soon", "mdi:clock-alert-outline"),
+            # The third number a dashboard card wants, and the only one of the
+            # three that was not already published. Counts routines that are
+            # neither late nor nearly due; paused and never-done ones are in
+            # neither, so the three do not add up to every routine on purpose.
+            ElmerCountSensor(store, entry, "ok", "On track", "mdi:check-circle-outline"),
             ElmerCountSensor(store, entry, "lowStock", "Parts to reorder", "mdi:package-variant"),
             ElmerCountSensor(store, entry, "partsShort", "Parts short", "mdi:cart-alert"),
             ElmerNextDueSensor(store, entry),
@@ -255,12 +260,24 @@ class ElmerRoutineSensor(ElmerEntity):
             return {}
         state = schedule.task_state(task, self._store.due_soon_days)
         eq = self._store.equipment(task.get("equipmentId")) or {}
+        months = task.get("months") or []
         return {
             "status": state["status"],
             "paused": bool(task.get("paused")),
+            # Present whether or not it is asleep, so an automation can ask
+            # when it wakes without having to notice the status first.
+            "snoozed_until": task.get("snoozedUntil") or None,
             "due": state["due"],
             "last_done": task.get("lastDone"),
-            "interval": f"{task.get('intervalCount')} {task.get('intervalUnit')}",
+            # A seasonal routine still has an interval stored, so that
+            # switching back does not lose it, but it is not what makes the
+            # routine due — so it is not reported as though it were. The two
+            # attributes are never both set, and `seasonal` says which.
+            "seasonal": bool(months),
+            "months": list(months) or None,
+            "interval": (
+                None if months else f"{task.get('intervalCount')} {task.get('intervalUnit')}"
+            ),
             "progress": round(state["progress"], 3),
             "equipment": eq.get("name"),
             "location": eq.get("location"),

@@ -520,6 +520,7 @@ export const CSS = `
 .row[data-paused] .sub,
 .tile[data-paused] .name,
 .tile[data-paused] .meta { opacity: 0.55; }
+.tag[data-tone="snoozed"] { background: var(--surface-2); color: var(--ink-3); }
 .row[data-paused] .meter,
 .tile[data-paused] .meter { opacity: 0.4; }
 .row[data-paused] .sub b,
@@ -1134,6 +1135,10 @@ a.btn { text-decoration: none; }
 
 .btnrow { display: flex; gap: 8px; margin-top: 14px; }
 .btnrow .btn { flex: 1 1 0; min-width: 0; }
+/* A button that is only a glyph stops taking an equal share, which is what
+   leaves the ones with words in them enough room. Square-ish rather than a
+   third of the row. */
+.btnrow .btn.iconly { flex: 0 0 auto; padding: 0 13px; }
 
 /* ---------- the add button ----------
    In the header, carrying the name of what it adds. A bare plus in this slot
@@ -1313,6 +1318,51 @@ a.btn { text-decoration: none; }
 /* Not scoped to .field — a hint is also used on its own under a pair of
    buttons, where it would otherwise fall back to full body size. */
 .hint { font-size: calc(11.5px * var(--ui-scale)); color: var(--ink-3); margin-top: 5px; line-height: 1.45; }
+
+/* The twelve months of a seasonal routine. Chips rather than a multi-select,
+   which on a phone is a scrolling list you have to hold a modifier key to use.
+   Each is a real checkbox with a label around it, so a tap anywhere on the
+   chip toggles it and a screen reader reads it as the checkbox it is. */
+.monthgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(calc(62px * var(--ui-scale)), 1fr));
+  gap: 6px;
+}
+.chip {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: calc(44px * var(--ui-scale));
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+}
+/* Off-screen rather than display:none: a hidden input cannot be focused, and
+   the keyboard has to be able to reach these. */
+.chip input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+}
+.chip:has(input:checked) {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.chip:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The UA stylesheet gives [hidden] display:none, but any author rule setting
+   a display beats it — .two is a grid, so hiding one did nothing at all.
+   Stated here once so nothing has to remember it per rule. */
+[hidden] { display: none !important; }
+
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .two .field { margin-top: 12px; }
 

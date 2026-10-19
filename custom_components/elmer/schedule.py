@@ -26,8 +26,10 @@ from typing import Any
 
 DUE_SOON_DAYS = 14
 
-# Mirrors STATUS_RANK in the renderer's model.js.
-STATUS_RANK = {"overdue": 0, "due": 1, "new": 2, "ok": 3, "paused": 4}
+# Mirrors STATUS_RANK in the renderer's model.js. Snoozed sits below on-track
+# and above paused: a snooze that left the thing at the top of the list would
+# have done nothing, and a snooze is still more temporary than a pause.
+STATUS_RANK = {"overdue": 0, "due": 1, "new": 2, "ok": 3, "snoozed": 4, "paused": 5}
 
 
 def parse_day(iso: Any) -> date | None:
@@ -109,9 +111,39 @@ def days_between(from_iso: str, to_iso: str) -> int:
     return (b - a).days
 
 
+def next_seasonal(months: Any, last_done: Any) -> str | None:
+    """The first of the next chosen month, strictly after ``last_done``.
+
+    A month-anchored routine does not drift. An interval walks forward from
+    whenever you happened to do it, so winterizing in late November one year
+    moves it later every year after; this lands on the same month regardless.
+
+    The first of the month is the due date rather than any particular day,
+    because the month is the whole of what was asked for. The warn-ahead
+    setting is what gives the lead time to act on it.
+
+    ``months`` arrives sorted and within 1-12 from the store, so the first
+    candidate found scanning this year and then the next is the right one.
+    """
+    d = parse_day(last_done)
+    if d is None or not months:
+        return None
+    for year in (d.year, d.year + 1):
+        for month in months:
+            candidate = date(year, int(month), 1)
+            if candidate > d:
+                return to_day(candidate)
+    return None
+
+
 def next_due(task: dict) -> str | None:
     if not task or not task.get("lastDone"):
         return None
+    # A routine with months on it is seasonal, and the interval it may also
+    # carry is left alone rather than cleared — switching a routine to months
+    # and back should not lose the every-three-months it had before.
+    if task.get("months"):
+        return next_seasonal(task["months"], task["lastDone"])
     return add_interval(
         task["lastDone"], task.get("intervalCount"), task.get("intervalUnit")
     )
@@ -142,6 +174,28 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
             "status": "paused",
             "progress": 0,
             "cycle": None,
+        }
+
+    # Snoozed until a date, then back to whatever it really is. Pausing says
+    # stop tracking this; snoozing says not now, and undoes itself.
+    #
+    # daysLeft goes None for the same reason it does when paused: it is what
+    # the routine's own sensor reports, and an automation that went on firing
+    # about the thing you had just set aside would make the snooze a panel
+    # decoration rather than a decision. The real due date is still returned,
+    # so the panel can say what is being put off and for how long.
+    #
+    # Nothing is cleared when the day arrives. A date in the past simply
+    # stops matching here, which means waking up needs no timer, no service
+    # and no write — the routine is awake the moment the date rolls over.
+    if task and task.get("snoozedUntil") and today() < task["snoozedUntil"]:
+        return {
+            "due": next_due(task),
+            "daysLeft": None,
+            "status": "snoozed",
+            "progress": 0,
+            "cycle": None,
+            "snoozedUntil": task["snoozedUntil"],
         }
 
     due = next_due(task)

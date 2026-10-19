@@ -100,6 +100,27 @@ def _int(value: Any, default: int = 0) -> int:
     return int(_num(value, default))
 
 
+def _months(value: Any) -> list[int]:
+    """The months a seasonal routine is anchored to: sorted, unique, 1-12.
+
+    An empty list is what makes a routine an ordinary interval one, so
+    anything unusable comes back empty rather than part-way valid. Sorting
+    here rather than at the point of use is what lets the scheduler take the
+    first candidate it finds and stop.
+    """
+    if not isinstance(value, (list, tuple)):
+        return []
+    out: set[int] = set()
+    for item in value:
+        try:
+            n = int(item)
+        except (TypeError, ValueError):
+            continue
+        if 1 <= n <= 12:
+            out.add(n)
+    return sorted(out)
+
+
 def empty_data() -> dict[str, Any]:
     return {
         "version": STORAGE_VERSION,
@@ -160,6 +181,13 @@ def normalize(raw: Any) -> dict[str, Any]:
         # A routine is paused or it is not; anything truthy in a file counts
         # as paused, and the value stored is always a boolean.
         item["paused"] = bool(t.get("paused"))
+        # Months make a routine seasonal. Always a list, so the scheduler can
+        # test it for emptiness without caring what a hand-edited file held.
+        item["months"] = _months(t.get("months"))
+        # A day, or nothing. Anything unparseable is nothing rather than a
+        # snooze that never ends, since the whole point is that it expires.
+        snoozed = t.get("snoozedUntil")
+        item["snoozedUntil"] = snoozed if schedule.parse_day(snoozed) else None
         used = t.get("partsUsed") if isinstance(t.get("partsUsed"), list) else []
         item["partsUsed"] = [
             {"supplyId": u.get("supplyId"), "quantity": max(1, _int(u.get("quantity"), 1))}
@@ -354,6 +382,7 @@ class ElmerStore:
         rows = self.rows()
         return {
             "paused": sum(1 for r in rows if r["state"]["status"] == "paused"),
+            "snoozed": sum(1 for r in rows if r["state"]["status"] == "snoozed"),
             "overdue": sum(1 for r in rows if r["state"]["status"] == "overdue"),
             "due": sum(1 for r in rows if r["state"]["status"] == "due"),
             "new": sum(1 for r in rows if r["state"]["status"] == "new"),
@@ -422,6 +451,15 @@ class ElmerStore:
             for t in d["tasks"]:
                 if t.get("id") == p.get("id"):
                     t["lastDone"] = p.get("doneOn")
+                    # Doing the job is the clearest possible end to a snooze,
+                    # so it ends here rather than waiting for its date. Undo
+                    # runs through this same op and does not bring it back —
+                    # the two cannot be told apart from here, and a snooze
+                    # that quietly returned would be the worse surprise.
+                    # Set to None rather than removed: normalize guarantees
+                    # the key is there, and a record that quietly lost it
+                    # stopped matching its own export on the way back in.
+                    t["snoozedUntil"] = None
 
         elif kind == "part.put":
             d["supplies"] = _upsert(d["supplies"], p)

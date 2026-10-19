@@ -42,15 +42,39 @@ On a wider screen the same layout stretches; nothing is rearranged.
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/desktop.png" alt="Elmer on a desktop browser" width="820">
 </p>
 
+**Either list, as a list or as cards.** Routines, Equipment and Parts each
+remember which shape you chose, and how many cards go in a row is yours to set
+— separately for a desktop and a phone, because a count picked at a desk
+should not follow you onto a screen that has no room for it.
+
+**Schedules that suit the job.** Most things run on an interval: every three
+months, every year. Anything tied to the weather does not — winterize the pool
+late one November and an interval moves it later every year after. Those can be
+anchored to months instead, and land in the same month however late you get to
+them.
+
+**Not now, without losing track.** Snooze a routine for a few days and it drops
+out of the overdue list and goes quiet, then comes back on its own. It still
+says what it really is underneath, so putting something off never hides how
+long it has been waiting. Pause is the other half of that: indefinite, for
+things you genuinely are not tracking at the moment.
+
+<p>
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/schedule.png" alt="A routine anchored to April and October rather than an interval" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/snooze.png" alt="Snoozing a routine for a few days" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/cards.png" alt="Equipment as cards rather than a list" width="250">
+</p>
+
 **Entities, so the rest of Home Assistant can act on it.**
 
 | Entity | What it is |
 | --- | --- |
 | `sensor.elmer_overdue` | How many routines are past due. Attributes list them. |
 | `sensor.elmer_due_soon` | How many fall inside your warning window. |
+| `sensor.elmer_on_track` | How many are neither late nor nearly due. |
 | `sensor.elmer_parts_to_reorder` | Parts at or below their reorder point. |
 | `sensor.elmer_next_due` | Days until the next thing that isn't already overdue. |
-| one per routine | Days until due — **negative when overdue**. |
+| one per routine | Days until due — **negative when overdue**, `unknown` while paused or snoozed. |
 
 Per-routine sensors are grouped under a device per piece of equipment, so the
 furnace's routines sit together. Days-until is the state rather than a date

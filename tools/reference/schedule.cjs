@@ -48,8 +48,30 @@ function daysBetween(fromIso, toIso) {
   return Math.round((b - a) / 86400000);
 }
 
+/**
+ * The first of the next chosen month, strictly after lastDone.
+ *
+ * A month-anchored routine does not drift the way an interval does. months
+ * arrives sorted and within 1-12, so the first candidate found scanning this
+ * year and then the next is the right one.
+ */
+function nextSeasonal(months, lastDone) {
+  const d = parseDay(lastDone);
+  if (!d || !months || !months.length) return null;
+  for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
+    for (const month of months) {
+      const candidate = new Date(year, Number(month) - 1, 1);
+      if (candidate > d) return toDay(candidate);
+    }
+  }
+  return null;
+}
+
 function nextDue(task) {
   if (!task || !task.lastDone) return null;
+  // Months on a routine make it seasonal; any interval it also carries is
+  // left alone so switching back does not lose it.
+  if (task.months && task.months.length) return nextSeasonal(task.months, task.lastDone);
   return addInterval(task.lastDone, task.intervalCount, task.intervalUnit);
 }
 
@@ -60,6 +82,19 @@ function taskState(task, dueSoonDays = 14) {
   // was paused to silence. The date it would have been due survives.
   if (task && task.paused) {
     return { due: nextDue(task), daysLeft: null, status: 'paused', progress: 0, cycle: null };
+  }
+  // Snoozed until a date. daysLeft goes null for the same reason pausing does
+  // — it is what the sensor reports — and a date in the past simply stops
+  // matching, so waking up needs no timer and no write.
+  if (task && task.snoozedUntil && today() < task.snoozedUntil) {
+    return {
+      due: nextDue(task),
+      daysLeft: null,
+      status: 'snoozed',
+      progress: 0,
+      cycle: null,
+      snoozedUntil: task.snoozedUntil,
+    };
   }
   const due = nextDue(task);
   if (!due) return { due: null, daysLeft: null, status: 'new', progress: 0 };
@@ -90,6 +125,7 @@ module.exports = {
   today,
   addInterval,
   daysBetween,
+  nextSeasonal,
   nextDue,
   taskState,
   overdueTasks,

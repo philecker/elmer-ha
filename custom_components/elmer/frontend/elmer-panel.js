@@ -14,12 +14,12 @@
 import { CSS } from './styles.js';
 import { icon } from './icons.js';
 import {
-  esc, html, raw, titleCase, uid, todayIso, intervalText,
+  esc, html, raw, titleCase, uid, todayIso, intervalText, addDays, formatDay,
 } from './util.js';
 import {
   routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
   equipmentForm, routineForm, partForm, logForm, logDetail, importForm,
-  partRow, partOptions, linkRow, groupForm,
+  partRow, partOptions, linkRow, groupForm, routineActions,
 } from './views.js';
 
 const TABS = [
@@ -217,6 +217,43 @@ function templatesFor(eq) {
   const what = eq.icon && eq.icon !== 'other' ? eq.icon : '';
   return TEMPLATES[what] || TEMPLATES[eq.category] || null;
 }
+
+/** A whole number from a form field, held inside a range. */
+function clampInt(value, low, high, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isNaN(n) ? fallback : Math.max(low, Math.min(high, n));
+}
+
+/**
+ * Every control in Settings that writes one key, in one place.
+ *
+ * Each says which key it writes, how to read its value, and whether the
+ * result is visible straight away. They were a chain of a dozen branches that
+ * all did the same four things, and adding a setting meant appending another
+ * one; now it is a row here and the markup in settingsView.
+ *
+ * `now` is for the ones that change how the panel is drawn rather than what
+ * it says — a theme or a size or a column count — and so should land before
+ * the save comes back. `key` takes the element because one control writes a
+ * different key depending on which list it belongs to.
+ */
+const SETTING_CONTROLS = {
+  'set-theme': { key: () => 'theme', value: (v) => v, now: 'theme' },
+  'set-text': { key: () => 'textSize', value: (v) => v, now: 'screen' },
+  'set-text-narrow': { key: () => 'textSizeNarrow', value: (v) => v, now: 'screen' },
+  'set-cards': { key: () => 'cardsWide', value: (v) => clampInt(v, 2, 3, 3), now: 'screen' },
+  'set-cards-narrow': { key: () => 'cardsNarrow', value: (v) => clampInt(v, 1, 2, 2), now: 'screen' },
+  // Equipment is the only list with a choice of order; both have a direction,
+  // and which direction key depends on the list the control sits in.
+  'set-sort': { key: () => 'sortEquipment', value: (v) => v },
+  'set-sort-dir': {
+    key: (el) => (el.dataset.tab === 'parts' ? 'sortPartsDir' : 'sortEquipmentDir'),
+    value: (v) => v,
+  },
+  'set-badge': { key: () => 'badgeOverdue', value: (v) => v === '1' },
+  'set-locations': { key: () => 'showLocations', value: (v) => v === '1' },
+  'set-soon': { key: () => 'dueSoonDays', value: (v) => clampInt(v, 0, 365, 0) },
+};
 
 class ElmerPanel extends HTMLElement {
   constructor() {
@@ -500,6 +537,9 @@ class ElmerPanel extends HTMLElement {
       filter: this.filter,
       query: this.query,
       range: this.range,
+      // Which routine is showing its snooze durations. Panel state, not
+      // stored: nothing has been decided until a duration is picked.
+      snoozing: this.snoozing || null,
       busy: this.busy,
       version: (this._panel && this._panel.config && this._panel.config.version) || '—',
     };
@@ -862,18 +902,31 @@ class ElmerPanel extends HTMLElement {
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (!el) return;
     const act = el.dataset.act;
-    if (act === 'set-theme') {
-      this._apply([{ kind: 'settings.put', payload: { theme: el.value } }]);
-      // Repaint immediately rather than waiting for the round trip, so the
-      // switch feels like a switch.
-      this.data.settings.theme = el.value;
-      this._applyTheme();
-    } else if (act === 'set-text' || act === 'set-text-narrow') {
-      const key = act === 'set-text' ? 'textSize' : 'textSizeNarrow';
-      this._apply([{ kind: 'settings.put', payload: { [key]: el.value } }]);
-      // Repaint at the new size immediately rather than after the round trip.
-      this.data.settings[key] = el.value;
-      this._applyScreenPrefs();
+
+    const control = SETTING_CONTROLS[act];
+    if (control) {
+      const key = control.key(el);
+      const value = control.value(el.value);
+      this._apply([{ kind: 'settings.put', payload: { [key]: value } }]);
+      // Some of these are visible the moment the menu closes, so the setting
+      // is written locally and applied now rather than after the round trip.
+      // The rest ride on the repaint the saved settings trigger.
+      if (control.now) {
+        this.data.settings[key] = value;
+        if (control.now === 'theme') this._applyTheme();
+        else this._applyScreenPrefs();
+      }
+      return;
+    }
+
+    if (act === 'pick-schedule') {
+      // Swap which half of the schedule is showing. Both stay in the form, so
+      // the interval a routine had is still there if you change your mind
+      // back before saving.
+      const sheet = el.closest('.sheet') || this.shadowRoot;
+      for (const block of sheet.querySelectorAll('[data-sched]')) {
+        block.hidden = block.dataset.sched !== el.value;
+      }
     } else if (act === 'pick-part') {
       this._pickPart(el);
     } else if (act === 'pick-or-new') {
@@ -886,32 +939,6 @@ class ElmerPanel extends HTMLElement {
         if (adding) box.focus();
         else box.value = '';
       }
-    } else if (act === 'set-cards' || act === 'set-cards-narrow') {
-      const key = act === 'set-cards' ? 'cardsWide' : 'cardsNarrow';
-      const n = parseInt(el.value, 10) || (key === 'cardsWide' ? 3 : 2);
-      this._apply([{ kind: 'settings.put', payload: { [key]: n } }]);
-      // Re-lay the grid now rather than after the round trip: this one is
-      // visible the moment the menu closes, the way the text sizes are.
-      this.data.settings[key] = n;
-      this._applyScreenPrefs();
-    } else if (act === 'set-sort' || act === 'set-sort-dir') {
-      // Changing the field can change what the direction beside it is called —
-      // a date reads "Oldest first" where a count reads "Fewest first" — and
-      // the relabelling rides on the repaint the saved settings trigger, the
-      // same way the location switch redraws its groups. The stored direction
-      // is left alone, since asc and desc mean the same thing under any name.
-      // Parts have one order and so only a direction; equipment has both.
-      const key = act === 'set-sort-dir'
-        ? (el.dataset.tab === 'parts' ? 'sortPartsDir' : 'sortEquipmentDir')
-        : 'sortEquipment';
-      this._apply([{ kind: 'settings.put', payload: { [key]: el.value } }]);
-    } else if (act === 'set-badge') {
-      this._apply([{ kind: 'settings.put', payload: { badgeOverdue: el.value === '1' } }]);
-    } else if (act === 'set-locations') {
-      this._apply([{ kind: 'settings.put', payload: { showLocations: el.value === '1' } }]);
-    } else if (act === 'set-soon') {
-      const n = Math.max(0, Math.min(365, parseInt(el.value, 10) || 0));
-      this._apply([{ kind: 'settings.put', payload: { dueSoonDays: n } }]);
     }
   }
 
@@ -947,6 +974,21 @@ class ElmerPanel extends HTMLElement {
         return;
       case 'resume':
         this._setPaused(id, false);
+        return;
+      // Opening the durations is a local thing: nothing is saved until one
+      // of them is chosen, so it lives on the panel rather than in the store.
+      case 'snooze-open':
+        this.snoozing = id;
+        this._refreshActions(id);
+        return;
+      case 'snooze-cancel':
+        this._refreshActions(this.snoozing, null);
+        return;
+      case 'snooze':
+        this._snooze(id, parseInt(el.dataset.days, 10) || 0);
+        return;
+      case 'wake':
+        this._snooze(id, 0);
         return;
       case 'set-view':
         this._setView(el.dataset.tab, el.dataset.value);
@@ -1134,6 +1176,45 @@ class ElmerPanel extends HTMLElement {
     if (!ok) return undefined;
     if (this.sheet && this.sheet.kind === 'routine' && this.sheet.id === id) this._closeSheet();
     return this._flash(paused ? `${task.name} paused` : `${task.name} resumed`);
+  }
+
+  /**
+   * Put a routine to sleep for a number of days, or wake it.
+   *
+   * The date is worked out here and stored as a day, not a duration, so a
+   * snooze set on a phone and read on a laptop in another timezone means the
+   * same morning. lastDone is untouched: a snooze must not rewrite the record
+   * of when the job was actually last done.
+   */
+  /**
+   * Redraw just the action buttons in an open routine sheet.
+   *
+   * Not a full render: the sheet is rebuilt only when its identity changes,
+   * on purpose, because rebuilding it throws away whatever is half-typed in
+   * the log fields. Showing the snooze durations is a change to one row.
+   */
+  _refreshActions(id, snoozing = id) {
+    this.snoozing = snoozing;
+    const box = this._layer && this._layer.querySelector('.sheet .actions');
+    if (!box) return;
+    const state = this.state;
+    const row = state.rows.find((r) => r.task.id === id);
+    if (row) box.innerHTML = routineActions(state, row.task, row.state);
+  }
+
+  async _snooze(id, days) {
+    const task = this.data.tasks.find((t) => t.id === id);
+    if (!task) return undefined;
+    const until = days ? addDays(todayIso(), days) : null;
+    const ok = await this._apply([
+      { kind: 'routine.put', payload: { ...task, snoozedUntil: until } },
+    ]);
+    this.snoozing = null;
+    if (!ok) return this._render();
+    if (this.sheet && this.sheet.kind === 'routine' && this.sheet.id === id) this._closeSheet();
+    return this._flash(until
+      ? `${task.name} snoozed until ${formatDay(until, todayIso())}`
+      : `${task.name} is awake`);
   }
 
   _setView(tab, value) {
@@ -1329,6 +1410,23 @@ class ElmerPanel extends HTMLElement {
     if (!name) return this._flash('Give the routine a name first.', 'error');
 
     const count = Math.max(1, parseInt(f.intervalCount, 10) || 1);
+
+    // Which schedule is showing decides which one is saved. Months are read
+    // off the chips only when the seasonal half is the one on screen, so an
+    // interval routine that was seasonal earlier in the same sitting does not
+    // keep the months that are still ticked behind the hidden block.
+    const kind = this.shadowRoot.querySelector('[data-act="pick-schedule"]');
+    const months = (kind && kind.value === 'seasonal')
+      ? Object.entries(f)
+        .filter(([key, value]) => key.startsWith('month:') && value)
+        .map(([key]) => parseInt(key.slice(6), 10))
+        .filter((m) => m >= 1 && m <= 12)
+        .sort((a, b) => a - b)
+      : [];
+    if (kind && kind.value === 'seasonal' && !months.length) {
+      return this._flash('Pick at least one month, or switch back to an interval.', 'error');
+    }
+
     const partsUsed = [];
     for (const [key, value] of Object.entries(f)) {
       if (!key.startsWith('part:')) continue;
@@ -1342,6 +1440,10 @@ class ElmerPanel extends HTMLElement {
       equipmentId: f.equipmentId || null,
       intervalCount: count,
       intervalUnit: f.intervalUnit || 'months',
+      // Always sent, empty included: a put patches rather than replaces, so
+      // switching a routine back to an interval has to say so explicitly or
+      // the months it used to have would survive and keep winning.
+      months,
       lastDone: f.lastDone || null,
       partsUsed,
       // Nothing about pausing here on purpose. A put patches by id rather
