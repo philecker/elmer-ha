@@ -73,6 +73,7 @@ things you genuinely are not tracking at the moment.
 | `sensor.elmer_due_soon` | How many fall inside your warning window. |
 | `sensor.elmer_on_track` | How many are neither late nor nearly due. |
 | `sensor.elmer_parts_to_reorder` | Parts at or below their reorder point. |
+| `sensor.elmer_parts_short` | Parts a due routine needs more of than you have. |
 | `sensor.elmer_next_due` | Days until the next thing that isn't already overdue. |
 | one per routine | Days until due — **negative when overdue**, `unknown` while paused or snoozed. |
 
@@ -83,6 +84,30 @@ because it is what a condition wants to compare: `below: 0` is overdue,
 
 **Services**: `elmer.complete`, `elmer.undo`, `elmer.adjust_stock`,
 `elmer.import_json`, `elmer.export_json`.
+
+**On your dashboard.** Elmer is a sidebar panel, but the counts above are
+ordinary sensors, so putting them on a dashboard needs no custom card and no
+extra download. Edit a dashboard, **+ Add card**, scroll to **Manual**, and
+paste:
+
+```yaml
+type: glance
+title: ELMER
+state_color: false
+entities:
+  - entity: sensor.elmer_overdue
+    name: Overdue
+  - entity: sensor.elmer_due_soon
+    name: Due soon
+  - entity: sensor.elmer_on_track
+    name: On track
+```
+
+Add `icon: elmer:elmer` to an entity to use Elmer's own mark — the icon set is
+registered on every page, so it is available anywhere in Home Assistant, not
+just inside the panel. If the entities do not resolve, check the real ids under
+**Developer tools → States** and filter for `elmer`; they differ if the
+integration was renamed or set up more than once.
 
 ---
 
