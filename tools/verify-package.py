@@ -275,6 +275,40 @@ def main() -> int:
                 broken.append(url)
         check("every image the README links to exists in the repo", not broken, "; ".join(broken))
 
+    # --- the frontend is served under a versioned path ---------------------
+    # The panel's entry point imports its modules by relative path, so those
+    # imports carry whatever version the directory does. Served from one fixed
+    # directory with the version only in the entry point's query string, a
+    # browser could pair a new entry point with a module left over from the
+    # previous version — Home Assistant's service worker caches independently
+    # of our cache headers — and an import of a name the old module does not
+    # export leaves the custom element undefined and the panel blank, with
+    # nothing in the log. Putting the version in the path makes that
+    # impossible: 1.5.0's entry point can only reach 1.5.0's modules.
+    init_py = open(os.path.join(PKG, "__init__.py"), encoding="utf-8").read()
+    check("the frontend is served under a path carrying the version",
+          'served_at = f"{FRONTEND_URL}/{version}"' in init_py)
+    check("and the panel is loaded from it",
+          'module_url=f"{served_at}/elmer-panel.js"' in init_py)
+    # A query string would mean the directory is shared across versions
+    # again. Comments are stripped first, since the one above this change
+    # quotes the old URL in order to explain what went wrong with it.
+    code = "\n".join(
+        l for l in init_py.splitlines() if not l.lstrip().startswith("#")
+    )
+    check("with no version left in a query string",
+          "?v=" not in code, "found ?v= in __init__.py")
+
+    front = os.path.join(PKG, "frontend")
+    entry = open(os.path.join(front, "elmer-panel.js"), encoding="utf-8").read()
+    imports = re.findall(r"from\s+'(\./[^']+)'", entry)
+    check("the entry point imports by relative path, as this relies on",
+          bool(imports) and all(i.startswith("./") for i in imports),
+          ", ".join(imports))
+    for rel in imports:
+        check(f"and {rel} ships beside it",
+              os.path.exists(os.path.join(front, rel[2:])))
+
     # --- the sidebar icon ------------------------------------------------
     # Home Assistant's sidebar takes an icon name, never an image, so Elmer's
     # own mark gets there through a custom icon set: one filled path, derived

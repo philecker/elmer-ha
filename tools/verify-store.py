@@ -223,6 +223,19 @@ async def main() -> int:
     check("and is always a boolean",
           store_mod.normalize({"settings": {"badgeOverdue": "yes"}})["settings"]["badgeOverdue"], True)
 
+    # --- content width -----------------------------------------------------
+    check("the content width starts at the default", fresh["contentWidth"], "default")
+    for given, want in (
+        ("wide", "wide"), ("widest", "widest"), ("default", "default"),
+        ("enormous", "default"), ("", "default"), (1040, "default"), (None, "default"),
+    ):
+        got = store_mod.normalize({"settings": {"contentWidth": given}})["settings"]["contentWidth"]
+        check(f"a width of {given!r} lands on {want!r}", got, want)
+    # Named rather than stored as a number of pixels, so the steps can be
+    # retuned later without rewriting what people already have saved.
+    check("and it is a name, not a measurement",
+          isinstance(fresh["contentWidth"], str), True)
+
     # --- snoozing ----------------------------------------------------------
     # The arithmetic is held against the reference implementation by
     # verify-schedule.py, including the day the snooze ends. What is only on

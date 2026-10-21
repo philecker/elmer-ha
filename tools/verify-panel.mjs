@@ -3129,6 +3129,62 @@ async function main() {
   }
   await ctx.close();
 
+  // --- content width ------------------------------------------------------
+  // Measured off the laid-out boxes, not read back from the setting: a stored
+  // name that never reached the stylesheet would look right in Settings and
+  // change nothing on screen. The window here is wider than the widest step
+  // so all three of them bind; at 1280 the top step would be clipped by the
+  // viewport and could not be told apart from the window itself.
+  ({ ctx, page } = await open({ narrow: false, viewport: { width: 1600, height: 900 } }));
+  await page.waitForTimeout(160);
+
+  const measureWidth = () => page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const w = (sel) => {
+      const n = root.querySelector(sel);
+      return n ? Math.round(n.getBoundingClientRect().width) : 0;
+    };
+    return { pad: w('.pad'), header: w('.headerinner'), tabs: w('.tabsinner') };
+  });
+
+  const widthDefault = await measureWidth();
+  check('the content starts at the measure it always had', widthDefault.pad, 820);
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  check('the width menu offers the default and two wider steps',
+    await page.$$eval(el('select[data-act="set-width"] option'), (n) => n.map((x) => x.value)),
+    ['default', 'wide', 'widest']);
+
+  for (const [value, want] of [['wide', 1040], ['widest', 1280], ['default', 820]]) {
+    await page.click(el('.tab[data-value="settings"]'));
+    await page.waitForTimeout(140);
+    await page.selectOption(el('select[data-act="set-width"]'), value);
+    await page.waitForTimeout(220);
+    const at = await measureWidth();
+    check(`${value} lays the content out at ${want}`, at.pad, want);
+    // The header and the tab strip ride the same token, and if one of them
+    // missed the change the tab labels would no longer start on the same
+    // vertical as the rows under them.
+    check(`and the header and tabs come with it at ${value}`,
+      [at.header, at.tabs], [want, want]);
+  }
+
+  // A phone is narrower than the narrowest step, which is why there is one
+  // setting rather than a pair: nothing a person picks here can bind there.
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  await page.selectOption(el('select[data-act="set-width"]'), 'widest');
+  await page.waitForTimeout(220);
+  await ctx.close();
+
+  ({ ctx, page } = await open({ narrow: true, viewport: PHONE }));
+  await page.waitForTimeout(200);
+  const onPhone = await measureWidth();
+  ok('the widest setting cannot stretch a phone past its own window',
+    onPhone.pad <= PHONE.width, String(onPhone.pad));
+  await ctx.close();
+
   /* ------------------------------------------- a fresh install, empty -- */
   // What somebody sees the first time they open the panel. Nothing covered it
   // before, and it is the one screen where a new user has no other clues.

@@ -194,7 +194,7 @@ const SEED = {
       doneOn: ago(470), notes: 'A lot of sediment. Worth doing every year.',
       cost: '', recordedAt: Date.now() - 4e10, previousLastDone: null, usedParts: [] },
   ],
-  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true },
+  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, contentWidth: 'default', sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true },
 };
 
 /* ---------------------------------------------------------------- store -- */
@@ -406,7 +406,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.5.0' } };
+panel.panel = { config: { version: '1.6.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

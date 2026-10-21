@@ -58,6 +58,10 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # two on a phone, past which a card is narrower than the name on it.
     "cardsWide": 3,
     "cardsNarrow": 2,
+    # How wide the content is allowed to get on a desktop. One setting rather
+    # than a pair, because a phone's viewport is narrower than the narrowest
+    # of these — the limit only ever binds on a wide screen.
+    "contentWidth": "default",
     # How the equipment and parts lists are ordered, and which way round.
     #
     # Equipment can go alphabetically or by date; parts only alphabetically,
@@ -223,6 +227,8 @@ def normalize(raw: Any) -> dict[str, Any]:
     # could get, and 3 is as many as there are. The ranges are the panel's.
     settings["cardsWide"] = min(3, max(2, _int(settings.get("cardsWide"), 3)))
     settings["cardsNarrow"] = min(2, max(1, _int(settings.get("cardsNarrow"), 2)))
+    if settings.get("contentWidth") not in ("default", "wide", "widest"):
+        settings["contentWidth"] = "default"
     if settings.get("sortEquipment") not in ("name", "date"):
         settings["sortEquipment"] = DEFAULT_SETTINGS["sortEquipment"]
     for key in ("sortEquipmentDir", "sortPartsDir"):

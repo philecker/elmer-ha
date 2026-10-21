@@ -130,20 +130,37 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     here = os.path.dirname(__file__)
     frontend_dir = os.path.join(here, "frontend")
 
+    version = _integration_version()
+
+    # The version goes in the PATH, not in a query string, and this is the
+    # whole reason the panel can be updated without breaking.
+    #
+    # It used to be `elmer-panel.js?v=1.4.0`, with the modules that file
+    # imports left as plain relative paths. Those imports resolve against the
+    # directory, so they carried no version at all. Home Assistant's service
+    # worker caches what it likes regardless of our cache headers, so after an
+    # update a browser could fetch the new entry point — a new URL, so a real
+    # fetch — and then satisfy `./views.js` from the worker's copy of the old
+    # one. A new entry point importing a name an old module does not export is
+    # a module that never evaluates, so the custom element is never defined
+    # and the panel is simply blank. No error in the log, because nothing on
+    # the Home Assistant side went wrong.
+    #
+    # Under a versioned directory every import is versioned for free: 1.5.0's
+    # entry point can only ever reach 1.5.0's modules, because that is the
+    # only place its relative paths lead.
+    #
+    # cache_headers stays off even so. A versioned path would make caching
+    # safe, but files are routinely swapped in place during development
+    # without the version changing, and a cached stale panel is a confusing
+    # hour. A few kilobytes per load is the cheaper side of that trade.
+    #
     # async_register_static_paths replaced register_static_path in 2025.7; the
     # old call now raises a blocking-I/O error rather than working.
-    #
-    # cache_headers=False on purpose. The panel is a handful of kilobytes, and
-    # only its entry point carries a version in its URL — the modules it imports
-    # are plain relative paths. With long cache headers an update could hand a
-    # browser a fresh entry point and stale modules, which fails in ways that
-    # look like nothing is wrong. Re-fetching a few kilobytes is the cheaper
-    # side of that trade.
+    served_at = f"{FRONTEND_URL}/{version}"
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(FRONTEND_URL, frontend_dir, cache_headers=False)]
+        [StaticPathConfig(served_at, frontend_dir, cache_headers=False)]
     )
-
-    version = _integration_version()
 
     # The sidebar takes an icon name, never an image, so showing Elmer's own
     # mark there means registering an icon set the name can point at. That has
@@ -151,15 +168,13 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     # anybody opens the panel — which is what add_extra_js_url is for, and it
     # is the one thing Elmer puts on pages that are nothing to do with it. The
     # file is a couple of kilobytes and holds one path.
-    frontend.add_extra_js_url(
-        hass, f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}?v={version}"
-    )
+    frontend.add_extra_js_url(hass, f"{served_at}/{SIDEBAR_ICON_FILE}")
 
     await panel_custom.async_register_panel(
         hass,
         frontend_url_path=PANEL_URL,
         webcomponent_name=PANEL_COMPONENT,
-        module_url=f"{FRONTEND_URL}/elmer-panel.js?v={version}",
+        module_url=f"{served_at}/elmer-panel.js",
         sidebar_title=PANEL_TITLE,
         sidebar_icon=PANEL_ICON,
         require_admin=False,
@@ -199,7 +214,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     try:
         version = _integration_version()
         frontend.remove_extra_js_url(
-            hass, f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}?v={version}"
+            hass, f"{FRONTEND_URL}/{version}/{SIDEBAR_ICON_FILE}"
         )
     except Exception:  # noqa: BLE001
         _LOGGER.debug("could not unregister the Elmer icon set", exc_info=True)

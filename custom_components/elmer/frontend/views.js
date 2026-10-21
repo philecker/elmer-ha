@@ -1002,6 +1002,14 @@ export function settingsView(state) {
       <div class="field">
         <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. A phone is offered fewer because it has less to give: two cards across a phone are about 175px each.</div>
       </div>
+      ${raw(selectField({
+    id: 'width',
+    act: 'set-width',
+    label: 'Content width',
+    options: [['default', 'Default'], ['wide', 'Wide'], ['widest', 'Widest']],
+    value: s.contentWidth || 'default',
+    hint: 'How far the content spreads on a desktop. A phone is already narrower than the narrowest of these, so it changes nothing there. Wider fits more across but makes a list row a longer way for the eye to travel back.',
+  }))}
       <!-- Named for where the badge actually appears. Home Assistant gives a
            custom panel's own sidebar row no badge, so this is the nearest
            thing and it lands on the Notifications row. -->

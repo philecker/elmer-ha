@@ -241,6 +241,7 @@ const SETTING_CONTROLS = {
   'set-theme': { key: () => 'theme', value: (v) => v, now: 'theme' },
   'set-text': { key: () => 'textSize', value: (v) => v, now: 'screen' },
   'set-text-narrow': { key: () => 'textSizeNarrow', value: (v) => v, now: 'screen' },
+  'set-width': { key: () => 'contentWidth', value: (v) => v, now: 'screen' },
   'set-cards': { key: () => 'cardsWide', value: (v) => clampInt(v, 2, 3, 3), now: 'screen' },
   'set-cards-narrow': { key: () => 'cardsNarrow', value: (v) => clampInt(v, 1, 2, 2), now: 'screen' },
   // Equipment is the only list with a choice of order; both have a direction,
@@ -477,6 +478,7 @@ class ElmerPanel extends HTMLElement {
     // leave a phone on whatever the desktop chose.
     this.setAttribute('data-cards', String(s.cardsWide || 3));
     this.setAttribute('data-cards-narrow', String(s.cardsNarrow || 2));
+    this.setAttribute('data-width', s.contentWidth || 'default');
   }
 
   _applyTheme() {

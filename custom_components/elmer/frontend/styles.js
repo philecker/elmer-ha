@@ -1721,6 +1721,13 @@ a.btn { text-decoration: none; }
    breakpoint, so the two can never disagree and nothing has to listen for a
    resize. Both are always set, "3" and "2" included, or the wide rule would
    go on winning on a phone. */
+/* How wide the content may get. The measure exists because a list row read
+   edge to edge on a wide monitor is a long way for an eye to travel back, so
+   the steps are bounded rather than offering full width. Below the breakpoint
+   none of them bind: the viewport is already narrower than the narrowest. */
+:host([data-width="wide"]) { --content: 1040px; }
+:host([data-width="widest"]) { --content: 1280px; }
+
 :host([data-cards="2"]) { --cards: 2; }
 :host([data-cards="3"]) { --cards: 3; }
 
