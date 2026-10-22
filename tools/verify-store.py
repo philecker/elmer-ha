@@ -164,12 +164,30 @@ async def main() -> int:
     # many as it could get.
     check("the card counts start at three and two",
           (fresh["cardsWide"], fresh["cardsNarrow"]), (3, 2))
-    for given, want in ((2, 2), (3, 3), (4, 3), (6, 3), (1, 2), (0, 2), ("x", 3), (None, 3)):
+    for given, want in ((2, 2), (3, 3), (4, 4), (5, 4), (9, 4), (1, 2), (0, 2),
+                        ("x", 3), (None, 3)):
         got = store_mod.normalize({"settings": {"cardsWide": given}})["settings"]["cardsWide"]
         check(f"a desktop count of {given!r} lands on {want}", got, want)
-    for given, want in ((1, 1), (2, 2), (4, 2), (0, 1), ("x", 2)):
+    for given, want in ((1, 1), (2, 2), (3, 3), (4, 3), (0, 1), ("x", 2)):
         got = store_mod.normalize({"settings": {"cardsNarrow": given}})["settings"]["cardsNarrow"]
         check(f"a mobile count of {given!r} lands on {want}", got, want)
+    # The two clamps and the two menus have to agree, or a count a menu offers
+    # is silently pulled back to something else the moment it is saved. They
+    # have moved together twice now — four on a desktop was offered, taken
+    # away, and offered again — so the menus are read rather than restated.
+    views = open(
+        os.path.join(PKG, "frontend", "views.js"), encoding="utf-8"
+    ).read()
+    for act, want in (("set-cards", [2, 3, 4]), ("set-cards-narrow", [1, 2, 3])):
+        block = views.split(f"act: '{act}',", 1)[1].split("}))", 1)[0]
+        offered = [int(n) for n in re.findall(r"\[(\d+), '\d+'\]", block)]
+        check(f"the {act} menu offers {want}", offered, want)
+        key = "cardsWide" if act == "set-cards" else "cardsNarrow"
+        kept = [
+            store_mod.normalize({"settings": {key: n}})["settings"][key]
+            for n in offered
+        ]
+        check(f"and the store keeps every one of them", kept, offered)
     # Whole numbers only: a fractional column is not a thing a grid can draw.
     check("and they survive a round trip as integers",
           [type(fresh["cardsWide"]).__name__, type(fresh["cardsNarrow"]).__name__],

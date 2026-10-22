@@ -242,8 +242,8 @@ const SETTING_CONTROLS = {
   'set-text': { key: () => 'textSize', value: (v) => v, now: 'screen' },
   'set-text-narrow': { key: () => 'textSizeNarrow', value: (v) => v, now: 'screen' },
   'set-width': { key: () => 'contentWidth', value: (v) => v, now: 'screen' },
-  'set-cards': { key: () => 'cardsWide', value: (v) => clampInt(v, 2, 3, 3), now: 'screen' },
-  'set-cards-narrow': { key: () => 'cardsNarrow', value: (v) => clampInt(v, 1, 2, 2), now: 'screen' },
+  'set-cards': { key: () => 'cardsWide', value: (v) => clampInt(v, 2, 4, 3), now: 'screen' },
+  'set-cards-narrow': { key: () => 'cardsNarrow', value: (v) => clampInt(v, 1, 3, 2), now: 'screen' },
   // Equipment is the only list with a choice of order; both have a direction,
   // and which direction key depends on the list the control sits in.
   'set-sort': { key: () => 'sortEquipment', value: (v) => v },

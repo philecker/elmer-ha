@@ -14,8 +14,9 @@ PANEL_ICON = "elmer:toolbox"
 # Loaded on every Home Assistant page, because the sidebar is drawn long
 # before anybody opens the panel.
 SIDEBAR_ICON_FILE = "sidebar-icon.js"
-# Served from /elmer_frontend/..., versioned so a browser never holds a stale
-# panel after an update.
+# Served from /elmer_frontend/<version>/..., so a browser never holds a stale
+# panel after an update. The sidebar icon above is the exception and sits
+# directly under this prefix, unversioned; __init__.py says why.
 FRONTEND_URL = "/elmer_frontend"
 PANEL_COMPONENT = "elmer-panel"
 

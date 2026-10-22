@@ -3071,12 +3071,12 @@ async function main() {
 
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(140);
-  check('the desktop menu offers two or three',
+  check('the desktop menu offers two to four',
     await page.$$eval(el('select[data-act="set-cards"] option'), (n) => n.map((x) => x.value)),
-    ['2', '3']);
-  check('and the mobile menu only one or two',
+    ['2', '3', '4']);
+  check('and the mobile menu one to three',
     await page.$$eval(el('select[data-act="set-cards-narrow"] option'), (n) => n.map((x) => x.value)),
-    ['1', '2']);
+    ['1', '2', '3']);
 
   // Three on the desktop must not follow us onto the phone: the whole reason
   // there are two of these.
@@ -3089,11 +3089,18 @@ async function main() {
 
   await page.click(el('.tab[data-value="settings"]'));
   await page.waitForTimeout(140);
-  await page.selectOption(el('select[data-act="set-cards-narrow"]'), '1');
-  await page.waitForTimeout(220);
-  await page.click(el('.tab[data-value="parts"]'));
-  await page.waitForTimeout(180);
-  check('while the phone setting does move it', (await columns()).cols, 1);
+  for (const n of ['1', '3', '2']) {
+    await page.click(el('.tab[data-value="settings"]'));
+    await page.waitForTimeout(140);
+    await page.selectOption(el('select[data-act="set-cards-narrow"]'), n);
+    await page.waitForTimeout(220);
+    await page.click(el('.tab[data-value="parts"]'));
+    await page.waitForTimeout(180);
+    const at = await columns();
+    check(`while the phone setting does move it: ${n} draws ${n}`, at.cols, Number(n));
+    ok(`and ${n} across a phone still fills the row`,
+      Math.abs(at.spans) <= 1, String(at.spans));
+  }
   await ctx.close();
 
   // The same panel on a desktop, where the wide setting takes over. A fresh
@@ -3116,7 +3123,7 @@ async function main() {
   ok('with the cards still filling the row', Math.abs(wide.spans) <= 1, String(wide.spans));
   ok('and still equal to each other', wide.equal, JSON.stringify(wide.widths));
 
-  for (const n of ['2', '3']) {
+  for (const n of ['2', '3', '4']) {
     await page.click(el('.tab[data-value="settings"]'));
     await page.waitForTimeout(140);
     await page.selectOption(el('select[data-act="set-cards"]'), n);
@@ -3126,6 +3133,8 @@ async function main() {
     const at = await columns();
     check(`${n} across draws ${n} across`, at.cols, Number(n));
     ok(`and ${n} still fills the row`, Math.abs(at.spans) <= 1, String(at.spans));
+    ok(`and no column has collapsed at ${n}`,
+      Math.min(...at.widths) >= 100, JSON.stringify(at.widths));
   }
   await ctx.close();
 

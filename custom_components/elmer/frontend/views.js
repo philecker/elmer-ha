@@ -987,7 +987,7 @@ export function settingsView(state) {
     act: 'set-cards',
     scope: 'Desktop',
     label: 'Cards per row',
-    options: [[2, '2'], [3, '3']],
+    options: [[2, '2'], [3, '3'], [4, '4']],
     value: s.cardsWide || 3,
   }))}
         ${raw(selectField({
@@ -995,12 +995,12 @@ export function settingsView(state) {
     act: 'set-cards-narrow',
     scope: 'Mobile',
     label: 'Cards per row',
-    options: [[1, '1'], [2, '2']],
+    options: [[1, '1'], [2, '2'], [3, '3']],
     value: s.cardsNarrow || 2,
   }))}
       </div>
       <div class="field">
-        <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. A phone is offered fewer because it has less to give: two cards across a phone are about 175px each.</div>
+        <div class="hint">Only the card view uses these; the list view is one row deep whatever happens. The top of each range is tight: three across a phone leaves about 114px a card, and four on a desktop about 190px unless the content width below is turned up.</div>
       </div>
       ${raw(selectField({
     id: 'width',

@@ -6,6 +6,45 @@ HACS does not read this file — the changelog it shows when an update is
 available is the body of the GitHub release. This is here for anyone reading
 the repository, and the release bodies are written from it.
 
+## 1.7.0
+
+### Added
+
+- **One more card per row at each end**: four across on a desktop, three on a
+  phone. The previous ceilings were three and two.
+
+  Four on a desktop was offered once before and taken away, because at the
+  820px measure it left about 190px a card. The content width setting added in
+  1.6.0 is what brings it back — at Wide a card is about 245px and at Widest
+  about 305px.
+
+  Both new counts are the tight end of their range rather than a better
+  default, and neither default moves. Three across a phone is about 107px a
+  card, which wraps a part name like "Softener Salt (40 lb)" onto three lines.
+  It fits more on screen; whether that is worth it is a judgement for whoever
+  is looking at the screen.
+
+## 1.6.1
+
+### Fixed
+
+- **The sidebar icon going missing after an update**, coming back on the next
+  page load. A side effect of the 1.5.1 fix for the blank panel.
+
+  The icon set is registered by a small script Home Assistant is asked to put
+  on every page, and the URL of that script is written into the Home Assistant
+  index page server side. That page is served StaleWhileRevalidate by Home
+  Assistant's service worker, so the first load after an update gets the
+  previous copy of it and refreshes it behind. 1.5.1 moved the version into
+  the path the frontend is served from, which meant the stale index asked for
+  a directory that is no longer registered: a 404, no icon set, and a blank
+  sidebar row for the life of that page.
+
+  The icon script now has a stable URL that every version serves, so a stale
+  index names a file that still exists. The panel keeps its versioned path —
+  the two fail differently, and a panel module paired across versions is what
+  made 1.5.0 blank in the first place.
+
 ## 1.6.0
 
 ### Added

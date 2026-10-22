@@ -158,9 +158,6 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     # async_register_static_paths replaced register_static_path in 2025.7; the
     # old call now raises a blocking-I/O error rather than working.
     served_at = f"{FRONTEND_URL}/{version}"
-    await hass.http.async_register_static_paths(
-        [StaticPathConfig(served_at, frontend_dir, cache_headers=False)]
-    )
 
     # The sidebar takes an icon name, never an image, so showing Elmer's own
     # mark there means registering an icon set the name can point at. That has
@@ -168,7 +165,44 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     # anybody opens the panel — which is what add_extra_js_url is for, and it
     # is the one thing Elmer puts on pages that are nothing to do with it. The
     # file is a couple of kilobytes and holds one path.
-    frontend.add_extra_js_url(hass, f"{served_at}/{SIDEBAR_ICON_FILE}")
+    #
+    # Its URL carries no version, and that is the opposite of the panel's for
+    # a reason.
+    #
+    # add_extra_js_url writes the URL into the Home Assistant index page,
+    # server side. Home Assistant's service worker serves that page
+    # StaleWhileRevalidate — the catch-all route in its frontend's
+    # service-worker.ts — so the first load after any change gets the previous
+    # copy of the index and refreshes it behind. For one page load, then, the
+    # URL Elmer asked for is the one it was asking for before the update.
+    #
+    # Under a versioned path that URL is a 404: the old version's directory is
+    # not registered any more. Nothing registers the icon set, and a custom
+    # panel's sidebar row has no icon for the life of that page — the symptom
+    # being an icon that goes missing after an update and comes back on the
+    # next load. Under a stable path the stale index names a file that still
+    # exists.
+    #
+    # Safe for this file where it was not safe for the panel, because the two
+    # fail differently. A stale icon script is a standalone script with no
+    # imports and no exports anybody reads, so the worst it can do is draw the
+    # previous mark for a load. A stale panel module gets paired with a new
+    # entry point and the import graph breaks, which is what made 1.5.0 blank.
+    #
+    # Registered as a file rather than a directory, so it is one exact route
+    # and cannot shadow the versioned directory beside it.
+    icon_url = f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}"
+    await hass.http.async_register_static_paths(
+        [
+            StaticPathConfig(served_at, frontend_dir, cache_headers=False),
+            StaticPathConfig(
+                icon_url,
+                os.path.join(frontend_dir, SIDEBAR_ICON_FILE),
+                cache_headers=False,
+            ),
+        ]
+    )
+    frontend.add_extra_js_url(hass, icon_url)
 
     await panel_custom.async_register_panel(
         hass,
@@ -210,11 +244,9 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     # The icon set is the one thing Elmer loads on pages that are nothing to do
     # with it, so it should stop being loaded the moment Elmer is gone rather
     # than waiting for a restart. Removed by the same URL it was added under,
-    # version and all. Wrapped for the same reason as the panel above.
+    # which no longer depends on which version happens to be installed.
+    # Wrapped for the same reason as the panel above.
     try:
-        version = _integration_version()
-        frontend.remove_extra_js_url(
-            hass, f"{FRONTEND_URL}/{version}/{SIDEBAR_ICON_FILE}"
-        )
+        frontend.remove_extra_js_url(hass, f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}")
     except Exception:  # noqa: BLE001
         _LOGGER.debug("could not unregister the Elmer icon set", exc_info=True)

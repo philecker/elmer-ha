@@ -299,6 +299,39 @@ def main() -> int:
     check("with no version left in a query string",
           "?v=" not in code, "found ?v= in __init__.py")
 
+    # The icon script is the exception, and the exception is the whole point.
+    #
+    # add_extra_js_url writes its URL into the Home Assistant index page,
+    # server side, and that page is served StaleWhileRevalidate by Home
+    # Assistant's service worker. The first load after an update therefore
+    # asks for whatever URL the *previous* version put there. Versioned, that
+    # is a 404 — the old directory is gone — nothing registers the icon set,
+    # and the sidebar row is blank until the next load. Stable, the stale
+    # index names a file that is still being served.
+    #
+    # The asymmetry with the panel is deliberate: a stale copy of this file
+    # draws last version's mark for one load, while a stale panel module
+    # paired with a new entry point breaks the import graph and draws nothing
+    # at all. Both directions of this have shipped as a bug, so both are
+    # pinned here.
+    check("the icon script is served from a path with no version in it",
+          'icon_url = f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}"' in code)
+    check("and that is the URL put on every page",
+          "add_extra_js_url(hass, icon_url)" in code)
+    check("and the URL it is withdrawn under matches",
+          'remove_extra_js_url(hass, f"{FRONTEND_URL}/{SIDEBAR_ICON_FILE}")' in code)
+    check("and it has a static route of its own, or it would 404",
+          "StaticPathConfig(" in code and "icon_url," in code)
+    # Belt and braces: whatever the lines above look like after a future
+    # edit, the version must not reach this URL.
+    icon_add = [
+        l for l in code.splitlines()
+        if "add_extra_js_url" in l or 'icon_url = ' in l
+    ]
+    check("with no version interpolated into it by another route",
+          not any("{version}" in l or "served_at" in l for l in icon_add),
+          " | ".join(icon_add))
+
     front = os.path.join(PKG, "frontend")
     entry = open(os.path.join(front, "elmer-panel.js"), encoding="utf-8").read()
     imports = re.findall(r"from\s+'(\./[^']+)'", entry)

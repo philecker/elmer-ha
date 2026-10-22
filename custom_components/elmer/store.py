@@ -225,8 +225,8 @@ def normalize(raw: Any) -> dict[str, Any]:
     # verify-store.py rather than by memory.
     # Clamped rather than rejected: a file naming 6 wanted as many as it
     # could get, and 3 is as many as there are. The ranges are the panel's.
-    settings["cardsWide"] = min(3, max(2, _int(settings.get("cardsWide"), 3)))
-    settings["cardsNarrow"] = min(2, max(1, _int(settings.get("cardsNarrow"), 2)))
+    settings["cardsWide"] = min(4, max(2, _int(settings.get("cardsWide"), 3)))
+    settings["cardsNarrow"] = min(3, max(1, _int(settings.get("cardsNarrow"), 2)))
     if settings.get("contentWidth") not in ("default", "wide", "widest"):
         settings["contentWidth"] = "default"
     if settings.get("sortEquipment") not in ("name", "date"):

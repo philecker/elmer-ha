@@ -1715,12 +1715,17 @@ a.btn { text-decoration: none; }
 }
 
 /* Cards per row, on exactly the arrangement above and for the same reason: a
-   count chosen at a desk should not follow you onto a phone, where a third
-   column leaves each card narrower than the name it carries. data-cards
+   count chosen at a desk should not follow you onto a phone, where the same
+   number of columns has a third of the room to put them in. data-cards
    applies at every width and data-cards-narrow takes over below the
    breakpoint, so the two can never disagree and nothing has to listen for a
-   resize. Both are always set, "3" and "2" included, or the wide rule would
-   go on winning on a phone. */
+   resize. Both are always set, the defaults included, or the wide rule would
+   go on winning on a phone.
+
+   Each range runs one past comfortable at the top end — three on a phone is
+   about 114px a card, four on a desktop about 190px at the default measure —
+   which is a choice to be made by whoever can see the screen rather than
+   here. */
 /* How wide the content may get. The measure exists because a list row read
    edge to edge on a wide monitor is a long way for an eye to travel back, so
    the steps are bounded rather than offering full width. Below the breakpoint
@@ -1730,10 +1735,12 @@ a.btn { text-decoration: none; }
 
 :host([data-cards="2"]) { --cards: 2; }
 :host([data-cards="3"]) { --cards: 3; }
+:host([data-cards="4"]) { --cards: 4; }
 
 @media (max-width: 759px) {
   :host([data-cards-narrow="1"]) { --cards: 1; }
   :host([data-cards-narrow="2"]) { --cards: 2; }
+  :host([data-cards-narrow="3"]) { --cards: 3; }
 }
 
 @media (min-width: 760px) {
