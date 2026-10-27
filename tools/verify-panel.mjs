@@ -186,8 +186,12 @@ async function main() {
     tone: n.dataset.tone,
     n: Number(n.querySelector('.n').textContent),
   })));
+  // All is every routine there is, which is more than the four pills beside
+  // it add up to: a finished one-off and a paused routine are both in the
+  // list, under headings of their own, and neither has a pill.
   check('every filter carries its count', pillCounts, [
-    { tone: 'all', n: counts.overdue + counts.due + counts.ok + counts.new },
+    { tone: 'all', n: counts.overdue + counts.due + counts.ok + counts.new
+      + counts.done + counts.paused + counts.snoozed },
     { tone: 'overdue', n: counts.overdue },
     { tone: 'due', n: counts.due },
     { tone: 'new', n: counts.new },
@@ -296,11 +300,12 @@ async function main() {
     }));
   });
   check('groups run worst first', grouped.map((g) => g.label),
-    ['Overdue', 'Due soon', 'Never done', 'Up to date']);
+    ['Overdue', 'Due soon', 'Up to date', 'Finished']);
   ok('every heading counts its own group',
     grouped.every((g) => g.count === g.rows), JSON.stringify(grouped));
   check('and together they are every routine',
-    grouped.reduce((n, g) => n + g.rows, 0), counts.overdue + counts.due + counts.new + counts.ok);
+    grouped.reduce((n, g) => n + g.rows, 0),
+    counts.overdue + counts.due + counts.new + counts.ok + counts.done);
   check('the overdue group matches the pill', grouped[0].count, counts.overdue);
 
   // Typing filters the list. Each keystroke re-renders, which replaces the
@@ -367,7 +372,7 @@ async function main() {
   ok('and leaves focus in it', cleared.focused);
   ok('the clear button goes when there is nothing to clear', cleared.clearGone);
   check('and every group is back', cleared.groups,
-    ['Overdue', 'Due soon', 'Never done', 'Up to date']);
+    ['Overdue', 'Due soon', 'Up to date', 'Finished']);
 
   // Narrowing with a pill leaves one group, so a heading would only repeat the
   // pill; the list goes flat instead.
@@ -1145,13 +1150,16 @@ async function main() {
     }
     return out;
   });
-  check('a routine opens on the interval half', await schedBlocks(), { interval: true, seasonal: false });
+  // Exactly one of the four showing, named, so a failure says which.
+  const showing = async () => Object.entries(await schedBlocks())
+    .filter(([, visible]) => visible).map(([k]) => k);
+  check('a routine opens on the interval one', await showing(), ['interval']);
 
-  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'seasonal');
+  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'months');
   await page.waitForTimeout(120);
-  check('choosing months swaps which half shows', await schedBlocks(), { interval: false, seasonal: true });
+  check('choosing months swaps which one shows', await showing(), ['months']);
   check('and offers all twelve',
-    await page.$$eval(el('.sheet .monthgrid input'), (n) => n.length), 12);
+    await page.$$eval(el('.sheet [data-sched="months"] .monthgrid input'), (n) => n.length), 12);
 
   // Saving with none ticked would silently make it an interval routine
   // again, so it is refused instead.
@@ -1163,8 +1171,8 @@ async function main() {
   check('and nothing was stored',
     await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').months || []), []);
 
-  await page.click(el('.sheet .monthgrid input[name="month:4"]'));
-  await page.click(el('.sheet .monthgrid input[name="month:10"]'));
+  await page.click(el('.sheet input[name="month:4"]'));
+  await page.click(el('.sheet input[name="month:10"]'));
   await page.click(el('.sheet [data-act="save-routine"]'));
   await page.waitForTimeout(220);
   check('the months saved, in order',
@@ -1197,17 +1205,93 @@ async function main() {
   await page.waitForSelector(el('.sheet'));
   await page.click(el('.sheet [data-act="edit-routine"]'));
   await page.waitForSelector(el('.sheet [data-act="pick-schedule"]'));
-  check('it reopens on the seasonal half', await schedBlocks(), { interval: false, seasonal: true });
+  check('it reopens on the months one', await showing(), ['months']);
   check('with the months it was given still ticked',
-    await page.$$eval(el('.sheet .monthgrid input'),
+    await page.$$eval(el('.sheet [data-sched="months"] .monthgrid input'),
       (n) => n.filter((x) => x.checked).map((x) => x.name)),
     ['month:4', 'month:10']);
   await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'interval');
   await page.waitForTimeout(120);
   await page.click(el('.sheet [data-act="save-routine"]'));
   await page.waitForTimeout(220);
-  check('switching back clears the months',
-    await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').months), []);
+  // The months used to be cleared here, because with no stored kind their
+  // presence was what made a routine seasonal and leaving them would have
+  // left them winning. The kind is stored now, so they stay put and the
+  // record says plainly which one is in force.
+  check('switching back leaves the months where they were',
+    await page.evaluate(() => {
+      const t = window.__snapshot().tasks.find((x) => x.id === 't1');
+      return [t.schedule, t.months];
+    }), ['interval', [4, 10]]);
+  check('and the row goes back to reading the interval',
+    await page.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const r = root.querySelector('.row[data-id="t1"]');
+      return !!r;
+    }), true);
+
+  // --- clock changes and a specific date ---------------------------------
+  // Two more kinds, and the pair of them is where the form had to stop
+  // inferring: a routine can now hold months and clocks and a date at once.
+  await page.click(el('.row[data-id="t1"]'));
+  await page.waitForSelector(el('.sheet'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet [data-act="pick-schedule"]'));
+  check('the menu offers all four',
+    await page.$$eval(el('.sheet [data-act="pick-schedule"] option'), (n) => n.map((x) => x.value)),
+    ['interval', 'months', 'clocks', 'date']);
+
+  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'clocks');
+  await page.waitForTimeout(120);
+  check('the clock change one shows on its own', await showing(), ['clocks']);
+  check('and offers spring and fall',
+    await page.$$eval(el('.sheet [data-sched="clocks"] input'), (n) => n.map((x) => x.name)),
+    ['clock:spring', 'clock:fall']);
+
+  // Neither ticked is a schedule that cannot produce a date, so it is
+  // refused rather than stored.
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(200);
+  ok('saving with neither ticked is refused',
+    await page.$(el('.sheet [data-act="pick-schedule"]')) !== null, 'the sheet closed anyway');
+
+  await page.click(el('.sheet input[name="clock:fall"]'));
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(220);
+  const onClocks = await page.evaluate(() => {
+    const t = window.__snapshot().tasks.find((x) => x.id === 't1');
+    const st = window.__snapshot().computed.states[t.id] || {};
+    return { schedule: t.schedule, clocks: t.clocks, months: t.months, due: st.due, status: st.status };
+  });
+  check('the clock change saved, with the months still beside it',
+    [onClocks.schedule, onClocks.clocks, onClocks.months], ['clocks', ['fall'], [4, 10]]);
+  // The first Sunday in November, whichever November comes next.
+  ok('and it is due on a first Sunday in November',
+    /^\d{4}-11-0[1-7]$/.test(onClocks.due || ''), String(onClocks.due));
+
+  // A specific date, and the toggle that decides whether it comes back.
+  await page.click(el('.row[data-id="t1"]'));
+  await page.waitForSelector(el('.sheet'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet [data-act="pick-schedule"]'));
+  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'date');
+  await page.waitForTimeout(120);
+  check('the date one shows on its own', await showing(), ['date']);
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(200);
+  ok('saving with no date is refused',
+    await page.$(el('.sheet [data-act="pick-schedule"]')) !== null, 'the sheet closed anyway');
+
+  await page.fill(el('.sheet input[name="onDate"]'), '2027-12-25');
+  await page.selectOption(el('.sheet select[name="onDateYearly"]'), '1');
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(220);
+  check('a yearly date saves and is due on the day',
+    await page.evaluate(() => {
+      const t = window.__snapshot().tasks.find((x) => x.id === 't1');
+      const st = window.__snapshot().computed.states[t.id] || {};
+      return [t.schedule, t.onDate, t.onDateYearly, (st.due || '').slice(5)];
+    }), ['date', '2027-12-25', true, '12-25']);
 
   // --- the chrome does not change on a detail page ----------------------
   // The header used to turn into a back arrow and the thing's name, so the one

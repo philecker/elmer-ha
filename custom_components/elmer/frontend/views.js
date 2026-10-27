@@ -14,6 +14,7 @@ import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
   INTERVAL_UNITS, intervalText, scheduleText, monthsText, MONTHS_LONG,
+  scheduleKind, CLOCK_LABELS,
   safeHref, asLink, linkLabel, daysBetween, MONTHS,
   SORT_FIELDS, sortDirections, sortField, sortRecords,
 } from './util.js';
@@ -169,7 +170,7 @@ export function routineRow(row, state, opts = {}) {
   // Inside a piece of equipment, naming it on every row says nothing — the
   // interval is what you actually want there.
   const where = opts.hideEquipment
-    ? `every ${scheduleText(t)}`
+    ? scheduleText(t)
     : whereLine(eq, state.settings.showLocations);
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
@@ -178,9 +179,14 @@ export function routineRow(row, state, opts = {}) {
   // What it really is stays on the line beside it, so putting something off
   // never hides how long it has been waiting.
   const snoozed = st.status === 'snoozed';
+  // A finished one-off has no days left, and "not scheduled" would be a poor
+  // way to say so: nothing is scheduled because the job is over, which is
+  // the one case where that is the answer rather than a gap.
+  const over = st.status === 'done';
   const lead = off
     ? 'Paused'
-    : (snoozed ? `Snoozed until ${shortDay(t.snoozedUntil)}` : relative(st.daysLeft));
+    : (snoozed ? `Snoozed until ${shortDay(t.snoozedUntil)}`
+      : (over ? `Done ${relative(daysBetween(state.computed.today, t.lastDone))}` : relative(st.daysLeft)));
   // Snoozed, the line says when it wakes and what it is underneath, in one
   // word. The full "due 30 days ago" and the equipment name both wanted room
   // this row does not have on a phone; which state it is in is the part the
@@ -219,7 +225,7 @@ export function routineTile(row, state, opts = {}) {
   const t = row.task;
   const st = row.state;
   const where = opts.hideEquipment
-    ? `every ${scheduleText(t)}`
+    ? scheduleText(t)
     : whereLine(row.equipment, state.settings.showLocations);
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
@@ -235,7 +241,9 @@ export function routineTile(row, state, opts = {}) {
             title="Mark done today" aria-label="Mark ${esc(t.name)} done today">${icon('check', 17)}</button>`)}
     </div>
     <div class="name">${t.name}</div>
-    <div class="meta"><b${raw(tone ? ` data-tone="${esc(tone)}"` : '')}>${raw(off ? 'Paused' : esc(relative(st.daysLeft)))}</b>${raw(
+    <div class="meta"><b${raw(tone ? ` data-tone="${esc(tone)}"` : '')}>${raw(
+    off ? 'Paused' : esc(st.status === 'done' ? 'Finished' : relative(st.daysLeft))
+  )}</b>${raw(
       where ? `<br>${esc(where)}` : ''
     )}</div>
   </div>`;
@@ -246,7 +254,11 @@ const FILTERS = [
   ['all', 'All'],
   ['overdue', 'Overdue'],
   ['due', 'Due soon'],
-  ['new', 'Never done'],
+  // It used to say "Never done", which is what this meant while a routine
+  // with no last-done had no date. Three of the four kinds know their own
+  // dates now and the fourth counts as due, so what is left here is a
+  // routine whose schedule has nothing in it to work a date out from.
+  ['new', 'No schedule'],
   ['ok', 'Up to date'],
 ];
 
@@ -265,6 +277,10 @@ const GROUPS = [
   // order the statuses sort in. A snooze that left the thing at the top of
   // the list would not have been a snooze.
   ['snoozed', 'Snoozed'],
+  // A one-off that has been done. Below the on-track ones because it is not
+  // waiting for anything, and above paused because it finished rather than
+  // being set aside.
+  ['done', 'Finished'],
   ['paused', 'Paused'],
 ];
 
@@ -890,10 +906,15 @@ export function groupForm(state, field, value) {
  * Options are [value, label]; the value is compared as a string so a count
  * can be passed as a number and a yes/no as "1" and "0".
  */
-function selectField({ id, act, label, scope, hint, tab, options, value }) {
+function selectField({ id, act, label, scope, hint, tab, options, value, name }) {
+  // Two sorts of menu share this. A settings one acts the moment it changes
+  // and is found by data-act; a form one is read when the form is saved and
+  // is found by name. Neither wants the other's attribute: an empty data-act
+  // would be picked up by the delegated click handler as an action of its
+  // own, and a name on a settings menu would put it into every form read.
   return html`<div class="field">
     <label for="${id}">${raw(scope ? `<span class="scope">${esc(scope)}</span>` : '')}${label}</label>
-    <select id="${id}" data-act="${act}"${raw(tab ? ` data-tab="${esc(tab)}"` : '')}>
+    <select id="${id}"${raw(act ? ` data-act="${esc(act)}"` : '')}${raw(name ? ` name="${esc(name)}"` : '')}${raw(tab ? ` data-tab="${esc(tab)}"` : '')}>
       ${options.map(([v, l]) => html`<option value="${v}"${raw(String(value) === String(v) ? ' selected' : '')}>${l}</option>`)}
     </select>
     ${raw(hint ? `<div class="hint">${esc(hint)}</div>` : '')}
@@ -1067,8 +1088,8 @@ The same import and export below are available as the elmer.import_json and elme
     <div class="card"><div class="panelbody">
       <div class="note" style="padding:8px 0 4px">${counts.equipment} ${raw(counts.equipment === 1 ? 'piece' : 'pieces')} of equipment, ${state.tasks.length} ${raw(state.tasks.length === 1 ? 'routine' : 'routines')}, ${state.supplies.length} ${raw(state.supplies.length === 1 ? 'part' : 'parts')}, ${state.log.length} history ${raw(state.log.length === 1 ? 'entry' : 'entries')}.</div>
       <div class="btnrow">
-        <button class="btn" data-act="export">${raw(icon('download', 16))}Export a copy</button>
-        <button class="btn" data-act="import">${raw(icon('upload', 16))}Import a file</button>
+        <button class="btn" data-act="export">${raw(icon('download', 16))}Export Data</button>
+        <button class="btn" data-act="import">${raw(icon('upload', 16))}Import Data</button>
       </div>
       <div class="hint" style="margin-top:10px">Exporting downloads a JSON file you can keep anywhere. Importing one asks whether to merge it into what is here or replace it.</div>
     </div></div>
@@ -1351,10 +1372,15 @@ export function routineForm(state, task, equipmentId) {
   const t = task || {};
   const eqId = t.equipmentId || equipmentId || '';
   const used = t.partsUsed || [];
-  // Months on the record are what make it seasonal; there is no separate
-  // flag to keep in step with them.
+  // Which kind is live is stored on the record now. It used to be inferred
+  // from whether there were months, which worked while there were two kinds
+  // and cannot work at four: a routine can hold a date and an interval and a
+  // set of months at once, and the only thing that can say which one is
+  // meant is the record itself.
   const chosen = new Set(t.months || []);
-  const seasonal = chosen.size > 0;
+  const clocks = new Set(t.clocks || []);
+  const kind = scheduleKind(t);
+  const show = (k) => raw(kind === k ? '' : ' hidden');
   return html`<div class="field">
       <label for="f-rname">Routine</label>
       <input id="f-rname" name="name" value="${t.name || ''}" placeholder="Replace air filter"
@@ -1367,19 +1393,24 @@ export function routineForm(state, task, equipmentId) {
         ${state.equipment.map((e) => html`<option value="${e.id}"${raw(eqId === e.id ? ' selected' : '')}>${e.name}</option>`)}
       </select>
     </div>
-    <!-- Two ways to be due, and only one showing at a time. An interval
+    <!-- Four ways to be due, and only one showing at a time. An interval
          walks forward from whenever you last did it, which is right for a
          filter and wrong for anything tied to the weather: winterizing done
-         late one November slides later every year after. Months do not
-         drift. -->
+         late one November slides later every year after. The other three do
+         not drift, because they are dates rather than gaps. -->
     ${raw(selectField({
     id: 'f-schedkind',
     act: 'pick-schedule',
     label: 'Schedule',
-    options: [['interval', 'Every so often'], ['seasonal', 'In certain months']],
-    value: seasonal ? 'seasonal' : 'interval',
+    options: [
+      ['interval', 'Every so often'],
+      ['months', 'In certain months'],
+      ['clocks', 'At a clock change'],
+      ['date', 'On a date'],
+    ],
+    value: kind,
   }))}
-    <div class="two" data-sched="interval"${raw(seasonal ? ' hidden' : '')}>
+    <div class="two" data-sched="interval"${show('interval')}>
       <div class="field">
         <label for="f-count">Every</label>
         <input id="f-count" name="intervalCount" type="number" inputmode="numeric" min="1" max="999"
@@ -1392,7 +1423,7 @@ export function routineForm(state, task, equipmentId) {
         </select>
       </div>
     </div>
-    <div class="field" data-sched="seasonal"${raw(seasonal ? '' : ' hidden')}>
+    <div class="field" data-sched="months"${show('months')}>
       <label id="f-months-label">Months</label>
       <div class="monthgrid" role="group" aria-labelledby="f-months-label">
         ${MONTHS.map((short, i) => html`<label class="chip">
@@ -1403,10 +1434,36 @@ export function routineForm(state, task, equipmentId) {
       </div>
       <div class="hint">Due on the first of each month you pick, every year. Pick more than one for something you do twice a year. Warn-ahead under Settings is what gives you notice before the month arrives.</div>
     </div>
+    <!-- The clock changes, which is when everyone is told to see to the
+         smoke alarms. Both can be ticked, because that is the job: one
+         routine twice a year rather than two routines once. -->
+    <div class="field" data-sched="clocks"${show('clocks')}>
+      <label id="f-clocks-label">Clock change</label>
+      <div class="monthgrid" role="group" aria-labelledby="f-clocks-label">
+        ${CLOCK_LABELS.map(([value, label]) => html`<label class="chip wide">
+          <input type="checkbox" name="clock:${value}"${raw(clocks.has(value) ? ' checked' : '')}
+            aria-label="${label}">
+          <span>${label}</span>
+        </label>`)}
+      </div>
+      <div class="hint">United States dates: forward on the second Sunday in March, back on the first Sunday in November. Tick both for the twice-a-year jobs — smoke alarm batteries being the one everybody means.</div>
+    </div>
+    <div class="field" data-sched="date"${show('date')}>
+      <label for="f-ondate">Date</label>
+      <input id="f-ondate" name="onDate" type="date" value="${t.onDate || ''}">
+      ${raw(selectField({
+    id: 'f-onrepeat',
+    label: 'Repeats',
+    options: [['1', 'Every year'], ['0', 'Once only']],
+    value: (t.onDateYearly === undefined ? true : t.onDateYearly) ? '1' : '0',
+    name: 'onDateYearly',
+  }))}
+      <div class="hint">Every year uses the day and month and ignores the year you pick. Once only is a job with an end: mark it done and Elmer stops scheduling it, keeping the history.</div>
+    </div>
     <div class="field">
       <label for="f-lastDone">Last done</label>
       <input id="f-lastDone" name="lastDone" type="date" value="${t.lastDone || ''}">
-      <div class="hint">Leave this empty if you have never done it — Elmer will show it as never done rather than inventing a date.</div>
+      <div class="hint">Leave this empty if you have never done it. A routine anchored to months, a clock change or a date still knows when it is next due; one on an interval has nothing to count from, so it reads as due now.</div>
     </div>
     ${raw(state.supplies.length ? html`<div class="field">
       <label for="f-pickpart">Parts this uses</label>
@@ -1539,9 +1596,10 @@ export function logForm(state, taskId) {
 
   return html`<dl class="kv" style="padding:4px 0 10px">
       ${raw(eq ? `<dt>Equipment</dt><dd>${esc(eq.name)}</dd>` : '')}
-      <dt>Every</dt><dd>${scheduleText(task)}</dd>
+      <dt>Schedule</dt><dd>${scheduleText(task)}</dd>
       <dt>Last done</dt><dd>${raw(task.lastDone ? esc(formatDay(task.lastDone, state.computed.today)) : 'never')}</dd>
       ${raw(st.due ? `<dt>Due</dt><dd>${esc(formatDay(st.due, state.computed.today))} · ${esc(relative(st.daysLeft))}</dd>` : '')}
+      ${raw(st.status === 'done' ? '<dt>Due</dt><dd>finished — this one does not come round again</dd>' : '')}
       ${raw(eq && eq.partNumber ? `<dt>Part number</dt><dd class="mono">${esc(eq.partNumber)}</dd>` : '')}
     </dl>
     <div class="label">Log a service</div>

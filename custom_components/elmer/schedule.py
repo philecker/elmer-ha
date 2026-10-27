@@ -29,7 +29,30 @@ DUE_SOON_DAYS = 14
 # Mirrors STATUS_RANK in the renderer's model.js. Snoozed sits below on-track
 # and above paused: a snooze that left the thing at the top of the list would
 # have done nothing, and a snooze is still more temporary than a pause.
-STATUS_RANK = {"overdue": 0, "due": 1, "new": 2, "ok": 3, "snoozed": 4, "paused": 5}
+STATUS_RANK = {
+    "overdue": 0,
+    "due": 1,
+    "new": 2,
+    "ok": 3,
+    "snoozed": 4,
+    "done": 5,
+    "paused": 6,
+}
+
+# The four ways a routine can be due. Which one is live used to be inferred
+# from the data — months on the record meant seasonal — which worked while
+# there were two and stops working at four: a routine can hold a date and an
+# interval and a set of months at once, and inferring would make switching
+# between them lose whichever lost the precedence. The kind is stored, and
+# everything else is kept, so switching back finds the old answer still there.
+SCHEDULE_KINDS = ("interval", "months", "clocks", "date")
+
+# Clock changes, under United States rules: forward on the second Sunday in
+# March, back on the first Sunday in November. Hardcoded rather than read from
+# the configured time zone, which is wrong by a week or two in Europe and
+# wrong altogether where there is no clock change. The label says daylight
+# saving, so anyone it does not fit has the specific-date option instead.
+CLOCKS = ("spring", "fall")
 
 
 def parse_day(iso: Any) -> date | None:
@@ -111,7 +134,108 @@ def days_between(from_iso: str, to_iso: str) -> int:
     return (b - a).days
 
 
-def next_seasonal(months: Any, last_done: Any) -> str | None:
+def nth_sunday(year: int, month: int, n: int) -> date:
+    """The nth Sunday of a month, counting from one.
+
+    ``date.weekday()`` is Monday 0 through Sunday 6 while the reference's
+    ``getDay()`` is Sunday 0 through Saturday 6. Both reduce to the same
+    offset from the first of the month, which is all either one is used for.
+    """
+    first = date(year, month, 1)
+    offset = (6 - first.weekday()) % 7
+    return date(year, month, 1 + offset + 7 * (n - 1))
+
+
+def clock_change(year: int, which: str) -> date:
+    """When the clocks go forward or back in a given year."""
+    if which == "spring":
+        return nth_sunday(year, 3, 2)
+    return nth_sunday(year, 11, 1)
+
+
+def next_clock(clocks: Any, after: Any, inclusive: bool = False) -> str | None:
+    """The next clock change among those chosen, after a date.
+
+    Both changes can be chosen at once — smoke alarm batteries being the job
+    everyone is told to do twice a year — so this is the earliest of the
+    candidates rather than the next one in the list.
+    """
+    d = parse_day(after)
+    if d is None or not clocks:
+        return None
+    best: date | None = None
+    for year in (d.year, d.year + 1):
+        for which in clocks:
+            if which not in CLOCKS:
+                continue
+            candidate = clock_change(year, which)
+            if candidate > d or (inclusive and candidate == d):
+                if best is None or candidate < best:
+                    best = candidate
+    return to_day(best) if best is not None else None
+
+
+def _anniversary(year: int, base: date) -> date:
+    """The same day of the year, in another year.
+
+    29 February rolls to 1 March rather than clamping to the 28th, which is
+    what the year arithmetic in ``add_interval`` already does. Two rules for
+    the same question would be worse than one slightly surprising one.
+    """
+    if base.month == 2 and base.day == 29 and not calendar.isleap(year):
+        return date(year, 3, 1)
+    return date(year, base.month, base.day)
+
+
+def next_anniversary(on_date: Any, after: Any, inclusive: bool = False) -> str | None:
+    """The next time a specific date comes round again, after a date."""
+    base = parse_day(on_date)
+    d = parse_day(after)
+    if base is None or d is None:
+        return None
+    for year in (d.year, d.year + 1):
+        candidate = _anniversary(year, base)
+        if candidate > d or (inclusive and candidate == d):
+            return to_day(candidate)
+    return None
+
+
+def yearly(task: dict) -> bool:
+    """Whether a specific-date routine comes back every year.
+
+    Absent in a hand-edited file means yearly, because a routine that keeps
+    coming back is the safer thing to assume: the other reading would quietly
+    retire something the moment it was first done.
+    """
+    if not task:
+        return True
+    return bool(task.get("onDateYearly", True))
+
+
+def schedule_kind(task: dict) -> str:
+    """Which of the four kinds a routine is on.
+
+    Files written before there were four say nothing, and months on the
+    record are what made a routine seasonal then, so that is what they mean
+    now. Everything else was an interval.
+    """
+    kind = (task or {}).get("schedule")
+    if kind in SCHEDULE_KINDS:
+        return kind
+    return "months" if (task or {}).get("months") else "interval"
+
+
+def finished(task: dict) -> bool:
+    """A one-off that has been done. There is no next time, and that is the point."""
+    return (
+        bool(task)
+        and schedule_kind(task) == "date"
+        and not yearly(task)
+        and bool(task.get("lastDone"))
+    )
+
+
+def next_seasonal(months: Any, last_done: Any, inclusive: bool = False) -> str | None:
     """The first of the next chosen month, strictly after ``last_done``.
 
     A month-anchored routine does not drift. An interval walks forward from
@@ -131,22 +255,50 @@ def next_seasonal(months: Any, last_done: Any) -> str | None:
     for year in (d.year, d.year + 1):
         for month in months:
             candidate = date(year, int(month), 1)
-            if candidate > d:
+            if candidate > d or (inclusive and candidate == d):
                 return to_day(candidate)
     return None
 
 
 def next_due(task: dict) -> str | None:
-    if not task or not task.get("lastDone"):
+    """When a routine is next due, or None if there is nothing to go on.
+
+    Three of the four kinds know their own dates and need no last-done to
+    have one: a routine anchored to November is due in November whether or
+    not anybody has ever done it. Only an interval has nothing to count
+    from, and a routine you have never done is one that wants doing, so it
+    is due now.
+
+    Done once, the next occurrence is the first strictly after that date —
+    otherwise marking something done would leave it due the same day. Never
+    done, today itself counts, or a routine anchored to today would read as
+    due next year.
+    """
+    if not task:
         return None
-    # A routine with months on it is seasonal, and the interval it may also
-    # carry is left alone rather than cleared — switching a routine to months
-    # and back should not lose the every-three-months it had before.
-    if task.get("months"):
-        return next_seasonal(task["months"], task["lastDone"])
-    return add_interval(
-        task["lastDone"], task.get("intervalCount"), task.get("intervalUnit")
-    )
+    kind = schedule_kind(task)
+    last = task.get("lastDone")
+
+    if kind == "interval":
+        if not last:
+            return today()
+        return add_interval(last, task.get("intervalCount"), task.get("intervalUnit"))
+
+    anchor = last or today()
+    inclusive = not last
+
+    if kind == "months":
+        return next_seasonal(task.get("months"), anchor, inclusive)
+    if kind == "clocks":
+        return next_clock(task.get("clocks"), anchor, inclusive)
+
+    # A specific date, either every year or exactly once.
+    if yearly(task):
+        return next_anniversary(task.get("onDate"), anchor, inclusive)
+    if last:
+        return None
+    once = parse_day(task.get("onDate"))
+    return to_day(once) if once else None
 
 
 def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
@@ -200,18 +352,29 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
 
     due = next_due(task)
     if due is None:
+        # Two different nothings. A one-off that has been done is over, and
+        # says so; anything else here has a kind chosen with nothing filled
+        # in — months with no months ticked — and is genuinely unscheduled.
+        over = finished(task)
         return {
             "due": None,
             "daysLeft": None,
-            "status": "new",
-            "progress": 0,
+            "status": "done" if over else "new",
+            "progress": 1 if over else 0,
             "cycle": None,
         }
     now = today()
     days_left = days_between(now, due)
-    cycle = max(1, days_between(task["lastDone"], due))
-    elapsed = days_between(task["lastDone"], now)
-    progress = max(0.0, min(1.0, elapsed / cycle))
+    if task.get("lastDone"):
+        cycle = max(1, days_between(task["lastDone"], due))
+        elapsed = days_between(task["lastDone"], now)
+        progress = max(0.0, min(1.0, elapsed / cycle))
+    else:
+        # Never done, so there is no cycle to be part-way through. The ring
+        # stays empty until the day arrives rather than inventing a start
+        # date to measure from.
+        cycle = None
+        progress = 1.0 if days_left <= 0 else 0.0
     if days_left < 0:
         status = "overdue"
     elif days_left <= due_soon_days:

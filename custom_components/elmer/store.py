@@ -104,6 +104,19 @@ def _int(value: Any, default: int = 0) -> int:
     return int(_num(value, default))
 
 
+def _clocks(value: Any) -> list[str]:
+    """The clock changes a routine is anchored to, in the order they fall.
+
+    Both can be chosen. Sorted into spring-then-fall rather than the order
+    they were ticked, so the scheduler's scan reads chronologically within a
+    year and two files that mean the same thing look the same.
+    """
+    if not isinstance(value, (list, tuple)):
+        return []
+    chosen = {v for v in value if v in schedule.CLOCKS}
+    return [c for c in schedule.CLOCKS if c in chosen]
+
+
 def _months(value: Any) -> list[int]:
     """The months a seasonal routine is anchored to: sorted, unique, 1-12.
 
@@ -188,6 +201,19 @@ def normalize(raw: Any) -> dict[str, Any]:
         # Months make a routine seasonal. Always a list, so the scheduler can
         # test it for emptiness without caring what a hand-edited file held.
         item["months"] = _months(t.get("months"))
+        # Which kind of schedule is live. Stored rather than inferred, now
+        # that there are four and a routine can hold the makings of all of
+        # them at once; switching between them keeps what the others held.
+        # Anything unrecognised, including a file written before this
+        # existed, falls back to what used to be inferred from the data.
+        item["schedule"] = schedule.schedule_kind(t)
+        item["clocks"] = _clocks(t.get("clocks"))
+        # A specific date, and whether it comes round again. Yearly is the
+        # default for a missing flag for the same reason the scheduler takes
+        # it that way: the other reading retires a routine behind your back.
+        on_date = t.get("onDate")
+        item["onDate"] = on_date if schedule.parse_day(on_date) else None
+        item["onDateYearly"] = bool(t.get("onDateYearly", True))
         # A day, or nothing. Anything unparseable is nothing rather than a
         # snooze that never ends, since the whole point is that it expires.
         snoozed = t.get("snoozedUntil")
@@ -342,9 +368,10 @@ class ElmerStore:
         filter are counted together here, which a per-part threshold cannot see
         at all.
 
-        Overdue routines count: still undone, still needing the part. A routine
-        that has never been done has no due date, so nothing is coming up for it
-        and it is left out rather than counted as needed now.
+        Overdue routines count: still undone, still needing the part. So do
+        routines nobody has ever done, which used to be left out for having no
+        due date and now have one — an interval routine never done is due now,
+        and a part it needs is a part you are short of today.
         """
         soon = self.due_soon_days
         needed: dict[str, int] = {}
@@ -392,6 +419,7 @@ class ElmerStore:
             "overdue": sum(1 for r in rows if r["state"]["status"] == "overdue"),
             "due": sum(1 for r in rows if r["state"]["status"] == "due"),
             "new": sum(1 for r in rows if r["state"]["status"] == "new"),
+            "done": sum(1 for r in rows if r["state"]["status"] == "done"),
             "ok": sum(1 for r in rows if r["state"]["status"] == "ok"),
             "lowStock": sum(
                 1 for s in self.data["supplies"] if schedule.stock_status(s) != "ok"

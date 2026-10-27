@@ -55,24 +55,125 @@ function daysBetween(fromIso, toIso) {
  * arrives sorted and within 1-12, so the first candidate found scanning this
  * year and then the next is the right one.
  */
-function nextSeasonal(months, lastDone) {
+function nextSeasonal(months, lastDone, inclusive = false) {
   const d = parseDay(lastDone);
   if (!d || !months || !months.length) return null;
   for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
     for (const month of months) {
-      const candidate = new Date(year, Number(month) - 1, 1);
-      if (candidate > d) return toDay(candidate);
+      const candidate = new Date(year, Number(month) - 1, 1, 12, 0, 0, 0);
+      if (candidate > d || (inclusive && candidate.getTime() === d.getTime())) {
+        return toDay(candidate);
+      }
     }
   }
   return null;
 }
 
+// The four ways a routine can be due. Which one is live is stored rather than
+// inferred: a routine can hold a date and an interval and a set of months at
+// once, and inferring would lose whichever lost the precedence.
+const SCHEDULE_KINDS = ['interval', 'months', 'clocks', 'date'];
+
+// United States rules: forward on the second Sunday in March, back on the
+// first Sunday in November.
+const CLOCKS = ['spring', 'fall'];
+
+/** The nth Sunday of a month, counting from one. */
+function nthSunday(year, month, n) {
+  const first = new Date(year, month - 1, 1, 12, 0, 0, 0);
+  const offset = (7 - first.getDay()) % 7;
+  return new Date(year, month - 1, 1 + offset + 7 * (n - 1), 12, 0, 0, 0);
+}
+
+function clockChange(year, which) {
+  return which === 'spring' ? nthSunday(year, 3, 2) : nthSunday(year, 11, 1);
+}
+
+/** The earliest of the chosen clock changes after a date. */
+function nextClock(clocks, after, inclusive = false) {
+  const d = parseDay(after);
+  if (!d || !clocks || !clocks.length) return null;
+  let best = null;
+  for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
+    for (const which of clocks) {
+      if (!CLOCKS.includes(which)) continue;
+      const candidate = clockChange(year, which);
+      if (candidate > d || (inclusive && candidate.getTime() === d.getTime())) {
+        if (!best || candidate < best) best = candidate;
+      }
+    }
+  }
+  return best ? toDay(best) : null;
+}
+
+/** The same day of the year in another year; 29 Feb rolls to 1 March. */
+function anniversary(year, base) {
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  if (base.getMonth() === 1 && base.getDate() === 29 && !leap) {
+    return new Date(year, 2, 1, 12, 0, 0, 0);
+  }
+  return new Date(year, base.getMonth(), base.getDate(), 12, 0, 0, 0);
+}
+
+function nextAnniversary(onDate, after, inclusive = false) {
+  const base = parseDay(onDate);
+  const d = parseDay(after);
+  if (!base || !d) return null;
+  for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
+    const candidate = anniversary(year, base);
+    if (candidate > d || (inclusive && candidate.getTime() === d.getTime())) {
+      return toDay(candidate);
+    }
+  }
+  return null;
+}
+
+/** Absent means yearly: the reading that does not quietly retire a routine. */
+function isYearly(task) {
+  if (!task) return true;
+  return task.onDateYearly === undefined ? true : !!task.onDateYearly;
+}
+
+function scheduleKind(task) {
+  const kind = task && task.schedule;
+  if (SCHEDULE_KINDS.includes(kind)) return kind;
+  // Written before there were four kinds: months are what made it seasonal.
+  return task && task.months && task.months.length ? 'months' : 'interval';
+}
+
+/** A one-off that has been done. There is no next time, and that is the point. */
+function finished(task) {
+  return !!task && scheduleKind(task) === 'date' && !isYearly(task) && !!task.lastDone;
+}
+
+/**
+ * When a routine is next due, or null if there is nothing to go on.
+ *
+ * Three of the four kinds know their own dates and need no last-done. Only an
+ * interval has nothing to count from, and a routine never done is one that
+ * wants doing, so it is due now. Done once, the next occurrence is the first
+ * strictly after that date; never done, today itself counts.
+ */
 function nextDue(task) {
-  if (!task || !task.lastDone) return null;
-  // Months on a routine make it seasonal; any interval it also carries is
-  // left alone so switching back does not lose it.
-  if (task.months && task.months.length) return nextSeasonal(task.months, task.lastDone);
-  return addInterval(task.lastDone, task.intervalCount, task.intervalUnit);
+  if (!task) return null;
+  const kind = scheduleKind(task);
+  const last = task.lastDone;
+
+  if (kind === 'interval') {
+    if (!last) return today();
+    return addInterval(last, task.intervalCount, task.intervalUnit);
+  }
+
+  const anchor = last || today();
+  const inclusive = !last;
+
+  if (kind === 'months') return nextSeasonal(task.months, anchor, inclusive);
+  if (kind === 'clocks') return nextClock(task.clocks, anchor, inclusive);
+
+  if (isYearly(task)) return nextAnniversary(task.onDate, anchor, inclusive);
+  if (last) return null;
+  const once = parseDay(task.onDate);
+  return once ? toDay(once) : null;
 }
 
 function taskState(task, dueSoonDays = 14) {
@@ -97,12 +198,31 @@ function taskState(task, dueSoonDays = 14) {
     };
   }
   const due = nextDue(task);
-  if (!due) return { due: null, daysLeft: null, status: 'new', progress: 0 };
+  if (!due) {
+    // Two different nothings: a one-off that has been done is over, while
+    // anything else here has a kind chosen with nothing filled in.
+    const over = finished(task);
+    return {
+      due: null,
+      daysLeft: null,
+      status: over ? 'done' : 'new',
+      progress: over ? 1 : 0,
+      cycle: null,
+    };
+  }
   const now = today();
   const daysLeft = daysBetween(now, due);
-  const cycle = Math.max(1, daysBetween(task.lastDone, due));
-  const elapsed = daysBetween(task.lastDone, now);
-  const progress = Math.max(0, Math.min(1, elapsed / cycle));
+  let cycle = null;
+  let progress = 0;
+  if (task.lastDone) {
+    cycle = Math.max(1, daysBetween(task.lastDone, due));
+    const elapsed = daysBetween(task.lastDone, now);
+    progress = Math.max(0, Math.min(1, elapsed / cycle));
+  } else {
+    // No last-done means no cycle to be part-way through; the ring stays
+    // empty until the day arrives rather than inventing a start date.
+    progress = daysLeft <= 0 ? 1 : 0;
+  }
   let status = 'ok';
   if (daysLeft < 0) status = 'overdue';
   else if (daysLeft <= dueSoonDays) status = 'due';
@@ -126,6 +246,12 @@ module.exports = {
   addInterval,
   daysBetween,
   nextSeasonal,
+  nthSunday,
+  clockChange,
+  nextClock,
+  nextAnniversary,
+  scheduleKind,
+  finished,
   nextDue,
   taskState,
   overdueTasks,

@@ -43,23 +43,96 @@ function daysBetween(a, b) {
   if (!x || !y) return 0;
   return Math.round((y - x) / 86400000);
 }
-/** Months win over the interval, mirroring next_due in schedule.py. */
-function nextSeasonal(months, lastDone) {
+/** Mirrors next_seasonal in schedule.py. */
+function nextSeasonal(months, lastDone, inclusive = false) {
   const d = parseDay(lastDone);
   if (!d || !months || !months.length) return null;
   for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
     for (const month of months) {
-      const candidate = new Date(year, Number(month) - 1, 1);
-      if (candidate > d) return toDay(candidate);
+      const candidate = new Date(year, Number(month) - 1, 1, 12, 0, 0, 0);
+      if (candidate > d || (inclusive && candidate.getTime() === d.getTime())) {
+        return toDay(candidate);
+      }
     }
   }
   return null;
 }
 
+// United States rules, mirroring CLOCKS and clock_change in schedule.py:
+// forward on the second Sunday in March, back on the first Sunday in November.
+const CLOCKS = ['spring', 'fall'];
+function nthSunday(year, month, n) {
+  const first = new Date(year, month - 1, 1, 12, 0, 0, 0);
+  const offset = (7 - first.getDay()) % 7;
+  return new Date(year, month - 1, 1 + offset + 7 * (n - 1), 12, 0, 0, 0);
+}
+function clockChange(year, which) {
+  return which === 'spring' ? nthSunday(year, 3, 2) : nthSunday(year, 11, 1);
+}
+function nextClock(clocks, after, inclusive = false) {
+  const d = parseDay(after);
+  if (!d || !clocks || !clocks.length) return null;
+  let best = null;
+  for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
+    for (const which of clocks) {
+      if (!CLOCKS.includes(which)) continue;
+      const candidate = clockChange(year, which);
+      if (candidate > d || (inclusive && candidate.getTime() === d.getTime())) {
+        if (!best || candidate < best) best = candidate;
+      }
+    }
+  }
+  return best ? toDay(best) : null;
+}
+function anniversary(year, base) {
+  const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+  if (base.getMonth() === 1 && base.getDate() === 29 && !leap) {
+    return new Date(year, 2, 1, 12, 0, 0, 0);
+  }
+  return new Date(year, base.getMonth(), base.getDate(), 12, 0, 0, 0);
+}
+function nextAnniversary(onDate, after, inclusive = false) {
+  const base = parseDay(onDate);
+  const d = parseDay(after);
+  if (!base || !d) return null;
+  for (const year of [d.getFullYear(), d.getFullYear() + 1]) {
+    const candidate = anniversary(year, base);
+    if (candidate > d || (inclusive && candidate.getTime() === d.getTime())) {
+      return toDay(candidate);
+    }
+  }
+  return null;
+}
+function isYearly(task) {
+  if (!task) return true;
+  return task.onDateYearly === undefined ? true : !!task.onDateYearly;
+}
+function scheduleKind(task) {
+  const kind = task && task.schedule;
+  if (['interval', 'months', 'clocks', 'date'].includes(kind)) return kind;
+  return task && task.months && task.months.length ? 'months' : 'interval';
+}
+function finished(task) {
+  return !!task && scheduleKind(task) === 'date' && !isYearly(task) && !!task.lastDone;
+}
+
+/** Mirrors next_due in schedule.py. */
 function nextDue(task) {
-  if (!task || !task.lastDone) return null;
-  if (task.months && task.months.length) return nextSeasonal(task.months, task.lastDone);
-  return addInterval(task.lastDone, task.intervalCount, task.intervalUnit);
+  if (!task) return null;
+  const kind = scheduleKind(task);
+  const last = task.lastDone;
+  if (kind === 'interval') {
+    if (!last) return today();
+    return addInterval(last, task.intervalCount, task.intervalUnit);
+  }
+  const anchor = last || today();
+  const inclusive = !last;
+  if (kind === 'months') return nextSeasonal(task.months, anchor, inclusive);
+  if (kind === 'clocks') return nextClock(task.clocks, anchor, inclusive);
+  if (isYearly(task)) return nextAnniversary(task.onDate, anchor, inclusive);
+  if (last) return null;
+  const once = parseDay(task.onDate);
+  return once ? toDay(once) : null;
 }
 
 function taskState(task, soon = 14) {
@@ -81,15 +154,28 @@ function taskState(task, soon = 14) {
       snoozedUntil: task.snoozedUntil,
     };
   }
-  if (!task || !task.lastDone) {
-    return { due: null, daysLeft: null, status: 'new', progress: 0, cycle: null };
-  }
   const due = nextDue(task);
+  if (!due) {
+    const over = finished(task);
+    return {
+      due: null,
+      daysLeft: null,
+      status: over ? 'done' : 'new',
+      progress: over ? 1 : 0,
+      cycle: null,
+    };
+  }
   const now = today();
   const daysLeft = daysBetween(now, due);
-  const cycle = Math.max(1, daysBetween(task.lastDone, due));
-  const elapsed = daysBetween(task.lastDone, now);
-  const progress = Math.max(0, Math.min(1, elapsed / cycle));
+  let cycle = null;
+  let progress = 0;
+  if (task.lastDone) {
+    cycle = Math.max(1, daysBetween(task.lastDone, due));
+    const elapsed = daysBetween(task.lastDone, now);
+    progress = Math.max(0, Math.min(1, elapsed / cycle));
+  } else {
+    progress = daysLeft <= 0 ? 1 : 0;
+  }
   let status = 'ok';
   if (daysLeft < 0) status = 'overdue';
   else if (daysLeft <= soon) status = 'due';
@@ -152,12 +238,21 @@ const SEED = {
       intervalCount: 1, intervalUnit: 'months', partsUsed: [{ supplyId: 's3', quantity: 2 }] },
     { id: 't7', equipmentId: 'eq4', name: 'Test Alarm', lastDone: ago(200),
       intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
+    // The job everybody is told to do when the clocks change, on the
+    // schedule that says so — and never done, which used to read as "not
+    // scheduled" and now reads as the next changeover.
     { id: 't8', equipmentId: 'eq4', name: 'Replace Battery', lastDone: null,
+      schedule: 'clocks', clocks: ['spring', 'fall'],
       intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
     { id: 't9', equipmentId: 'eq5', name: 'Oil Change', lastDone: ago(14),
       intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
     { id: 't10', equipmentId: 'eq5', name: 'Sharpen Blades', lastDone: ago(95),
       intervalCount: 3, intervalUnit: 'months', partsUsed: [] },
+    // A job with an end: done once and finished, kept for the history
+    // rather than scheduled again.
+    { id: 't11', equipmentId: 'eq2', name: 'Register Warranty', lastDone: ago(300),
+      schedule: 'date', onDate: ago(305), onDateYearly: false,
+      intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
   ],
   supplies: [
     // Locations here on purpose: parts are grouped by where they are kept,
@@ -257,6 +352,7 @@ function snapshot() {
         overdue: vals.filter((s) => s.status === 'overdue').length,
         due: vals.filter((s) => s.status === 'due').length,
         new: vals.filter((s) => s.status === 'new').length,
+        done: vals.filter((s) => s.status === 'done').length,
         ok: vals.filter((s) => s.status === 'ok').length,
         lowStock: Object.values(stock).filter((s) => s !== 'ok').length,
         equipment: data.equipment.length,
@@ -406,7 +502,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.7.0' } };
+panel.panel = { config: { version: '1.8.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

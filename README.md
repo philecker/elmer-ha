@@ -47,11 +47,20 @@ remember which shape you chose, and how many cards go in a row is yours to set
 — separately for a desktop and a phone, because a count picked at a desk
 should not follow you onto a screen that has no room for it.
 
-**Schedules that suit the job.** Most things run on an interval: every three
-months, every year. Anything tied to the weather does not — winterize the pool
-late one November and an interval moves it later every year after. Those can be
-anchored to months instead, and land in the same month however late you get to
-them.
+**Schedules that suit the job.** Four of them. Most things run on an interval:
+every three months, every year. Anything tied to the weather does not —
+winterize the pool late one November and an interval moves it later every year
+after — so those can be anchored to **months** instead, and land in the same
+month however late you get to them. Smoke alarm batteries go on the **clock
+change**, spring or fall or both, on the United States dates. And anything with
+a date of its own gets one, either every year or **once only**: a job with an
+end, which Elmer stops scheduling the moment it is done and keeps in the
+history.
+
+Only an interval needs to have been done before it knows anything. The other
+three know their own dates, so a routine you have never done still says when it
+is next due rather than reading as unscheduled — and an interval you have never
+done is simply due now.
 
 **Not now, without losing track.** Snooze a routine for a few days and it drops
 out of the overdue list and goes quiet, then comes back on its own. It still
@@ -61,6 +70,11 @@ things you genuinely are not tracking at the moment.
 
 <p>
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/schedule.png" alt="A routine anchored to April and October rather than an interval" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/clocks.png" alt="A routine anchored to both clock changes" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/ondate.png" alt="A routine on a specific date, every year or once only" width="250">
+</p>
+
+<p>
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/snooze.png" alt="Snoozing a routine for a few days" width="250">
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/cards.png" alt="Equipment as cards rather than a list" width="250">
 </p>
@@ -150,7 +164,7 @@ Home Assistant **2025.7 or newer**. Earlier versions lack
 ## Importing a backup
 
 If you have an `elmer.json` from somewhere else, bring it in from
-**Settings ▸ Data export ▸ Import a file** — pick the file, check what Elmer
+**Settings ▸ Data export ▸ Import Data** — pick the file, check what Elmer
 says is in it, and choose whether to merge or replace.
 
 To do it from a script instead, put the file in your Home Assistant **config**
@@ -185,8 +199,8 @@ separate backup for Elmer.
 
 **Settings ▸ Data export** has both halves:
 
-- **Export a copy** downloads the file through your browser.
-- **Import a file** reads a backup you pick, shows you what is in it, and asks
+- **Export Data** downloads the file through your browser.
+- **Import Data** reads a backup you pick, shows you what is in it, and asks
   whether to merge it into what is here or replace everything.
 
 Both work from a phone over Nabu Casa, because the file is read and written in

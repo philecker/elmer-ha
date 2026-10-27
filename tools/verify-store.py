@@ -193,6 +193,48 @@ async def main() -> int:
           [type(fresh["cardsWide"]).__name__, type(fresh["cardsNarrow"]).__name__],
           ["int", "int"])
 
+    # --- the four schedule kinds -------------------------------------------
+    # Which kind is live is stored now rather than inferred, because at four
+    # kinds a routine can hold the makings of all of them and inference would
+    # lose whichever lost the precedence. The point of storing it is that
+    # switching away and back finds the old answer still there, so these
+    # check that nothing is cleared.
+    def one(task):
+        return store_mod.normalize({"tasks": [dict({"id": "t", "name": "x"}, **task)]})["tasks"][0]
+
+    check("an unknown kind falls back the way a file written before this read",
+          one({"schedule": "nonsense", "months": [3]})["schedule"], "months")
+    check("and with no months, to an interval",
+          one({"schedule": None})["schedule"], "interval")
+    for kind in ("interval", "months", "clocks", "date"):
+        check(f"{kind} is kept as given", one({"schedule": kind})["schedule"], kind)
+
+    both = one({
+        "schedule": "clocks", "clocks": ["fall", "spring"],
+        "months": [6], "intervalCount": 9, "intervalUnit": "weeks",
+        "onDate": "2026-12-25",
+    })
+    check("clocks come back in the order they fall, not the order ticked",
+          both["clocks"], ["spring", "fall"])
+    check("and the other three kinds' settings are all still there",
+          [both["months"], both["intervalCount"], both["intervalUnit"], both["onDate"]],
+          [[6], 9, "weeks", "2026-12-25"])
+    for given, want in (
+        (["spring"], ["spring"]), (["fall"], ["fall"]),
+        (["spring", "spring"], ["spring"]), (["winter"], []),
+        ("spring", []), (None, []), ([], []),
+    ):
+        check(f"clocks {given!r} normalise to {want}", one({"clocks": given})["clocks"], want)
+
+    check("a date that is not one is no date at all",
+          [one({"onDate": v})["onDate"] for v in ("2026-13-40", "soon", "", None)],
+          [None, None, None, None])
+    check("and one that is survives", one({"onDate": "2026-12-25"})["onDate"], "2026-12-25")
+    # Yearly for anything absent: the other reading would retire a routine
+    # the first time it was done, which is not a thing to guess at.
+    check("a missing yearly flag means yearly", one({})["onDateYearly"], True)
+    check("and an explicit no means once", one({"onDateYearly": False})["onDateYearly"], False)
+
     # --- sorting -----------------------------------------------------------
     # The store's job here is only to refuse a field that does not exist; the
     # ordering itself is the panel's and is tested there. The allowed sets are
@@ -331,8 +373,18 @@ async def main() -> int:
     check("a December anchor rolls over",
           schedule.next_due(dict(seasonal, months=[12], lastDone="2026-12-05")),
           "2027-12-01")
-    check("never done is still never done",
-          schedule.next_due(dict(seasonal, lastDone=None)), None)
+    # Never done used to mean no date at all. A month-anchored routine knows
+    # its own dates, so now it has one: the next October, counted from today
+    # rather than from a last-done it does not have.
+    never = schedule.next_due(dict(seasonal, lastDone=None))
+    check("never done still lands on the chosen month",
+          (never or "")[5:], "10-01")
+    check("and it is in the future", bool(never) and never > schedule.today(), True)
+    # Nothing to go on is still nothing to go on, and that is a different
+    # thing from never having done it.
+    check("a month-anchored routine with no months ticked has no date",
+          schedule.next_due(dict(seasonal, schedule="months", months=[], lastDone=None)),
+          None)
     # Pausing has to keep working on a seasonal routine, since the two
     # features meet at the same short-circuit.
     paused_state = schedule.task_state(dict(seasonal, paused=True))
@@ -546,7 +598,18 @@ async def main() -> int:
                 {"id": "a", "name": "overdue", "lastDone": schedule.add_interval(today, -60, "days"), "intervalCount": 1, "intervalUnit": "months"},
                 {"id": "b", "name": "due", "lastDone": schedule.add_interval(today, -25, "days"), "intervalCount": 1, "intervalUnit": "months"},
                 {"id": "c", "name": "ok", "lastDone": today, "intervalCount": 1, "intervalUnit": "years"},
-                {"id": "d", "name": "new", "lastDone": None, "intervalCount": 1, "intervalUnit": "months"},
+                # Never done. It used to count as "new"; now an interval with
+                # nothing to count from is due today, which is what it is.
+                {"id": "d", "name": "never done", "lastDone": None, "intervalCount": 1, "intervalUnit": "months"},
+                # Genuinely unscheduled: the kind is set to months and no
+                # month is ticked, so there is nothing to work out a date
+                # from. This is all "new" means now.
+                {"id": "f", "name": "no schedule", "schedule": "months", "months": [], "lastDone": None},
+                # A one-off that has been done. Over, rather than overdue or
+                # fine, and reporting no days left so nothing fires on it.
+                {"id": "g", "name": "one-off done", "schedule": "date",
+                 "onDate": schedule.add_interval(today, -5, "days"),
+                 "onDateYearly": False, "lastDone": schedule.add_interval(today, -4, "days")},
                 # Would be overdue by two months if it were not paused.
                 {"id": "e", "name": "paused", "lastDone": schedule.add_interval(today, -90, "days"), "intervalCount": 1, "intervalUnit": "months", "paused": True},
             ],
@@ -561,9 +624,13 @@ async def main() -> int:
     # A paused routine is counted as paused and nowhere else. It would read as
     # overdue on its dates alone, so this is the check that pausing actually
     # stops the nagging rather than only changing how a row is drawn.
-    check("counts", s.counts(), {"paused": 1, "snoozed": 0, "overdue": 1, "due": 1,
-                                 "new": 1, "ok": 1, "lowStock": 2, "partsShort": 0,
-                                 "equipment": 0})
+    check("counts", s.counts(), {"paused": 1, "snoozed": 0, "overdue": 1, "due": 2,
+                                 "new": 1, "done": 1, "ok": 1, "lowStock": 2,
+                                 "partsShort": 0, "equipment": 0})
+    done_state = schedule.task_state(s.task("g"), s.due_soon_days)
+    check("a finished one-off is done rather than overdue", done_state["status"], "done")
+    check("and reports no days left, so nothing fires on it", done_state["daysLeft"], None)
+    check("and has no next date, because there is not one", done_state["due"], None)
     paused_state = schedule.task_state(s.task("e"), s.due_soon_days)
     check("a paused routine reports no days left", paused_state["daysLeft"], None)
     check("which is what keeps a numeric condition from matching it",
@@ -571,9 +638,12 @@ async def main() -> int:
     # The date survives, so the panel can say what was paused rather than only
     # that something was.
     check("but it still knows when it would have been due", bool(paused_state["due"]), True)
-    # Never-done ranks ahead of fine: STATUS_RANK puts 'new' at 2 and 'ok' at 3,
-    # because a routine with no date needs attention more than one that is fine.
-    check("urgency order", [r["task"]["id"] for r in s.rows()], ["a", "b", "d", "c", "e"])
+    # Overdue, then the two due ones soonest-first — the never-done routine
+    # is due today and so comes before the one due in a few days — then the
+    # unscheduled one, then fine, then finished, then paused. The last two
+    # sort to the bottom on purpose: neither is waiting for anything.
+    check("urgency order", [r["task"]["id"] for r in s.rows()],
+          ["a", "d", "b", "f", "c", "g", "e"])
     check("out of stock", schedule.stock_status({"quantity": 0, "reorderAt": 0}), "out")
     check("at the reorder point is low", schedule.stock_status({"quantity": 2, "reorderAt": 2}), "low")
     check("above it is fine", schedule.stock_status({"quantity": 3, "reorderAt": 2}), "ok")
@@ -599,10 +669,18 @@ async def main() -> int:
                 {"id": "c", "name": "far off", "lastDone": today,
                  "intervalCount": 1, "intervalUnit": "years",
                  "partsUsed": [{"supplyId": "belt", "quantity": 5}]},
-                # Never done, so nothing is scheduled and nothing is needed.
+                # Never done, which now means due today rather than not
+                # scheduled — so its parts are needed, and this is the check
+                # that the two moved together.
                 {"id": "d", "name": "never done", "lastDone": None,
                  "intervalCount": 1, "intervalUnit": "months",
                  "partsUsed": [{"supplyId": "gasket", "quantity": 4}]},
+                # Genuinely unscheduled: a kind chosen with nothing filled
+                # in. Nothing is coming up for it, so its parts are not
+                # needed and this is what the old never-done case tested.
+                {"id": "e", "name": "no schedule", "schedule": "clocks",
+                 "clocks": [], "lastDone": None,
+                 "partsUsed": [{"supplyId": "washer", "quantity": 7}]},
             ],
             "supplies": [
                 # Two on the shelf and well above its reorder point, yet three
@@ -610,19 +688,27 @@ async def main() -> int:
                 {"id": "filter", "name": "Filter", "quantity": 2, "reorderAt": 0},
                 {"id": "belt", "name": "Belt", "quantity": 1, "reorderAt": 0},
                 {"id": "gasket", "name": "Gasket", "quantity": 0, "reorderAt": 0},
+                {"id": "washer", "name": "Washer", "quantity": 0, "reorderAt": 0},
             ],
         },
         merge=False,
     )
     short = s.parts_short()
-    check("only the part the schedule actually needs is short",
-          [r["name"] for r in short], ["Filter"])
-    check("two routines sharing a part are added together", short[0]["needed"], 3)
-    check("against what is on the shelf", short[0]["on_hand"], 2)
-    check("leaving the shortfall", short[0]["short"], 1)
+    by_name = {r["name"]: r for r in short}
+    check("the parts the schedule actually needs are short",
+          sorted(by_name), ["Filter", "Gasket"])
+    check("and the one nothing is scheduled for is not",
+          "Washer" in by_name, False)
+    check("two routines sharing a part are added together",
+          by_name["Filter"]["needed"], 3)
+    check("against what is on the shelf", by_name["Filter"]["on_hand"], 2)
+    check("leaving the shortfall", by_name["Filter"]["short"], 1)
     check("and it names the routines that want it",
-          short[0]["routines"], ["furnace filter", "second filter"])
-    check("the count follows", s.counts()["partsShort"], 1)
+          by_name["Filter"]["routines"], ["furnace filter", "second filter"])
+    check("a routine never done needs its parts today",
+          (by_name["Gasket"]["needed"], by_name["Gasket"]["routines"]),
+          (4, ["never done"]))
+    check("the count follows", s.counts()["partsShort"], 2)
     # And the gap itself: the part that is short reads perfectly healthy by the
     # reorder point, because two on the shelf is above a threshold of zero.
     # Nothing but this check would have noticed.
@@ -631,10 +717,12 @@ async def main() -> int:
 
     # Enough on the shelf and the shortfall goes away.
     await s.async_apply([("part.adjust", {"id": "filter", "delta": 1})])
-    check("topping it up clears it", s.parts_short(), [])
+    check("topping it up clears it",
+          [r["name"] for r in s.parts_short()], ["Gasket"])
 
     # A part deleted out from under a routine must not raise.
     await s.async_apply([("part.delete", {"id": "filter"})])
+    await s.async_apply([("part.delete", {"id": "gasket"})])
     check("a routine pointing at a deleted part is skipped", s.parts_short(), [])
 
     # --- listeners fire once per batch ------------------------------------

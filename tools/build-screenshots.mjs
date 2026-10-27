@@ -89,7 +89,7 @@ async function shot(page, name) {
 // used to be captured separately and only Routines had a dark counterpart.
 const SCREENS = [
   'routines', 'equipment', 'cards', 'parts', 'history', 'settings',
-  'log-service', 'snooze', 'schedule',
+  'log-service', 'snooze', 'schedule', 'clocks', 'ondate',
 ];
 const OWNED = [
   ...SCREENS.map((n) => `${n}.png`),
@@ -146,13 +146,31 @@ async function phoneScreens(dark) {
   // and then cancelled, for the same reason.
   await page.click('.sheet [data-act="edit-routine"]');
   await page.waitForSelector('.sheet [data-act="pick-schedule"]');
-  await page.selectOption('.sheet [data-act="pick-schedule"]', 'seasonal');
-  await page.waitForSelector('.sheet .monthgrid');
+  await page.selectOption('.sheet [data-act="pick-schedule"]', 'months');
+  await page.waitForSelector('.sheet [data-sched="months"] .monthgrid');
   for (const month of ['month:4', 'month:10']) {
-    await page.click(`.sheet .monthgrid input[name="${month}"]`);
+    await page.click(`.sheet input[name="${month}"]`);
   }
   await page.waitForTimeout(150);
   await shot(page, `schedule${suffix}.png`);
+
+  // And the two newer kinds, on the same open form: the clock change, where
+  // both can be ticked, and a date that either comes back every year or does
+  // not come back at all.
+  await page.selectOption('.sheet [data-act="pick-schedule"]', 'clocks');
+  await page.waitForSelector('.sheet [data-sched="clocks"] .monthgrid');
+  for (const which of ['clock:spring', 'clock:fall']) {
+    await page.click(`.sheet input[name="${which}"]`);
+  }
+  await page.waitForTimeout(150);
+  await shot(page, `clocks${suffix}.png`);
+
+  await page.selectOption('.sheet [data-act="pick-schedule"]', 'date');
+  await page.waitForSelector('.sheet input[name="onDate"]');
+  await page.fill('.sheet input[name="onDate"]', '2027-04-15');
+  await page.waitForTimeout(150);
+  await shot(page, `ondate${suffix}.png`);
+
   await page.click('.sheet [data-act="close"]');
   await page.waitForTimeout(200);
 

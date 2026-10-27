@@ -181,6 +181,96 @@ def build_tasks():
         "intervalCount": 3, "intervalUnit": "months", "snoozedUntil": "2026-12-01",
     })
 
+    # Clock changes. The anchors straddle both changeovers in both
+    # directions, because the whole question is which one comes next: a
+    # routine done in October must land on November and one done in
+    # November on March. Never done is in here too, and so is the day
+    # itself, where "the next one strictly after" and "today counts"
+    # disagree by a year.
+    for last in [
+        "2026-03-07",
+        "2026-03-08",
+        "2026-03-09",
+        "2026-10-31",
+        "2026-11-01",
+        "2026-11-02",
+        "2026-12-25",
+        "2027-01-01",
+        None,
+        "",
+    ]:
+        for clocks in [["spring"], ["fall"], ["spring", "fall"], [], ["winter"]]:
+            tasks.append(
+                {
+                    "id": f"c{len(tasks)}",
+                    "name": "x",
+                    "schedule": "clocks",
+                    "lastDone": last,
+                    "clocks": clocks,
+                    # Carried alongside, and must not be used.
+                    "intervalCount": 3,
+                    "intervalUnit": "months",
+                    "months": [4],
+                }
+            )
+
+    # A specific date, yearly and once. 29 February is in here because the
+    # year arithmetic does not clamp, and a date in the past is in here
+    # because a one-off never done is simply overdue.
+    for on_date in ["2026-11-01", "2024-02-29", "2026-10-07", "2025-01-01", None, "", "nope"]:
+        for last in ["2026-09-01", "2026-10-07", "2026-11-02", None, ""]:
+            for every_year in (True, False):
+                tasks.append(
+                    {
+                        "id": f"d{len(tasks)}",
+                        "name": "x",
+                        "schedule": "date",
+                        "lastDone": last,
+                        "onDate": on_date,
+                        "onDateYearly": every_year,
+                        "intervalCount": 3,
+                        "intervalUnit": "months",
+                    }
+                )
+    # And the same without the flag at all, which a hand-edited file can be
+    # and which has to read as yearly on both sides.
+    tasks.append({
+        "id": "dnoflag", "name": "x", "schedule": "date",
+        "lastDone": "2026-09-01", "onDate": "2026-11-01",
+    })
+
+    # Never done, on every kind, which is the whole of what changed: three
+    # of the four know their own dates and only the interval has to fall
+    # back on today.
+    for kind, extra in [
+        ("interval", {"intervalCount": 3, "intervalUnit": "months"}),
+        ("months", {"months": [10]}),
+        ("months", {"months": [1]}),
+        ("months", {"months": []}),
+        ("clocks", {"clocks": ["fall"]}),
+        ("clocks", {"clocks": []}),
+        ("date", {"onDate": "2026-10-07", "onDateYearly": True}),
+        ("date", {"onDate": "2026-10-07", "onDateYearly": False}),
+        ("date", {"onDate": None, "onDateYearly": True}),
+    ]:
+        for last in (None, ""):
+            tasks.append(dict(
+                {"id": f"n{len(tasks)}", "name": "x", "schedule": kind, "lastDone": last},
+                **extra,
+            ))
+
+    # An explicit kind that disagrees with the data beside it, since the
+    # stored kind is what decides and inference must not creep back in.
+    tasks.append({
+        "id": "kint", "name": "x", "schedule": "interval", "lastDone": "2026-09-01",
+        "intervalCount": 2, "intervalUnit": "months", "months": [1, 7],
+        "clocks": ["spring"], "onDate": "2026-12-25",
+    })
+    tasks.append({
+        "id": "kbad", "name": "x", "schedule": "nonsense", "lastDone": "2026-09-01",
+        "intervalCount": 2, "intervalUnit": "months", "months": [1, 7],
+    })
+
     # The same routines again, paused. Pausing is a short-circuit in both
     # implementations, and a short-circuit is exactly the kind of thing that
     # gets added to one and forgotten in the other. It also pins the order:
@@ -317,7 +407,14 @@ def main() -> int:
             "taskState",
             got,
             want,
-            f"lastDone={t['lastDone']!r} every {t['intervalCount']} {t['intervalUnit']}"
+            # Enough of the routine to find it again, whichever kind it is.
+            " ".join(
+                f"{k}={t[k]!r}"
+                for k in ("id", "schedule", "lastDone", "intervalCount",
+                          "intervalUnit", "months", "clocks", "onDate",
+                          "onDateYearly", "snoozedUntil", "paused")
+                if k in t
+            )
             + (f" months={t['months']}" if t.get("months") else "")
             + (f" asleep until {t['snoozedUntil']!r}" if t.get("snoozedUntil") else ""),
         )

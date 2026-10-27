@@ -1413,20 +1413,31 @@ class ElmerPanel extends HTMLElement {
 
     const count = Math.max(1, parseInt(f.intervalCount, 10) || 1);
 
-    // Which schedule is showing decides which one is saved. Months are read
-    // off the chips only when the seasonal half is the one on screen, so an
-    // interval routine that was seasonal earlier in the same sitting does not
-    // keep the months that are still ticked behind the hidden block.
-    const kind = this.shadowRoot.querySelector('[data-act="pick-schedule"]');
-    const months = (kind && kind.value === 'seasonal')
-      ? Object.entries(f)
-        .filter(([key, value]) => key.startsWith('month:') && value)
-        .map(([key]) => parseInt(key.slice(6), 10))
-        .filter((m) => m >= 1 && m <= 12)
-        .sort((a, b) => a - b)
-      : [];
-    if (kind && kind.value === 'seasonal' && !months.length) {
-      return this._flash('Pick at least one month, or switch back to an interval.', 'error');
+    // The menu says which kind is live; all four are saved whatever it says.
+    // That is the point of storing the kind: the months stay ticked behind a
+    // hidden block and are still there if you switch back. It used to read
+    // them only while they were on screen, because with no stored kind the
+    // presence of months was itself the answer.
+    const picker = this.shadowRoot.querySelector('[data-act="pick-schedule"]');
+    const kind = (picker && picker.value) || 'interval';
+    const months = Object.entries(f)
+      .filter(([key, value]) => key.startsWith('month:') && value)
+      .map(([key]) => parseInt(key.slice(6), 10))
+      .filter((m) => m >= 1 && m <= 12)
+      .sort((a, b) => a - b);
+    const clocks = ['spring', 'fall'].filter((c) => f[`clock:${c}`]);
+
+    // Each kind needs the thing it is made of. Saving without it would store
+    // a routine with a schedule chosen and no way to work out a date, which
+    // reads as "no schedule" — true, but not what anybody meant to do.
+    if (kind === 'months' && !months.length) {
+      return this._flash('Pick at least one month, or choose another schedule.', 'error');
+    }
+    if (kind === 'clocks' && !clocks.length) {
+      return this._flash('Pick spring, fall, or both.', 'error');
+    }
+    if (kind === 'date' && !f.onDate) {
+      return this._flash('Pick a date, or choose another schedule.', 'error');
     }
 
     const partsUsed = [];
@@ -1442,10 +1453,16 @@ class ElmerPanel extends HTMLElement {
       equipmentId: f.equipmentId || null,
       intervalCount: count,
       intervalUnit: f.intervalUnit || 'months',
-      // Always sent, empty included: a put patches rather than replaces, so
-      // switching a routine back to an interval has to say so explicitly or
-      // the months it used to have would survive and keep winning.
+      // All four kinds every time. A put patches rather than replaces, so a
+      // field left out would keep whatever it had — which is wanted for the
+      // kinds that are merely not showing, and would be wrong for the one
+      // being edited. Sending the lot makes the record say what the form
+      // says, and `schedule` says which of the four is in force.
+      schedule: kind,
       months,
+      clocks,
+      onDate: f.onDate || null,
+      onDateYearly: f.onDateYearly !== '0',
       lastDone: f.lastDone || null,
       partsUsed,
       // Nothing about pausing here on purpose. A put patches by id rather

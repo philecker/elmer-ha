@@ -136,18 +136,64 @@ export function monthsText(months) {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
 }
 
+/** Mirrors schedule_kind in schedule.py; see the comment there. */
+export function scheduleKind(task) {
+  const kind = task && task.schedule;
+  if (['interval', 'months', 'clocks', 'date'].includes(kind)) return kind;
+  return task && task.months && task.months.length ? 'months' : 'interval';
+}
+
+export const CLOCK_LABELS = [
+  ['spring', 'Spring forward'],
+  ['fall', 'Fall back'],
+];
+
+/** "the spring clock change", "both clock changes". */
+export function clocksText(clocks) {
+  const list = (clocks || []).filter((c) => c === 'spring' || c === 'fall');
+  if (!list.length) return '';
+  if (list.length > 1) return 'both clock changes';
+  return list[0] === 'spring' ? 'the spring clock change' : 'the fall clock change';
+}
+
+/** "25 December" — a day and a month, with no year, since it is every year. */
+export function dayAndMonth(iso) {
+  const parts = String(iso || '').split('-');
+  if (parts.length < 3) return '';
+  const [, m, d] = parts.map(Number);
+  if (!m || !d) return '';
+  return `${d} ${MONTHS_LONG[m - 1] || ''}`.trim();
+}
+
 /**
- * What a routine's schedule is called, for the line that reads "every ...".
+ * What a routine's schedule is called, as a whole phrase.
  *
- * One function for both kinds, so a caller never has to know which it is
- * holding — which is the thing that would otherwise get missed at one of the
- * four places this is printed.
+ * It used to return the tail of "every ..." and leave the word to the caller,
+ * which worked while both kinds were things that repeat. A one-off does not
+ * repeat, so "every" belongs to whichever kind is speaking rather than to the
+ * four places this gets printed.
  */
 export function scheduleText(task) {
-  const months = (task && task.months) || [];
-  return months.length
-    ? monthsText(months)
-    : intervalText(task && task.intervalCount, task && task.intervalUnit);
+  const t = task || {};
+  switch (scheduleKind(t)) {
+    case 'months': {
+      const text = monthsText(t.months);
+      return text ? `every ${text}` : 'no schedule';
+    }
+    case 'clocks': {
+      const text = clocksText(t.clocks);
+      return text ? `at ${text}` : 'no schedule';
+    }
+    case 'date': {
+      const when = dayAndMonth(t.onDate);
+      if (!when) return 'no schedule';
+      // Absent reads as yearly, the same way the scheduler takes it.
+      const yearly = t.onDateYearly === undefined ? true : !!t.onDateYearly;
+      return yearly ? `every ${when}` : `once, on ${when}`;
+    }
+    default:
+      return `every ${intervalText(t.intervalCount, t.intervalUnit)}`;
+  }
 }
 
 export const CATEGORIES = [

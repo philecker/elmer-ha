@@ -33,6 +33,7 @@ STATUS_ICON = {
     "overdue": "mdi:alert-circle",
     "due": "mdi:clock-alert-outline",
     "new": "mdi:help-circle-outline",
+    "done": "mdi:check-all",
     "ok": "mdi:check-circle-outline",
     "paused": "mdi:pause-circle-outline",
 }

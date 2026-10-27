@@ -6,6 +6,47 @@ HACS does not read this file — the changelog it shows when an update is
 available is the body of the GitHub release. This is here for anyone reading
 the repository, and the release bodies are written from it.
 
+## 1.8.0
+
+### Changed
+
+- The two buttons under Data export now read **Export Data** and **Import
+  Data**, rather than "Export a copy" and "Import a file".
+
+### Added
+
+- **Two more kinds of schedule.** A routine can now be anchored to a **clock
+  change** — spring, fall, or both, on the United States dates (forward on the
+  second Sunday in March, back on the first Sunday in November) — or to a
+  **specific date**, either every year or once only.
+
+  Once only is a job with an end. Mark it done and Elmer stops scheduling it,
+  keeps it in the history, and files it under Finished rather than leaving it
+  looking overdue forever.
+
+- **A routine you have never done now says when it is due.** It used to read
+  "not scheduled", because a date was only ever worked out from the last time
+  you did it. Three of the four kinds know their own dates and no longer need
+  one: a routine anchored to November is due in November whether or not
+  anybody has ever got to it.
+
+  An interval has nothing to count from, so a routine on one that has never
+  been done is now treated as due today. That is a change in behaviour, not
+  only in wording: these count towards the due tally, can go overdue, reach
+  the sidebar badge and the sensors, and their parts show up under what the
+  schedule needs.
+
+### Changed
+
+- Which kind of schedule a routine is on is now recorded on the routine rather
+  than worked out from what it happens to hold. It used to be inferred —
+  months on the record meant seasonal — which cannot survive four kinds, since
+  a routine can hold a date and an interval and a set of months at once. One
+  consequence worth having: switching between kinds no longer discards the
+  settings of the one you switched away from.
+- The "Never done" filter is now "No schedule", which is all it can mean now:
+  a routine whose schedule has nothing in it to work a date out from.
+
 ## 1.7.0
 
 ### Added

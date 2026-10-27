@@ -838,6 +838,7 @@ export const CSS = `
 .pill[data-tone="due"] { --tone: var(--brass); }
 .pill[data-tone="ok"] { --tone: var(--accent); }
 .pill[data-tone="new"] { --tone: var(--ink-3); }
+.pill[data-tone="done"] { --tone: var(--ink-3); }
 .pill[data-tone="all"] { --tone: var(--ink-2); }
 
 /* Nothing in it, nothing to shout about: a zero drops back to neutral rather
@@ -1009,6 +1010,8 @@ export const CSS = `
 .meter[data-status="due"] .fill { stroke: var(--brass); }
 .meter[data-status="overdue"] .fill { stroke: var(--rust); }
 .meter[data-status="new"] .fill { stroke: var(--ink-3); }
+/* A full ring in the quiet grey: finished, rather than nothing known. */
+.meter[data-status="done"] .fill { stroke: var(--ink-3); }
 .meter .pip {
   position: absolute;
   inset: 0;
@@ -1328,6 +1331,11 @@ a.btn { text-decoration: none; }
   grid-template-columns: repeat(auto-fit, minmax(calc(62px * var(--ui-scale)), 1fr));
   gap: 6px;
 }
+/* Two chips rather than twelve, carrying words rather than three letters.
+   auto-fit would give them a twelfth of the row each and clip the labels, so
+   this grid is told there are two of them. */
+.monthgrid:has(.chip.wide) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.chip.wide span { padding: 0 6px; }
 .chip {
   position: relative;
   display: flex;
