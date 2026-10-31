@@ -167,15 +167,10 @@ function taskState(task, soon = 14) {
   }
   const now = today();
   const daysLeft = daysBetween(now, due);
-  let cycle = null;
-  let progress = 0;
-  if (task.lastDone) {
-    cycle = Math.max(1, daysBetween(task.lastDone, due));
-    const elapsed = daysBetween(task.lastDone, now);
-    progress = Math.max(0, Math.min(1, elapsed / cycle));
-  } else {
-    progress = daysLeft <= 0 ? 1 : 0;
-  }
+  // Mirrors schedule.py: how near the day is, against the warn-ahead window.
+  const span = Math.max(1, soon);
+  const progress = Math.max(0, Math.min(1, (span - daysLeft) / span));
+  const cycle = task.lastDone ? Math.max(1, daysBetween(task.lastDone, due)) : null;
   let status = 'ok';
   if (daysLeft < 0) status = 'overdue';
   else if (daysLeft <= soon) status = 'due';
@@ -248,6 +243,12 @@ const SEED = {
       intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
     { id: 't10', equipmentId: 'eq5', name: 'Sharpen Blades', lastDone: ago(95),
       intervalCount: 3, intervalUnit: 'months', partsUsed: [] },
+    // Attached to no equipment, which is allowed and has its own layout:
+    // one line of facts where every other tile has two. Also never done and
+    // anchored to months, so its ring has to come from the schedule.
+    { id: 't12', equipmentId: null, name: 'Rotate Mattress', lastDone: null,
+      schedule: 'months', months: [5, 11],
+      intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
     // A job with an end: done once and finished, kept for the history
     // rather than scheduled again.
     { id: 't11', equipmentId: 'eq2', name: 'Register Warranty', lastDone: ago(300),
@@ -502,7 +503,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.8.0' } };
+panel.panel = { config: { version: '1.8.1' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

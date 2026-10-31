@@ -212,17 +212,16 @@ function taskState(task, dueSoonDays = 14) {
   }
   const now = today();
   const daysLeft = daysBetween(now, due);
-  let cycle = null;
-  let progress = 0;
-  if (task.lastDone) {
-    cycle = Math.max(1, daysBetween(task.lastDone, due));
-    const elapsed = daysBetween(task.lastDone, now);
-    progress = Math.max(0, Math.min(1, elapsed / cycle));
-  } else {
-    // No last-done means no cycle to be part-way through; the ring stays
-    // empty until the day arrives rather than inventing a start date.
-    progress = daysLeft <= 0 ? 1 : 0;
-  }
+  // How near the day is, against the warn-ahead window. It used to be the
+  // proportion of the service interval elapsed, which made a six-monthly
+  // routine two weeks out read fuller than a monthly one five days out — the
+  // ring disagreeing with the number inside it and with the order of the
+  // list. It also wants no last-done, so it reads the same whoever has
+  // touched the routine.
+  const span = Math.max(1, dueSoonDays);
+  const progress = Math.max(0, Math.min(1, (span - daysLeft) / span));
+  // The service interval, still true and still only knowable once done.
+  const cycle = task.lastDone ? Math.max(1, daysBetween(task.lastDone, due)) : null;
   let status = 'ok';
   if (daysLeft < 0) status = 'overdue';
   else if (daysLeft <= dueSoonDays) status = 'due';

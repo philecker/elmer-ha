@@ -6,6 +6,39 @@ HACS does not read this file — the changelog it shows when an update is
 available is the body of the GitHub release. This is here for anyone reading
 the repository, and the release bodies are written from it.
 
+## 1.8.1
+
+### Changed
+
+- **The ring now shows how near the day is, not how worn the routine is.** It
+  used to fill with the proportion of the service interval that had elapsed,
+  which is a different quantity wearing the same clothes: fourteen days is a
+  bigger slice of a month than of six months, so a six-monthly routine a
+  fortnight away drew a fuller ring than a monthly one five days away. The
+  ring has a count of days printed in the middle of it and sits in a list
+  ordered by those days, so of the two quantities that is the one it has to
+  agree with.
+
+  It is now drawn against the warn-ahead window: empty as a routine enters Due
+  soon, full on the day, full while overdue. Nothing can be fuller than
+  something with fewer days left, whatever the two intervals are.
+
+  One consequence to expect: everything under Up to date now shows an empty
+  ring, because none of it is inside the warn-ahead window yet. Widening
+  warn-ahead under Settings starts the rings filling earlier.
+
+### Fixed
+
+- **The ring on a routine nobody has done yet** was drawn empty, so a routine
+  due tomorrow sat in Due soon next to full rings looking like the least
+  urgent thing on the screen. The new ring wants no history, so it reads the
+  same whether or not anybody has got to the routine. Introduced in 1.8.0.
+
+- **Tiles with nothing in the equipment field** put their "in 1 day" where
+  their neighbours keep the equipment name, a line below everything else on
+  the row. The second line is now reserved whether or not there is anything to
+  put in it. Also introduced in 1.8.0.
+
 ## 1.8.0
 
 ### Changed

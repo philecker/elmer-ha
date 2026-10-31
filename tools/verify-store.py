@@ -193,6 +193,76 @@ async def main() -> int:
           [type(fresh["cardsWide"]).__name__, type(fresh["cardsNarrow"]).__name__],
           ["int", "int"])
 
+    # --- the ring agrees with the number inside it -------------------------
+    # The ring is how near the day is, measured against the warn-ahead
+    # window. It used to be the proportion of the service interval elapsed,
+    # which is a different quantity wearing the same clothes: fourteen days
+    # is a bigger slice of a month than of six months, so a six-monthly
+    # routine a fortnight out drew a fuller ring than a monthly one five days
+    # out. The ring sits inside a list ordered by days left and has a count
+    # of days printed in the middle of it, so of the two quantities it is
+    # this one that has to be true.
+    fixed = "2026-10-31"
+    real_today = schedule.today
+    schedule.today = lambda: fixed
+    try:
+        def ring(days_ahead, soon=14, **task):
+            due = schedule.add_interval(fixed, days_ahead, "days")
+            # Built backwards from the date wanted, so the interval is only
+            # ever the thing being varied.
+            base = {"lastDone": schedule.add_interval(due, -90, "days"),
+                    "intervalCount": 90, "intervalUnit": "days"}
+            return schedule.task_state(dict(base, **task), soon)
+
+        # The case that was reported, both intervals, same days left.
+        monthly = schedule.task_state(
+            {"lastDone": "2026-10-05", "intervalCount": 1, "intervalUnit": "months"}, 14)
+        six = schedule.task_state(
+            {"lastDone": "2026-05-14", "intervalCount": 6, "intervalUnit": "months"}, 14)
+        check("the reported pair are 5 and 14 days out",
+              [monthly["daysLeft"], six["daysLeft"]], [5, 14])
+        check("and the nearer one now draws the fuller ring",
+              monthly["progress"] > six["progress"], True)
+
+        # The general property, which is the whole point: across a spread of
+        # intervals and distances, a ring never contradicts the number.
+        spread = []
+        for days in (-30, -1, 0, 1, 5, 9, 14, 15, 40, 400):
+            for every, unit in ((1, "months"), (6, "months"), (2, "weeks"), (3, "years")):
+                st = ring(days, intervalCount=every, intervalUnit=unit)
+                spread.append((st["daysLeft"], st["progress"]))
+        bad = [
+            (a, b) for a in spread for b in spread
+            if a[0] < b[0] and a[1] < b[1]
+        ]
+        check("nearer always means fuller, whatever the interval", bad, [])
+
+        # The ends and the edges of the window.
+        check("full on the day", ring(0)["progress"], 1.0)
+        check("and full while overdue", ring(-30)["progress"], 1.0)
+        check("empty as it enters the window", ring(14)["progress"], 0.0)
+        check("and empty beyond it", ring(400)["progress"], 0.0)
+        check("halfway through the run-up, halfway round",
+              round(ring(7)["progress"], 3), 0.5)
+
+        # And it wants no history, so a routine nobody has done reads like
+        # one that has been done for years. This is what drew an empty ring
+        # on something due tomorrow.
+        never = schedule.task_state({"schedule": "clocks", "clocks": ["fall"]}, 14)
+        check("a never-done routine due tomorrow is nearly full",
+              [never["daysLeft"], round(never["progress"], 3)], [1, round(13 / 14, 3)])
+        check("though it still reports no cycle, having never been done",
+              never["cycle"], None)
+        # The warn-ahead setting is the scale the ring is drawn against, so
+        # widening it starts the ring earlier. At forty days out a fortnight
+        # of warning has not begun and two months of it is a third gone.
+        check("forty days out is nothing to a fortnight of warning",
+              ring(40)["progress"], 0.0)
+        check("and a third of the way round with two months of it",
+              round(ring(40, soon=60)["progress"], 2), 0.33)
+    finally:
+        schedule.today = real_today
+
     # --- the four schedule kinds -------------------------------------------
     # Which kind is live is stored now rather than inferred, because at four
     # kinds a routine can hold the makings of all of them and inference would

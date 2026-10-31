@@ -609,9 +609,13 @@ export const CSS = `
   color: var(--ink);
 }
 /* Pushed to the bottom so tiles of different name lengths still line their
-   facts up with each other. */
+   facts up with each other — and held at two lines whether or not there is a
+   second one to put there. A routine with no equipment has only the one, and
+   bottom-alignment alone put that line where its neighbours keep their
+   location, leaving the urgency words out of step along the row. */
 .tile .meta {
   margin-top: auto;
+  min-height: calc(2 * 1.45em);
   font-size: calc(11.5px * var(--ui-scale));
   font-weight: 500;
   line-height: 1.45;

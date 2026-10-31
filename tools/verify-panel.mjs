@@ -3121,6 +3121,95 @@ async function main() {
     target.w >= 44 && target.h >= 44, `${target.w}×${target.h}`);
   check('and the search box does not run under it', target.overflow, false);
 
+  // --- the tiles in a row line up with each other -------------------------
+  // Measured on screen, because this was a layout fault rather than a data
+  // one: a routine with no equipment has one line of facts where its
+  // neighbours have two, and bottom-aligning the block alone put that line
+  // where the others keep their location. The urgency words then sat at
+  // different heights along the row.
+  //
+  // In a context of its own, on a desktop — where it was reported, and where
+  // a location fits on one line. Narrower than that most locations wrap to
+  // two, making a three-line block that sits higher again for a reason of
+  // its own. The page the rest of this section is using is left alone.
+  {
+    const wide = await open({ narrow: false, viewport: DESKTOP });
+    await wide.page.waitForTimeout(160);
+    await wide.page.click(el('.tab[data-value="routines"]'));
+    await wide.page.waitForTimeout(140);
+    await wide.page.click(el('.viewseg button[data-value="cards"]'));
+    await wide.page.waitForTimeout(240);
+
+    const bare = await wide.page.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const tile = root.querySelector('.tile[data-id="t12"]');
+      if (!tile) return null;
+      const meta = tile.querySelector('.meta');
+      const lh = parseFloat(getComputedStyle(meta).lineHeight) || 1;
+      const mine = Math.round(tile.getBoundingClientRect().top);
+      const lines = (el2) => Math.round(el2.getBoundingClientRect().height / lh);
+      const sibling = [...root.querySelectorAll('.tile')].find((t) => t !== tile
+        && Math.round(t.getBoundingClientRect().top) === mine
+        && t.querySelector('.meta').innerHTML.includes('<br>')
+        && lines(t.querySelector('.meta')) === 2);
+      const topIn = (t) => Math.round(t.querySelector('.meta b').getBoundingClientRect().top
+        - t.getBoundingClientRect().top);
+      return {
+        lines: lines(meta),
+        hasBreak: meta.innerHTML.includes('<br>'),
+        mineTop: topIn(tile),
+        siblingTop: sibling ? topIn(sibling) : null,
+      };
+    });
+    ok('the sample has a routine attached to no equipment', bare !== null, 'no t12 tile');
+    check('whose facts really are one line', bare.hasBreak, false);
+    check('but which still reserves the second', bare.lines, 2);
+    ok('with a neighbour on the same row to compare against',
+      bare.siblingTop !== null, 'none found');
+    check('so its urgency line stands level with that neighbour',
+      bare.mineTop, bare.siblingTop);
+
+    // The rings down the page never argue with the numbers beside them. The
+    // ring is drawn from the state rather than measured off the pixels, so
+    // this reads the arc itself: whatever the renderer did with the number
+    // is what a person actually sees.
+    const arcs = await wide.page.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const snap = window.__snapshot();
+      return [...root.querySelectorAll('.tile')].map((t) => {
+        const st = snap.computed.states[t.dataset.id] || {};
+        const fill = t.querySelector('.meter .fill');
+        const total = Number(fill.getAttribute('stroke-dasharray'));
+        return {
+          id: t.dataset.id,
+          days: st.daysLeft,
+          status: st.status,
+          drawn: 1 - Number(fill.getAttribute('stroke-dashoffset')) / total,
+        };
+      });
+    });
+    // Paused, snoozed and finished routines are left out: none of them is
+    // counting down to anything, and their rings say so rather than lying
+    // quietly in the order.
+    const counting = arcs.filter((a) => a.days !== null && a.days !== undefined);
+    ok('there are rings to compare', counting.length >= 4, JSON.stringify(arcs));
+    const argues = [];
+    for (const a of counting) {
+      for (const b of counting) {
+        // A hair of tolerance, since both are rounded into an attribute.
+        if (a.days < b.days && a.drawn < b.drawn - 0.001) argues.push([a, b]);
+      }
+    }
+    check('no ring is fuller than one with fewer days left', argues, []);
+
+    const battery = await wide.page.evaluate(() => {
+      const snap = window.__snapshot();
+      return { lastDone: snap.tasks.find((x) => x.id === 't8').lastDone };
+    });
+    check('and one of them has never been done at all', battery.lastDone, null);
+    await wide.ctx.close();
+  }
+
   // --- cards per row ------------------------------------------------------
   // How many columns the grid actually draws, counted off the laid-out tiles
   // rather than read back from the setting: a stored number that never

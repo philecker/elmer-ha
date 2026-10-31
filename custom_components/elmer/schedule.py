@@ -365,16 +365,28 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
         }
     now = today()
     days_left = days_between(now, due)
-    if task.get("lastDone"):
-        cycle = max(1, days_between(task["lastDone"], due))
-        elapsed = days_between(task["lastDone"], now)
-        progress = max(0.0, min(1.0, elapsed / cycle))
-    else:
-        # Never done, so there is no cycle to be part-way through. The ring
-        # stays empty until the day arrives rather than inventing a start
-        # date to measure from.
-        cycle = None
-        progress = 1.0 if days_left <= 0 else 0.0
+
+    # How near the day is, measured against the warn-ahead window: empty
+    # until a routine enters that window, full on the day, and full while
+    # overdue.
+    #
+    # It used to be the proportion of the service interval that had elapsed,
+    # which sounds like the same thing and is not. Fourteen days is a bigger
+    # slice of a month than of six months, so a six-monthly routine two weeks
+    # out drew a fuller ring than a monthly one five days out — the ring
+    # disagreeing with the number inside it and with the order of the list it
+    # was sitting in. Proportion-elapsed is a real quantity and the ring can
+    # only carry one; the one that has to agree with everything around it is
+    # how soon.
+    #
+    # It also wants no last-done, which is what the whole ring reads the same
+    # whoever has touched the routine.
+    span = max(1, due_soon_days)
+    progress = max(0.0, min(1.0, (span - days_left) / span))
+
+    # The service interval, still reported because it is a true thing about
+    # the routine, and still only knowable once it has been done at all.
+    cycle = max(1, days_between(task["lastDone"], due)) if task.get("lastDone") else None
     if days_left < 0:
         status = "overdue"
     elif days_left <= due_soon_days:
