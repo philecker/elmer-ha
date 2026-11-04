@@ -6,6 +6,17 @@ HACS does not read this file — the changelog it shows when an update is
 available is the body of the GitHub release. This is here for anyone reading
 the repository, and the release bodies are written from it.
 
+## 1.9.1
+
+No changes. The v1.9.0 tag was cut on the previous commit, so the release of
+that name carried 1.8.1's code: HACS reported 1.9.0 because it shows the tag,
+while the panel reported 1.8.1 because it reads the manifest that was actually
+installed. The tag cannot simply be moved — HACS has 1.9.0 recorded as
+installed and will not offer it again — so the same code goes out under a
+number nobody has yet.
+
+Everything listed under 1.9.0 below arrives here.
+
 ## 1.9.0
 
 ### Added
