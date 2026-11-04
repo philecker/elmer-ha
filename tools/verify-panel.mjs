@@ -1835,12 +1835,25 @@ async function main() {
     return {
       years: years.map((l) => l.firstChild.textContent.trim()),
       counts: years.map((l) => Number(l.querySelector('.count').textContent)),
-      perYear: years.map((l) => l.nextElementSibling.querySelectorAll('.tl').length),
-      hasRail: getComputedStyle(ol, '::before').width !== 'auto',
+      // A year's entries now live in one .mon block per month, so counting
+      // them means walking the siblings up to the next year heading rather
+      // than looking at the one element after it.
+      perYear: years.map((l) => {
+        let n = 0;
+        for (let el2 = l.nextElementSibling; el2 && !el2.classList.contains('label');
+          el2 = el2.nextElementSibling) {
+          n += el2.querySelectorAll('.tl').length;
+        }
+        return n;
+      }),
+      // The rail belongs to the month block and turns off its heading.
+      hasRail: getComputedStyle(root.querySelector('.mon'), '::before').width !== 'auto',
+      hasTurn: getComputedStyle(root.querySelector('.sublabel'), '::before').width !== 'auto',
+      months: [...root.querySelectorAll('.sublabel')].map((l) => l.firstChild.textContent.trim()),
       dots: ol.querySelectorAll('.dot').length,
       rows: ol.querySelectorAll('.tl').length,
       when: first.querySelector('.when').textContent.trim(),
-      mono: getComputedStyle(first.querySelector('.when')).fontFamily,
+      tabular: getComputedStyle(first.querySelector('.when')).fontVariantNumeric,
       // The entries are a record to read, not a row of controls. Undo lives
       // on the entry's own sheet, a tap away, where there is room to say what
       // it will put back.
@@ -1854,14 +1867,136 @@ async function main() {
     [...timeline.years].sort().reverse());
   check('each year counts its own entries', timeline.counts, timeline.perYear);
   ok('there is a rail', timeline.hasRail);
+  ok('and it turns off the month heading', timeline.hasTurn);
   check('with a dot per entry', timeline.dots, timeline.rows);
-  ok('the date reads as a short day', /^[A-Z][a-z]{2} \d{1,2}$/.test(timeline.when), timeline.when);
-  ok('set in the mono face so the column lines up', /mono|Mono|Menlo/.test(timeline.mono),
-    timeline.mono);
+  // Months are named in full under the year, and the rows carry the day
+  // alone: the month is the heading above them, so printing it on every row
+  // was saying the same thing twelve times.
+  ok('the months are named', timeline.months.length > 0 && timeline.months.every(
+    (m) => /^[A-Z][a-z]+$/.test(m) || m === 'No date'), JSON.stringify(timeline.months));
+  ok('and a row carries the day alone', /^\d{1,2}$/.test(timeline.when), timeline.when);
+  ok('in figures that line up in a column', /tabular-nums/.test(timeline.tabular),
+    timeline.tabular);
   check('an entry carries no buttons of its own', timeline.actions, 0);
   check('the range picker offers three windows', timeline.ranges,
     ['3 months', '12 months', 'All time']);
   check('and opens on all of it', timeline.pressed, ['All time']);
+
+  // --- a month opens and closes on the same curve ------------------------
+  // The turn off the heading and the foot under the last entry are one
+  // shape used twice, mirrored. They were a long sweep and a small tick
+  // before, which read as two different ideas at the two ends of the same
+  // stroke. Measured off the rendered pseudo-elements rather than the
+  // stylesheet, since the point is what the two look like side by side.
+  const curves = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const turn = getComputedStyle(root.querySelector('.sublabel'), '::before');
+    const foot = getComputedStyle(root.querySelector('.mon'), '::after');
+    const px = (v) => Math.round(parseFloat(v) || 0);
+    return {
+      turn: { w: px(turn.width), h: px(turn.height), r: px(turn.borderTopLeftRadius) },
+      foot: { w: px(foot.width), h: px(foot.height), r: px(foot.borderBottomLeftRadius) },
+      // What is left between the end of the arm and the start of the word.
+      gap: px(getComputedStyle(root.querySelector('.mon')).getPropertyValue('--gap')),
+    };
+  });
+  // The bend is the thing that has to match: a long radius at the top and a
+  // tight one at the bottom made the two ends of one stroke read as two
+  // different ideas. How far each one reaches is not the same question —
+  // the turn has a heading out to its right to point at, and the foot has
+  // nothing, so it stops as soon as it has turned.
+  check('the turn and the foot bend on the same radius', curves.foot.r, curves.turn.r);
+  ok('and the bend is tight rather than a sweep',
+    curves.turn.r <= 12, `radius ${curves.turn.r}`);
+  ok('the turn reaches out towards the month', curves.turn.w > curves.foot.w,
+    `turn ${curves.turn.w}, foot ${curves.foot.w}`);
+  ok('and stops short of it rather than touching',
+    curves.gap >= 6, `gap ${curves.gap}`);
+  // The arm runs into the middle of the word, which is not the middle of the
+  // line the word sits on. The month is set in capitals and has no
+  // descenders, so its ink sits above the centre of its line box and an arm
+  // drawn at a plain 50% reads as low. Measured as a lift off that centre,
+  // since measuring the ink itself would mean counting pixels.
+  const arm = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    const lab = root.querySelector('.sublabel');
+    const r = lab.getBoundingClientRect();
+    const range = document.createRange();
+    range.selectNodeContents(lab.firstChild);
+    const line = range.getBoundingClientRect();
+    return {
+      armFromTop: parseFloat(getComputedStyle(lab, '::before').top),
+      lineMid: (line.top - r.top) + line.height / 2,
+      fontSize: parseFloat(getComputedStyle(lab).fontSize),
+    };
+  });
+  const lift = arm.lineMid - arm.armFromTop;
+  ok('the arm is lifted off the centre of the line box',
+    lift > 0, `${lift.toFixed(2)}px`);
+  ok('by about the amount the capitals sit high by, and no more',
+    lift / arm.fontSize > 0.05 && lift / arm.fontSize < 0.3,
+    `${(lift / arm.fontSize).toFixed(3)}em`);
+
+  // --- costs, and the switch that hides them -----------------------------
+  // The money has a column of its own now, and a month heading says what
+  // that month came to. Both are one setting, and turning it off has to take
+  // both — a total hanging over a list with no figures in it would be the
+  // worst of the three states.
+  const money = async () => page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return {
+      costs: [...root.querySelectorAll('.tl .cost')].map((c) => c.textContent.trim()),
+      totals: [...root.querySelectorAll('.sublabel .tot')].map((c) => c.textContent.trim()),
+      // Whatever is in the context line, the money must not be back in it.
+      subs: [...root.querySelectorAll('.tl .sub')].map((c) => c.textContent.trim()),
+    };
+  });
+  const withCosts = await money();
+  ok('a cost is printed for the entries that have one',
+    withCosts.costs.filter(Boolean).length > 0, JSON.stringify(withCosts.costs));
+  ok('and a month with more than one price says what it came to',
+    withCosts.totals.filter(Boolean).length > 0, JSON.stringify(withCosts.totals));
+  // A total over a single figure would print that figure twice.
+  const singles = await page.evaluate(() => {
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return [...root.querySelectorAll('.mon')].map((m) => ({
+      priced: [...m.querySelectorAll('.tl .cost')].filter((c) => c.textContent.trim()).length,
+      total: (m.querySelector('.sublabel .tot') || {}).textContent || '',
+    }));
+  });
+  check('and a month with only one says nothing',
+    singles.filter((m) => m.priced <= 1 && m.total.trim()), []);
+  ok('while one with several does', singles.some((m) => m.priced > 1 && m.total.trim()),
+    JSON.stringify(singles));
+  // A zero is what a warranty job gets typed in as; in a money column it
+  // reads as an error rather than as free.
+  ok('a cost of zero prints nothing at all',
+    !withCosts.costs.includes('0'), JSON.stringify(withCosts.costs));
+  ok('and the figure is out of the sentence it used to sit in',
+    withCosts.subs.every((t) => !/\d+\.\d{2}/.test(t)), JSON.stringify(withCosts.subs));
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  check('the setting offers yes or no',
+    await page.$$eval(el('select[data-act="set-history-cost"] option'), (n) => n.map((x) => x.value)),
+    ['1', '0']);
+  await page.selectOption(el('select[data-act="set-history-cost"]'), '0');
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="history"]'));
+  await page.waitForTimeout(200);
+  const noCosts = await money();
+  check('turning it off takes the costs', noCosts.costs, []);
+  check('and the monthly totals with them', noCosts.totals, []);
+  ok('while the entries themselves stay', (await page.$$(el('.tl'))).length > 0);
+
+  await page.click(el('.tab[data-value="settings"]'));
+  await page.waitForTimeout(140);
+  await page.selectOption(el('select[data-act="set-history-cost"]'), '1');
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="history"]'));
+  await page.waitForTimeout(200);
+  check('and turning it back on brings them back',
+    (await money()).costs.filter(Boolean).length, withCosts.costs.filter(Boolean).length);
 
   // Narrowing the window drops the older entries and says so in the count.
   const allCount = await page.$$eval(el('.timeline .tl'), (n) => n.length);
@@ -3146,10 +3281,14 @@ async function main() {
       if (!tile) return null;
       const meta = tile.querySelector('.meta');
       const lh = parseFloat(getComputedStyle(meta).lineHeight) || 1;
-      const mine = Math.round(tile.getBoundingClientRect().top);
       const lines = (el2) => Math.round(el2.getBoundingClientRect().height / lh);
+      // Matched by tile height rather than by grid row. Which tiles share a
+      // row depends on how the groups happen to divide — this one is last in
+      // its group and sits alone — while any tile of the same height has to
+      // put its first line of facts in the same place, row or no row.
+      const mineHeight = Math.round(tile.getBoundingClientRect().height);
       const sibling = [...root.querySelectorAll('.tile')].find((t) => t !== tile
-        && Math.round(t.getBoundingClientRect().top) === mine
+        && Math.round(t.getBoundingClientRect().height) === mineHeight
         && t.querySelector('.meta').innerHTML.includes('<br>')
         && lines(t.querySelector('.meta')) === 2);
       const topIn = (t) => Math.round(t.querySelector('.meta b').getBoundingClientRect().top
@@ -3164,9 +3303,9 @@ async function main() {
     ok('the sample has a routine attached to no equipment', bare !== null, 'no t12 tile');
     check('whose facts really are one line', bare.hasBreak, false);
     check('but which still reserves the second', bare.lines, 2);
-    ok('with a neighbour on the same row to compare against',
+    ok('with a tile of the same height to compare against',
       bare.siblingTop !== null, 'none found');
-    check('so its urgency line stands level with that neighbour',
+    check('so its urgency line stands at the same height',
       bare.mineTop, bare.siblingTop);
 
     // The rings down the page never argue with the numbers beside them. The
@@ -3668,17 +3807,25 @@ async function main() {
   // length of the list, and the document scrolls instead — carrying the header
   // and the tabs off the top of the screen. The height is therefore measured
   // from the window. Each case below is a shape Home Assistant can present.
-  for (const [label, css, tab, shouldScroll] of [
+  for (const [label, css, tab, shouldScroll, data] of [
     ['a parent with a height', '', 'routines', true],
     ['a parent with no height at all', 'html,body{height:auto!important}', 'routines', true],
     ['a toolbar above the panel', 'html,body{height:auto!important} body{padding-top:64px}', 'routines', true],
-    ['content too short to scroll', 'html,body{height:auto!important}', 'history', false],
+    // History used to be the short screen. It is not short any more — the
+    // entries wrap and every month carries a heading — so the case that
+    // proves a short tab does not scroll needs a tab that really is short,
+    // and the emptiest one there is will stay that way.
+    ['content too short to scroll', 'html,body{height:auto!important}', 'history', false, 'empty'],
     ['a parent shorter than the window', 'html,body{height:auto!important} elmer-panel{height:400px!important}', 'routines', true],
   ]) {
     // A window short enough that the routines list genuinely overflows it;
     // on a tall desktop it fits, and the case would prove nothing.
     const probe = await open({ narrow: false, viewport: { width: 1280, height: 680 } });
     if (css) await probe.page.addStyleTag({ content: css });
+    if (data) {
+      await probe.page.evaluate((d) => window.__setData(d), data);
+      await probe.page.waitForTimeout(200);
+    }
     await probe.page.click(`.tab[data-value="${tab}"]`);
     await probe.page.waitForTimeout(320);
     const fit = await probe.page.evaluate(() => {

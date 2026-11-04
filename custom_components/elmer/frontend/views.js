@@ -14,7 +14,7 @@ import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
   INTERVAL_UNITS, intervalText, scheduleText, monthsText, MONTHS_LONG,
-  scheduleKind, CLOCK_LABELS,
+  scheduleKind, CLOCK_LABELS, dayOfMonth, costText, monthSpend,
   safeHref, asLink, linkLabel, daysBetween, MONTHS,
   SORT_FIELDS, sortDirections, sortField, sortRecords,
 } from './util.js';
@@ -756,44 +756,72 @@ export function historyView(state) {
     </div></div>`;
   }
 
-  // By year, newest first. A log read top to bottom is a chronology, and the
-  // year is the only heading it needs — every other grouping cuts across time.
+  // By year and then by month, newest first. A log read top to bottom is a
+  // chronology, so the headings are the two divisions of time anybody thinks
+  // in — every other grouping would cut across it.
+  //
+  // kept is already sorted newest first, so inserting in order gives both
+  // maps their order and neither needs sorting again.
   const years = new Map();
   for (const l of kept) {
-    const y = String(l.doneOn || '').slice(0, 4) || '—';
-    if (!years.has(y)) years.set(y, []);
-    years.get(y).push(l);
+    const iso = String(l.doneOn || '');
+    const y = iso.slice(0, 4) || '—';
+    // Anything undated is gathered under one heading rather than being given
+    // a month it does not have.
+    const m = /^\d{4}-\d{2}/.test(iso) ? iso.slice(5, 7) : '—';
+    if (!years.has(y)) years.set(y, new Map());
+    const months = years.get(y);
+    if (!months.has(m)) months.set(m, []);
+    months.get(m).push(l);
   }
 
-  const sections = [...years.entries()].map(([year, entries]) => {
-    const items = entries.map((l) => {
-      const eq = state.equipment.find((e) => e.id === l.equipmentId);
-      const parts = (l.usedParts || [])
-        .map((u) => {
-          const sup = state.supplies.find((x) => x.id === u.supplyId);
-          return sup ? `${u.quantity} × ${sup.name}` : null;
-        })
-        .filter(Boolean);
-      const bits = [];
-      if (eq) bits.push(eq.name);
-      if (parts.length) bits.push(parts.join(', '));
-      // A cost of nothing is not worth a column. "0" is what a warranty job
-      // gets typed in as, and "· 0" in the middle of a line reads as an error.
-      if (l.cost && Number(String(l.cost).replace(/[^\d.-]/g, '')) !== 0) bits.push(l.cost);
-      if (l.notes) bits.push(l.notes);
+  const monthName = (m) => (m === '—' ? 'No date' : MONTHS_LONG[Number(m) - 1] || m);
+  const showCost = state.settings.showHistoryCost !== false;
 
-      return html`<li class="tl" data-act="log" data-id="${l.id}" role="button" tabindex="0">
-        <span class="dot" aria-hidden="true"></span>
-        <time class="when" datetime="${l.doneOn || ''}">${shortDay(l.doneOn)}</time>
-        <div class="body">
-          <div class="title">${l.taskName}</div>
-          ${raw(bits.length ? `<div class="sub"><span class="txt">${esc(bits.join(' · '))}</span></div>` : '')}
-        </div>
-      </li>`;
+  const sections = [...years.entries()].map(([year, months]) => {
+    const count = [...months.values()].reduce((n, list) => n + list.length, 0);
+
+    const blocks = [...months.entries()].map(([month, entries]) => {
+      const items = entries.map((l) => {
+        const eq = state.equipment.find((e) => e.id === l.equipmentId);
+        const parts = (l.usedParts || [])
+          .map((u) => {
+            const sup = state.supplies.find((x) => x.id === u.supplyId);
+            return sup ? `${u.quantity} × ${sup.name}` : null;
+          })
+          .filter(Boolean);
+        // Everything that is not the money, on one line that wraps. It used
+        // to be ellipsised on a single line with the cost buried in it, which
+        // put the interesting half of every entry behind a tap.
+        const bits = [];
+        if (eq) bits.push(eq.name);
+        if (parts.length) bits.push(parts.join(', '));
+        if (l.notes) bits.push(l.notes);
+
+        return html`<li class="tl" data-act="log" data-id="${l.id}" role="button" tabindex="0">
+          <span class="dot" aria-hidden="true"></span>
+          <time class="when" datetime="${l.doneOn || ''}">${dayOfMonth(l.doneOn)}</time>
+          <div class="body">
+            <div class="title">${l.taskName}</div>
+            ${raw(bits.length ? `<div class="sub">${esc(bits.join(' · '))}</div>` : '')}
+          </div>
+          ${raw(showCost ? `<span class="cost">${esc(costText(l.cost))}</span>` : '')}
+        </li>`;
+      });
+
+      // The month's spend, printed only when there is some. A column of
+      // nothing says less than no column at all.
+      const spend = showCost ? monthSpend(entries) : '';
+      return html`<div class="mon">
+        <div class="sublabel">${monthName(month)}<span class="count">${entries.length}</span>${raw(
+        spend ? `<span class="tot">${esc(spend)}</span>` : ''
+      )}</div>
+        <ol class="timeline">${items}</ol>
+      </div>`;
     });
 
-    return html`<div class="label">${year}<span class="count">${entries.length}</span></div>
-      <ol class="timeline">${items}</ol>`;
+    return html`<div class="label">${year}<span class="count" data-year>${count}</span></div>
+      ${blocks}`;
   });
 
   return html`<div class="scroll"><div class="pad">
@@ -1041,6 +1069,14 @@ export function settingsView(state) {
     options: [['0', 'No'], ['1', 'Yes, as a notification']],
     value: s.badgeOverdue ? '1' : '0',
     hint: "Keeps one notification listing what is overdue, which puts a count on Home Assistant's Notifications row. It is replaced as things change and cleared when nothing is overdue. Paused routines are never in it.",
+  }))}
+      ${raw(selectField({
+    id: 'histcost',
+    act: 'set-history-cost',
+    label: 'Show costs in history',
+    options: [['1', 'Yes'], ['0', 'No']],
+    value: s.showHistoryCost === false ? '0' : '1',
+    hint: 'What each service cost, in a column down the right of the history, with a total on each month. Turning it off hides both; nothing you have typed is lost.',
   }))}
       ${raw(selectField({
     id: 'locs',

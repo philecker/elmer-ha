@@ -253,6 +253,7 @@ const SETTING_CONTROLS = {
   },
   'set-badge': { key: () => 'badgeOverdue', value: (v) => v === '1' },
   'set-locations': { key: () => 'showLocations', value: (v) => v === '1' },
+  'set-history-cost': { key: () => 'showHistoryCost', value: (v) => v === '1' },
   'set-soon': { key: () => 'dueSoonDays', value: (v) => clampInt(v, 0, 365, 0) },
 };
 

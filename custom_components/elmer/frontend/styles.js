@@ -649,28 +649,73 @@ export const CSS = `
 
 /* A log read top to bottom is a chronology, so it is drawn as one: a rail
    down the left with a dot per entry, rather than a stack of cards. */
+/* ---------- the history timeline ----------
+
+   A month is a single stroke. The rail turns off the month heading — the arm
+   comes away from the label, the corner is at the top, and the line curves
+   down to become the rail for that month's entries, ending in a rounded foot
+   under the last of them.
+
+   Two things about that curve are deliberate and were arrived at the hard
+   way. It leaves the heading rather than arriving at it: drawn the other way
+   up, the arc sat under the word and read as an underline. And it stops
+   short of the word rather than touching it, because a line joined to text
+   reads as a bracket belonging to the text, while a line stopping short of
+   it reads as pointing at it.
+
+   --rail is where the vertical sits, --turn how far the curve travels
+   sideways, --gap how much air is left before the month. The indent is the
+   three added together, so changing any one of them keeps everything lined
+   up. */
+.mon {
+  --rail: 4px;
+  --turn: 26px;
+  --gap: 9px;
+  /* How tight the corner is, at both ends. A long radius made the turn a
+     sweep while the foot stayed a tick, and the two ends of one stroke read
+     as two different ideas. */
+  --bend: 9px;
+  --indent: calc(var(--rail) + var(--turn) + var(--gap));
+  position: relative;
+  padding-bottom: 8px;
+}
+.mon::before {
+  content: "";
+  position: absolute;
+  left: var(--rail);
+  top: calc(40px * var(--ui-scale));
+  bottom: 14px;
+  width: 1px;
+  background: var(--line);
+}
+/* The foot: the turn upside down, bending on the same --bend so the two
+   ends of a month cannot drift apart. It reaches only as far as it needs to
+   — there is nothing out to the right of it to reach for, where the turn at
+   the top has a heading to point at. */
+.mon::after {
+  content: "";
+  position: absolute;
+  left: var(--rail);
+  bottom: 8px;
+  width: var(--bend);
+  height: var(--bend);
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-bottom-left-radius: var(--bend);
+}
 .timeline {
   list-style: none;
   margin: 0 0 4px;
-  padding: 2px 0 2px 0;
+  padding: 2px 0;
   position: relative;
-}
-.timeline::before {
-  content: "";
-  position: absolute;
-  left: calc(4px * var(--ui-scale));
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  background: var(--line);
 }
 .tl {
   position: relative;
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  padding: 9px 2px 9px calc(22px * var(--ui-scale));
-  min-height: calc(46px * var(--ui-scale));
+  padding: 7px 2px 7px var(--indent, 22px);
+  min-height: calc(42px * var(--ui-scale));
   cursor: pointer;
   border-radius: var(--r-sm);
   -webkit-tap-highlight-color: transparent;
@@ -678,7 +723,7 @@ export const CSS = `
 .tl .dot {
   position: absolute;
   left: 0;
-  top: calc(14px * var(--ui-scale));
+  top: calc(13px * var(--ui-scale));
   width: calc(9px * var(--ui-scale));
   height: calc(9px * var(--ui-scale));
   border-radius: 50%;
@@ -686,14 +731,16 @@ export const CSS = `
   border: 1.5px solid var(--accent);
   box-sizing: border-box;
 }
+/* The day on its own. The month is the heading above it, so repeating it on
+   every row was saying the same thing twelve times. */
 .tl .when {
   flex: none;
-  width: calc(52px * var(--ui-scale));
-  padding-top: 1px;
-  font-family: var(--mono);
-  font-size: calc(11px * var(--ui-scale));
+  width: calc(20px * var(--ui-scale));
+  padding-top: 2px;
+  text-align: right;
+  font-size: calc(12px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
   color: var(--ink-3);
-  white-space: nowrap;
 }
 .tl .body { flex: 1 1 auto; min-width: 0; }
 .tl .title {
@@ -704,14 +751,25 @@ export const CSS = `
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Wraps. This line carries the equipment, the parts and whatever was typed
+   in the notes, and it used to be held to one line and ellipsised — which
+   put the interesting half of every entry behind a tap. */
 .tl .sub {
   margin-top: 2px;
-  font-size: calc(12px * var(--ui-scale));
+  font-size: calc(12.5px * var(--ui-scale));
+  line-height: 1.45;
   color: var(--ink-3);
-  display: flex;
-  min-width: 0;
 }
-.tl .sub .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Money, in a column of its own. It used to be a bare number in the middle
+   of that sentence, where it read as debris rather than as a figure. */
+.tl .cost {
+  flex: none;
+  padding-top: 1px;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
 
 /* The way back from a detail page. It sits where the list's search box sits,
    so moving between a list and one of its items does not shift the content
@@ -796,12 +854,31 @@ export const CSS = `
 
 /* The tally at the right-hand end of a group heading. .label::after is the
    hairline and takes the slack, so anything after it lands on the right. */
-.label .count {
+.label .count, .sublabel .count {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  min-width: 1.5em;
+  height: 1.5em;
+  padding: 0 0.42em;
+  border-radius: 999px;
+  background: var(--surface-3);
+  color: var(--ink-2);
   font-size: calc(10px * var(--ui-scale));
   font-weight: 700;
-  color: var(--ink-3);
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
   flex: none;
+}
+/* The year's count is the accent one: it is the heading that carries the
+   rule across the page, and the tint is what keeps it ahead of the month's
+   badge sitting under it. */
+.label .count[data-year] {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  color: var(--accent);
+  min-width: 1.6em;
+  height: 1.6em;
+  font-size: calc(10.5px * var(--ui-scale));
 }
 
 /* ---------- filter row ----------
@@ -897,6 +974,45 @@ export const CSS = `
 .label::after { content: ""; flex: 1; height: 1px; background: var(--line); order: 1; }
 .label .count, .label .seg { order: 2; }
 .label:first-child { margin-top: 4px; }
+
+/* The month, under the year, sitting at the end of the curve. Deliberately
+   not a .label: two headings with the same weight and the same rule across
+   the page read as a stutter rather than as a hierarchy. */
+.sublabel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 2px 2px 2px var(--indent, 22px);
+  min-height: calc(18px * var(--ui-scale));
+  font-size: calc(9.5px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+/* The turn itself, with its arm on the middle of the word.
+   Not the middle of the line box, which is what 50% alone would give: the
+   month is set in capitals and has no descenders, so its ink sits above the
+   centre of the line it occupies and a line drawn at 50% reads as low. The
+   lift is in em because it is a property of the face at any size. */
+.sublabel::before {
+  content: "";
+  position: absolute;
+  left: calc(-1 * (var(--turn) + var(--gap)));
+  top: calc(50% - 0.135em);
+  width: var(--turn);
+  height: calc(33px * var(--ui-scale));
+  border-left: 1px solid var(--line);
+  border-top: 1px solid var(--line);
+  border-top-left-radius: var(--bend);
+}
+.sublabel .tot {
+  margin-left: auto;
+  font-weight: 700;
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ---------- cards & rows ---------- */
 

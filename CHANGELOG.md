@@ -6,6 +6,34 @@ HACS does not read this file — the changelog it shows when an update is
 available is the body of the GitHub release. This is here for anyone reading
 the repository, and the release bodies are written from it.
 
+## 1.9.0
+
+### Added
+
+- **The history is divided by month as well as by year.** The year keeps its
+  rule across the page and its own tally; each month sits under it with a
+  count of its own, at the end of a curve that turns off the heading and
+  becomes the rail for that month's entries, closing on the same bend under
+  the last of them.
+
+- **What each service cost, in a column of its own**, with a total on any
+  month that had more than one priced entry. It used to be a bare number in
+  the middle of the context line, where it read as debris rather than as a
+  figure. A cost of zero — which is what a warranty job gets typed in as —
+  prints nothing, since a zero in a money column reads as an error.
+
+- **A setting to turn those costs off**, under Settings → Appearance. It takes
+  the column and the monthly totals together; nothing already typed is lost.
+
+### Changed
+
+- **An entry's context line wraps instead of being cut off.** Equipment, parts
+  and whatever was typed in the notes shared one ellipsised line with the
+  cost, which put the interesting half of every entry behind a tap.
+- Rows carry the day alone rather than the month and the day. The month is the
+  heading above them, so printing it on every row said the same thing twelve
+  times over.
+
 ## 1.8.1
 
 ### Changed

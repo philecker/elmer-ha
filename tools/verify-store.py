@@ -263,6 +263,19 @@ async def main() -> int:
     finally:
         schedule.today = real_today
 
+    # --- costs in the history -----------------------------------------
+    check("costs are shown until somebody says otherwise",
+          fresh["showHistoryCost"], True)
+    for given, want in ((True, True), (False, False), (1, True), (0, False),
+                        ("", False), ("no", True), (None, False)):
+        got = store_mod.normalize(
+            {"settings": {"showHistoryCost": given}})["settings"]["showHistoryCost"]
+        check(f"a cost setting of {given!r} lands on {want}", got, want)
+    check("and it is stored as a boolean either way",
+          [type(store_mod.normalize({"settings": {"showHistoryCost": v}})
+                ["settings"]["showHistoryCost"]).__name__ for v in (1, "", None)],
+          ["bool", "bool", "bool"])
+
     # --- the four schedule kinds -------------------------------------------
     # Which kind is live is stored now rather than inferred, because at four
     # kinds a routine can hold the makings of all of them and inference would

@@ -62,6 +62,11 @@ three know their own dates, so a routine you have never done still says when it
 is next due rather than reading as unscheduled — and an interval you have never
 done is simply due now.
 
+**A history that reads like one.** Every service you mark done is kept, grouped
+by year and then by month, with what it cost in a column of its own and a total
+on any month that had more than one. Costs can be turned off under Settings if
+you do not keep them.
+
 **Not now, without losing track.** Snooze a routine for a few days and it drops
 out of the overdue list and goes quiet, then comes back on its own. It still
 says what it really is underneath, so putting something off never hides how

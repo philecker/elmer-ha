@@ -48,6 +48,11 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Notifications row. That is a real change in what Elmer does rather than
     # how it looks, so nobody gets it without asking.
     "badgeOverdue": False,
+    # Whether the history prints what each service cost. On by default,
+    # because a log that records money and then hides it is a worse default
+    # than one that shows a column of nothing. Off is for anybody who does
+    # not type costs in, or does not want them on a screen in the kitchen.
+    "showHistoryCost": True,
     "viewRoutines": "list",
     "viewEquipment": "list",
     "viewParts": "list",
@@ -253,6 +258,7 @@ def normalize(raw: Any) -> dict[str, Any]:
     # could get, and 3 is as many as there are. The ranges are the panel's.
     settings["cardsWide"] = min(4, max(2, _int(settings.get("cardsWide"), 3)))
     settings["cardsNarrow"] = min(3, max(1, _int(settings.get("cardsNarrow"), 2)))
+    settings["showHistoryCost"] = bool(settings.get("showHistoryCost", True))
     if settings.get("contentWidth") not in ("default", "wide", "widest"):
         settings["contentWidth"] = "default"
     if settings.get("sortEquipment") not in ("name", "date"):

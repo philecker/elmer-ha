@@ -279,6 +279,9 @@ const SEED = {
     // Older entries, so the sample house has a history worth looking at: the
     // list groups by year and can be narrowed to the last few months, and
     // neither is exercised by a log that only reaches back a month.
+    { id: 'l6', taskId: 't6', equipmentId: 'eq3', taskName: 'Add Salt',
+      doneOn: ago(31), notes: '', cost: '21.98', recordedAt: Date.now() - 2.6e9,
+      previousLastDone: ago(60), usedParts: [{ supplyId: 's3', quantity: 2 }] },
     { id: 'l3', taskId: 't2', equipmentId: 'eq1', taskName: 'Replace Furnace Filter',
       doneOn: ago(130), notes: 'Old one was grey. Bought a four-pack this time.',
       cost: '18.99', recordedAt: Date.now() - 1.1e10, previousLastDone: ago(220),
@@ -290,7 +293,7 @@ const SEED = {
       doneOn: ago(470), notes: 'A lot of sediment. Worth doing every year.',
       cost: '', recordedAt: Date.now() - 4e10, previousLastDone: null, usedParts: [] },
   ],
-  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, contentWidth: 'default', sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true },
+  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, showHistoryCost: true, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, contentWidth: 'default', sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true },
 };
 
 /* ---------------------------------------------------------------- store -- */
@@ -503,7 +506,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.8.1' } };
+panel.panel = { config: { version: '1.9.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

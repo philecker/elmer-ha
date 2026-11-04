@@ -120,6 +120,61 @@ export function intervalText(count, unit) {
   return n === 1 ? one : `${n} ${one}s`;
 }
 
+/** The day on its own: the month is a heading above it now. */
+export function dayOfMonth(iso) {
+  const parts = String(iso || '').split('-');
+  if (parts.length < 3) return '';
+  const d = Number(parts[2]);
+  return d ? String(d) : '';
+}
+
+/**
+ * What a service cost, as it was typed.
+ *
+ * Printed verbatim rather than formatted, because the field is free text and
+ * whatever symbol somebody types is the one they want: Elmer has no idea
+ * which currency a house is in and inventing one would be worse than none.
+ *
+ * Nothing comes back for a zero. "0" is what a warranty job gets typed in
+ * as, and a zero in a money column reads as an error rather than as free.
+ */
+export function costText(cost) {
+  const raw = String(cost == null ? '' : cost).trim();
+  if (!raw) return '';
+  const n = Number(raw.replace(/[^\d.-]/g, ''));
+  if (Number.isFinite(n) && n === 0) return '';
+  return raw;
+}
+
+/**
+ * What a month came to, or nothing if none of it carried a price.
+ *
+ * Only the entries that parse to a number are counted — "about twenty" is a
+ * real thing to have typed and is not worth guessing at. The symbol is
+ * borrowed from the first entry that has one, so a column of dollars adds up
+ * to dollars without Elmer deciding what a dollar is.
+ */
+export function monthSpend(entries) {
+  let total = 0;
+  let priced = 0;
+  let symbol = '';
+  for (const l of entries || []) {
+    const raw = String((l && l.cost) || '').trim();
+    if (!raw) continue;
+    const n = Number(raw.replace(/[^\d.-]/g, ''));
+    if (!Number.isFinite(n) || n === 0) continue;
+    if (!symbol) {
+      const found = raw.match(/^\s*([^\d\s.-]+)/);
+      if (found) symbol = found[1];
+    }
+    total += n;
+    priced += 1;
+  }
+  // One priced entry needs no total: it would print the same figure twice,
+  // once in the heading and once in the row under it.
+  return priced > 1 ? `${symbol}${total.toFixed(2)}` : '';
+}
+
 export const MONTHS_LONG = [
   'January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December',
