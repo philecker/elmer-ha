@@ -134,6 +134,18 @@ function isYearly(task) {
   return task.onDateYearly === undefined ? true : !!task.onDateYearly;
 }
 
+/**
+ * The fixed point a routine counts from: the last time it was done, and
+ * failing that the day it was added. Never-done routines used to count from
+ * today, which moves, so their due date could never fall behind it.
+ */
+function anchorFor(task) {
+  if (!task) return today();
+  if (task.lastDone) return task.lastDone;
+  const added = parseDay(task.addedOn);
+  return added ? toDay(added) : today();
+}
+
 function scheduleKind(task) {
   const kind = task && task.schedule;
   if (SCHEDULE_KINDS.includes(kind)) return kind;
@@ -159,18 +171,20 @@ function nextDue(task) {
   const kind = scheduleKind(task);
   const last = task.lastDone;
 
+  const from = anchorFor(task);
+
   if (kind === 'interval') {
-    if (!last) return today();
+    // Never done: due since the day it was added, and ageing from there.
+    if (!last) return from;
     return addInterval(last, task.intervalCount, task.intervalUnit);
   }
 
-  const anchor = last || today();
   const inclusive = !last;
 
-  if (kind === 'months') return nextSeasonal(task.months, anchor, inclusive);
-  if (kind === 'clocks') return nextClock(task.clocks, anchor, inclusive);
+  if (kind === 'months') return nextSeasonal(task.months, from, inclusive);
+  if (kind === 'clocks') return nextClock(task.clocks, from, inclusive);
 
-  if (isYearly(task)) return nextAnniversary(task.onDate, anchor, inclusive);
+  if (isYearly(task)) return nextAnniversary(task.onDate, from, inclusive);
   if (last) return null;
   const once = parseDay(task.onDate);
   return once ? toDay(once) : null;
@@ -249,6 +263,7 @@ module.exports = {
   clockChange,
   nextClock,
   nextAnniversary,
+  anchorFor,
   scheduleKind,
   finished,
   nextDue,

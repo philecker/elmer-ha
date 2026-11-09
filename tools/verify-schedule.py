@@ -259,6 +259,49 @@ def build_tasks():
                 **extra,
             ))
 
+    # Never done, with the day it was added. That date is the anchor now,
+    # so it decides every answer: one well in the past has to let the
+    # routine fall behind, one in the future reads as not due yet, and a
+    # junk value has to fall back to today rather than throw. Crossed with
+    # all four kinds, because each one uses the anchor differently.
+    for added in [
+        "2026-07-04",
+        "2026-10-06",
+        "2026-10-07",
+        "2026-10-08",
+        "2027-03-01",
+        "2024-02-29",
+        None,
+        "",
+        "whenever",
+    ]:
+        for kind, extra in [
+            ("interval", {"intervalCount": 3, "intervalUnit": "months"}),
+            ("interval", {"intervalCount": 14, "intervalUnit": "days"}),
+            ("months", {"months": [10]}),
+            ("months", {"months": [11]}),
+            ("months", {"months": [4, 10]}),
+            ("clocks", {"clocks": ["fall"]}),
+            ("clocks", {"clocks": ["spring", "fall"]}),
+            ("date", {"onDate": "2026-11-01", "onDateYearly": True}),
+            ("date", {"onDate": "2026-11-01", "onDateYearly": False}),
+            ("date", {"onDate": "2026-10-07", "onDateYearly": True}),
+        ]:
+            tasks.append(dict(
+                {"id": f"a{len(tasks)}", "name": "x", "schedule": kind,
+                 "lastDone": None, "addedOn": added},
+                **extra,
+            ))
+    # And with the routine done since: the anchor is then ignored, however
+    # far off it is, so a stale or impossible added-on date cannot leak
+    # into a routine with a history.
+    for added in ["2020-01-01", "2030-01-01", "nope"]:
+        for last in ["2026-09-01", "2026-10-07"]:
+            tasks.append({
+                "id": f"ad{len(tasks)}", "name": "x", "schedule": "months",
+                "lastDone": last, "addedOn": added, "months": [10],
+            })
+
     # An explicit kind that disagrees with the data beside it, since the
     # stored kind is what decides and inference must not creep back in.
     tasks.append({

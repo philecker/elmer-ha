@@ -212,6 +212,30 @@ def yearly(task: dict) -> bool:
     return bool(task.get("onDateYearly", True))
 
 
+def anchor(task: dict) -> str:
+    """The fixed point a routine counts from.
+
+    The last time it was done, and failing that the day it was added.
+
+    Never-done routines used to count from today, which is the bug that
+    stopped them ever going overdue: "the next November after today" moves
+    forward with the clock, so the day it falls due is also the day the
+    answer becomes next November. Counting from a date that does not move
+    lets the due date fall behind today, which is all overdue is.
+
+    Today is still the last resort, for a hand-edited file with no added-on
+    date. Such a routine cannot go overdue until it is next written, which
+    is the old behaviour and better than refusing to schedule it at all.
+    """
+    if not task:
+        return today()
+    last = task.get("lastDone")
+    if last:
+        return last
+    added = parse_day(task.get("addedOn"))
+    return to_day(added) if added else today()
+
+
 def schedule_kind(task: dict) -> str:
     """Which of the four kinds a routine is on.
 
@@ -271,30 +295,34 @@ def next_due(task: dict) -> str | None:
 
     Done once, the next occurrence is the first strictly after that date —
     otherwise marking something done would leave it due the same day. Never
-    done, today itself counts, or a routine anchored to today would read as
-    due next year.
+    done, the day it was added counts, so a routine added on the first of
+    the month it names is due that same day.
     """
     if not task:
         return None
     kind = schedule_kind(task)
     last = task.get("lastDone")
 
+    from_day = anchor(task)
+
     if kind == "interval":
         if not last:
-            return today()
+            # Never done: due since the day it was added, and ageing from
+            # there. It reads as due on day one, exactly as before, and now
+            # keeps going rather than standing still at nought days left.
+            return from_day
         return add_interval(last, task.get("intervalCount"), task.get("intervalUnit"))
 
-    anchor = last or today()
     inclusive = not last
 
     if kind == "months":
-        return next_seasonal(task.get("months"), anchor, inclusive)
+        return next_seasonal(task.get("months"), from_day, inclusive)
     if kind == "clocks":
-        return next_clock(task.get("clocks"), anchor, inclusive)
+        return next_clock(task.get("clocks"), from_day, inclusive)
 
     # A specific date, either every year or exactly once.
     if yearly(task):
-        return next_anniversary(task.get("onDate"), anchor, inclusive)
+        return next_anniversary(task.get("onDate"), from_day, inclusive)
     if last:
         return None
     once = parse_day(task.get("onDate"))

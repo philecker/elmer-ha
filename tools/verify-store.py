@@ -193,6 +193,85 @@ async def main() -> int:
           [type(fresh["cardsWide"]).__name__, type(fresh["cardsNarrow"]).__name__],
           ["int", "int"])
 
+    # --- the day a routine arrived is recorded once and then left alone ----
+    st = new_store()
+    st.apply_op("routine.put", {"id": "r1", "name": "New", "intervalCount": 3,
+                                "intervalUnit": "months"})
+    stamped = st.data["tasks"][0]["addedOn"]
+    check("a new routine is stamped with the day it arrived",
+          stamped, schedule.today())
+
+    # Backdated by hand, then edited through the form, which sends the whole
+    # record without an added-on date. Re-stamping here would push the anchor
+    # forward and quietly un-overdue a routine every time somebody opened it.
+    st.data["tasks"][0]["addedOn"] = "2026-01-01"
+    st.apply_op("routine.put", {"id": "r1", "name": "Renamed", "intervalCount": 6,
+                                "intervalUnit": "months"})
+    check("editing one keeps the date it already had",
+          st.data["tasks"][0]["addedOn"], "2026-01-01")
+    check("and the edit still lands", st.data["tasks"][0]["name"], "Renamed")
+
+    st.apply_op("routine.put", {"id": "r2", "name": "Imported",
+                                "addedOn": "2025-05-05"})
+    check("an imported date is kept as given",
+          next(t["addedOn"] for t in st.data["tasks"] if t["id"] == "r2"),
+          "2025-05-05")
+
+    # --- due becomes overdue, for every kind --------------------------------
+    # The bug this pins: a routine nobody had done counted from today, and
+    # "the next November after today" moves with the clock. It reached its
+    # date and the next morning the answer was next November, so it went
+    # from due straight back to fine without ever being overdue.
+    #
+    # Checked by walking the clock rather than by reading one day, because
+    # every single day of it looked right on its own. Only the sequence was
+    # wrong.
+    real_today = schedule.today
+    try:
+        def walk(task, days):
+            out = []
+            for day in days:
+                schedule.today = lambda d=day: d
+                out.append(schedule.task_state(task, 14)["status"])
+            return out
+
+        around = ["2026-10-31", "2026-11-01", "2026-11-02", "2026-11-10"]
+        never = {"addedOn": "2026-07-04"}
+        for label, task in (
+            ("a month", dict(never, schedule="months", months=[11])),
+            ("a clock change", dict(never, schedule="clocks", clocks=["fall"])),
+            ("a yearly date", dict(never, schedule="date", onDate="2026-11-01",
+                                   onDateYearly=True)),
+            ("a one-off", dict(never, schedule="date", onDate="2026-11-01",
+                               onDateYearly=False)),
+        ):
+            check(f"{label}, never done, goes due then overdue and stays there",
+                  walk(task, around), ["due", "due", "overdue", "overdue"])
+
+        # Done once, which always worked, and must go on working.
+        check("and one that has been done behaves the same",
+              walk({"schedule": "months", "months": [11], "lastDone": "2025-11-05"},
+                   around),
+              ["due", "due", "overdue", "overdue"])
+
+        # An interval nobody has done is due from the day it was added, and
+        # ages instead of standing still at nought days left.
+        aged = walk({"schedule": "interval", "intervalCount": 3,
+                     "intervalUnit": "months", "addedOn": "2026-07-04"},
+                    ["2026-07-04", "2026-07-05", "2026-11-02"])
+        check("an interval never done is due the day it arrives, then overdue",
+              aged, ["due", "overdue", "overdue"])
+
+        # No anchor at all, as a hand-edited file might be: it falls back to
+        # today, which cannot go overdue. Pinned so the fallback is a choice
+        # rather than a surprise.
+        schedule.today = lambda: "2026-11-02"
+        loose = schedule.task_state({"schedule": "months", "months": [11]}, 14)
+        check("with no added-on date it falls back to counting from today",
+              loose["status"], "ok")
+    finally:
+        schedule.today = real_today
+
     # --- the ring agrees with the number inside it -------------------------
     # The ring is how near the day is, measured against the warn-ahead
     # window. It used to be the proportion of the service interval elapsed,

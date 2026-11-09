@@ -107,6 +107,13 @@ function isYearly(task) {
   if (!task) return true;
   return task.onDateYearly === undefined ? true : !!task.onDateYearly;
 }
+function anchorFor(task) {
+  if (!task) return today();
+  if (task.lastDone) return task.lastDone;
+  const added = parseDay(task.addedOn);
+  return added ? toDay(added) : today();
+}
+
 function scheduleKind(task) {
   const kind = task && task.schedule;
   if (['interval', 'months', 'clocks', 'date'].includes(kind)) return kind;
@@ -121,15 +128,16 @@ function nextDue(task) {
   if (!task) return null;
   const kind = scheduleKind(task);
   const last = task.lastDone;
+  const from = anchorFor(task);
   if (kind === 'interval') {
-    if (!last) return today();
+    // Never done: due since the day it was added, and ageing from there.
+    if (!last) return from;
     return addInterval(last, task.intervalCount, task.intervalUnit);
   }
-  const anchor = last || today();
   const inclusive = !last;
-  if (kind === 'months') return nextSeasonal(task.months, anchor, inclusive);
-  if (kind === 'clocks') return nextClock(task.clocks, anchor, inclusive);
-  if (isYearly(task)) return nextAnniversary(task.onDate, anchor, inclusive);
+  if (kind === 'months') return nextSeasonal(task.months, from, inclusive);
+  if (kind === 'clocks') return nextClock(task.clocks, from, inclusive);
+  if (isYearly(task)) return nextAnniversary(task.onDate, from, inclusive);
   if (last) return null;
   const once = parseDay(task.onDate);
   return once ? toDay(once) : null;
@@ -236,7 +244,11 @@ const SEED = {
     // The job everybody is told to do when the clocks change, on the
     // schedule that says so — and never done, which used to read as "not
     // scheduled" and now reads as the next changeover.
+    // Added today, so the sample looks the same whatever day the
+    // screenshots are built on. A real routine keeps the day it was added
+    // and falls behind from there; verify-schedule is where that is pinned.
     { id: 't8', equipmentId: 'eq4', name: 'Replace Battery', lastDone: null,
+      addedOn: today(),
       schedule: 'clocks', clocks: ['spring', 'fall'],
       intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
     { id: 't9', equipmentId: 'eq5', name: 'Oil Change', lastDone: ago(14),
@@ -247,6 +259,7 @@ const SEED = {
     // one line of facts where every other tile has two. Also never done and
     // anchored to months, so its ring has to come from the schedule.
     { id: 't12', equipmentId: null, name: 'Rotate Mattress', lastDone: null,
+      addedOn: today(),
       schedule: 'months', months: [5, 11],
       intervalCount: 6, intervalUnit: 'months', partsUsed: [] },
     // A job with an end: done once and finished, kept for the history
@@ -315,7 +328,14 @@ function applyOp(kind, p) {
   else if (kind === 'equipment.delete') {
     data.equipment = data.equipment.filter((e) => e.id !== p.id);
     data.tasks = data.tasks.filter((t) => t.equipmentId !== p.id);
-  } else if (kind === 'routine.put') upsert(data.tasks, p);
+  } else if (kind === 'routine.put') {
+    // Mirrors the store: a new routine is stamped with the day it arrived,
+    // an edited one keeps the date it already had.
+    if (!p.addedOn && !data.tasks.some((t) => t.id === p.id)) {
+      p = { ...p, addedOn: today() };
+    }
+    upsert(data.tasks, p);
+  }
   else if (kind === 'routine.delete') data.tasks = data.tasks.filter((t) => t.id !== p.id);
   else if (kind === 'routine.lastDone') {
     const t = data.tasks.find((x) => x.id === p.id);
@@ -506,7 +526,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.9.1' } };
+panel.panel = { config: { version: '1.9.2' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

@@ -154,6 +154,16 @@ def empty_data() -> dict[str, Any]:
     }
 
 
+def _unstamped(raw: Any) -> bool:
+    """Whether anything on disk is still missing its added-on date."""
+    if not isinstance(raw, dict):
+        return False
+    return any(
+        isinstance(t, dict) and not schedule.parse_day(t.get("addedOn"))
+        for t in (raw.get("tasks") or [])
+    )
+
+
 def normalize(raw: Any) -> dict[str, Any]:
     """Merge whatever came off disk into a known-good shape.
 
@@ -203,6 +213,14 @@ def normalize(raw: Any) -> dict[str, Any]:
         # A routine is paused or it is not; anything truthy in a file counts
         # as paused, and the value stored is always a boolean.
         item["paused"] = bool(t.get("paused"))
+        # The day this routine joined the house. It is what a routine nobody
+        # has done yet counts from, and the whole reason it exists is that
+        # counting from today meant such a routine could never fall behind
+        # today: it reached its date and the answer rolled on to the next
+        # one. Stamped here when it is missing, and pinned to disk by
+        # async_load so it does not creep forward on every restart.
+        added = schedule.parse_day(t.get("addedOn"))
+        item["addedOn"] = schedule.to_day(added) if added else schedule.today()
         # Months make a routine seasonal. Always a list, so the scheduler can
         # test it for emptiness without caring what a hand-edited file held.
         item["months"] = _months(t.get("months"))
@@ -313,6 +331,13 @@ class ElmerStore:
         self.data = normalize(raw)
         if raw is None:
             _LOGGER.debug("no stored data; starting empty")
+        elif _unstamped(raw):
+            # normalize() gives every routine an added-on date, but normalize
+            # runs on each load and today moves. Written back the first time
+            # so the anchor is a fact about the routine rather than about
+            # when Home Assistant last started.
+            _LOGGER.debug("stamping routines with an added-on date")
+            await self.async_save()
 
     async def async_save(self) -> None:
         await self._store.async_save(self.data)
@@ -484,6 +509,15 @@ class ElmerStore:
             d["tasks"] = [t for t in d["tasks"] if t.get("equipmentId") != p.get("id")]
 
         elif kind == "routine.put":
+            # A routine nobody has done yet counts from the day it arrived, so
+            # a new one is stamped here. An edit is not: a put patches, so the
+            # stored date survives the save, and re-stamping it would push the
+            # anchor forward every time somebody opened the form and reset a
+            # routine that had fallen behind.
+            if not p.get("addedOn") and not any(
+                t.get("id") == p.get("id") for t in d["tasks"]
+            ):
+                p = {**p, "addedOn": schedule.today()}
             d["tasks"] = _upsert(d["tasks"], p)
         elif kind == "routine.delete":
             d["tasks"] = [t for t in d["tasks"] if t.get("id") != p.get("id")]

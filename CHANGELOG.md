@@ -6,6 +6,34 @@ HACS does not read this file — the changelog it shows when an update is
 available is the body of the GitHub release. This is here for anyone reading
 the repository, and the release bodies are written from it.
 
+## 1.9.2
+
+### Fixed
+
+- **A routine nobody had done yet never went overdue.** It would count down
+  to its date, show as due, and then the next morning go quietly back to
+  fine with another year on the clock. The cause was the anchor: a routine
+  with no history was measured from today, and "the next November after
+  today" moves forward as today does, so the date it was counting towards
+  could never fall behind. Every routine now keeps the day it was added and
+  is measured from that, which stays put — so a seasonal job, a clock
+  change, a specific date and an interval all age past their date and stay
+  overdue until they are done.
+
+  Routines already in the file are stamped with the day you upgrade, since
+  the day they were really added was never recorded. They will come due on
+  schedule from here and fall behind properly after that. Anything with a
+  history is untouched; its last-done date was always the anchor and always
+  worked.
+
+  An interval that has never been done is now due the day it arrives and
+  overdue the day after, rather than sitting at zero days left for good.
+
+  There is a test on it now that walks the clock across a routine's due
+  date and insists the answer goes due, then overdue, and stays there. The
+  bug survived because every single day of it looked right on its own; only
+  the sequence was wrong.
+
 ## 1.9.1
 
 No changes. The v1.9.0 tag was cut on the previous commit, so the release of
