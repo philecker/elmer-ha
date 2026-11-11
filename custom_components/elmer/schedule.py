@@ -287,11 +287,12 @@ def next_seasonal(months: Any, last_done: Any, inclusive: bool = False) -> str |
 def next_due(task: dict) -> str | None:
     """When a routine is next due, or None if there is nothing to go on.
 
-    Three of the four kinds know their own dates and need no last-done to
-    have one: a routine anchored to November is due in November whether or
-    not anybody has ever done it. Only an interval has nothing to count
-    from, and a routine you have never done is one that wants doing, so it
-    is due now.
+    Everything counts from the routine's anchor (see anchor()): the day it
+    was last done, or, never done, the day it was added. Three of the four
+    kinds then find their own next date — a routine anchored to November is
+    due in the first November on or after the day it was added. An interval
+    never done is due on the day it was added: it is a job that wants doing,
+    and from that day it can fall behind like any other.
 
     Done once, the next occurrence is the first strictly after that date —
     otherwise marking something done would leave it due the same day. Never
@@ -357,25 +358,35 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
         }
 
     # Snoozed until a date, then back to whatever it really is. Pausing says
-    # stop tracking this; snoozing says not now, and undoes itself.
+    # stop tracking this; snoozing says "remind me then", and undoes itself.
     #
-    # daysLeft goes None for the same reason it does when paused: it is what
-    # the routine's own sensor reports, and an automation that went on firing
-    # about the thing you had just set aside would make the snooze a panel
-    # decoration rather than a decision. The real due date is still returned,
-    # so the panel can say what is being put off and for how long.
+    # A snooze is a new due date: the day it wakes, or the real one if that
+    # is later still. Days left count to it, so the routine says how long
+    # until it is back, and it is due soon like anything else once that day
+    # is inside the warn-ahead window — snoozing for three days with a
+    # fourteen-day window does not hide it, it just stops it being overdue.
+    # Further off than the window, it is filed as snoozed. Days left never
+    # reach zero while asleep, so an automation on an overdue routine stays
+    # quiet until the snooze is over, which is what snoozing it was for.
     #
     # Nothing is cleared when the day arrives. A date in the past simply
     # stops matching here, which means waking up needs no timer, no service
     # and no write — the routine is awake the moment the date rolls over.
-    if task and task.get("snoozedUntil") and today() < task["snoozedUntil"]:
+    until = task.get("snoozedUntil") if task else None
+    if until and parse_day(until) and today() < until:
+        real = next_due(task)
+        due = max(real, until) if real else until
+        days_left = days_between(today(), due)
+        span = max(1, due_soon_days)
         return {
-            "due": next_due(task),
-            "daysLeft": None,
-            "status": "snoozed",
-            "progress": 0,
+            "due": due,
+            "daysLeft": days_left,
+            "status": "due" if days_left <= due_soon_days else "snoozed",
+            "progress": max(0.0, min(1.0, (span - days_left) / span)),
             "cycle": None,
-            "snoozedUntil": task["snoozedUntil"],
+            "snoozedUntil": until,
+            # When it was due before it was put off, for the panel to say.
+            "realDue": real,
         }
 
     due = next_due(task)

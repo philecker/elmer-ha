@@ -137,10 +137,10 @@ async def async_setup_services(hass: HomeAssistant) -> None:
             if (s.get("name") or "").strip().lower() == needle or s.get("id") == call.data["part"]
         ]
         if not matches:
-            raise ServiceValidationError(f"No part called {call.data['part']!r}")
+            raise ServiceValidationError(f"No supply called {call.data['part']!r}")
         if len(matches) > 1:
             raise ServiceValidationError(
-                f"{len(matches)} parts are called {call.data['part']!r}; rename one so they can be told apart"
+                f"{len(matches)} supplies are called {call.data['part']!r}; rename one so they can be told apart"
             )
         await store.async_apply(
             [("part.adjust", {"id": matches[0]["id"], "delta": call.data["delta"]})]

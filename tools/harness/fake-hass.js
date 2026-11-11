@@ -151,15 +151,22 @@ function taskState(task, soon = 14) {
   if (task && task.paused) {
     return { due: nextDue(task), daysLeft: null, status: 'paused', progress: 0, cycle: null };
   }
-  // Mirrors the snooze short-circuit in schedule.py.
-  if (task && task.snoozedUntil && today() < task.snoozedUntil) {
+  // Mirrors the snooze in schedule.py: a new due date, due soon inside the
+  // window and snoozed past it.
+  const until = task ? task.snoozedUntil : null;
+  if (until && parseDay(until) && today() < until) {
+    const real = nextDue(task);
+    const due = real && real > until ? real : until;
+    const daysLeft = daysBetween(today(), due);
+    const span = Math.max(1, soon);
     return {
-      due: nextDue(task),
-      daysLeft: null,
-      status: 'snoozed',
-      progress: 0,
+      due,
+      daysLeft,
+      status: daysLeft <= soon ? 'due' : 'snoozed',
+      progress: Math.max(0, Math.min(1, (span - daysLeft) / span)),
       cycle: null,
-      snoozedUntil: task.snoozedUntil,
+      snoozedUntil: until,
+      realDue: real,
     };
   }
   const due = nextDue(task);
@@ -195,6 +202,8 @@ function stockStatus(s) {
 /* ----------------------------------------------------------------- data -- */
 
 const ago = (days) => addInterval(today(), -days, 'days');
+// Born so many years ago, with the next birthday that many days away.
+const born = (years, inDays) => addInterval(addInterval(today(), inDays, 'days'), -years, 'years');
 
 // Kept aside so the preview can swap between a furnished house and a fresh
 // install — the empty states are a real screen and deserve to be looked at.
@@ -289,6 +298,10 @@ const SEED = {
     { id: 'l2', taskId: 't9', equipmentId: 'eq5', taskName: 'Oil Change',
       doneOn: ago(14), notes: '', cost: '34.50', recordedAt: Date.now() - 1e9,
       previousLastDone: ago(200), usedParts: [] },
+    // The one-time routine, done: it is listed nowhere but here.
+    { id: 'l-warranty', taskId: 't11', equipmentId: 'eq2', taskName: 'Register Warranty',
+      doneOn: ago(300), notes: 'Registered online. Confirmation WR-00000.', cost: '',
+      recordedAt: Date.now() - 2.6e10, previousLastDone: null, usedParts: [] },
     // Older entries, so the sample house has a history worth looking at: the
     // list groups by year and can be narrowed to the last few months, and
     // neither is exercised by a log that only reaches back a month.
@@ -306,7 +319,65 @@ const SEED = {
       doneOn: ago(470), notes: 'A lot of sediment. Worth doing every year.',
       cost: '', recordedAt: Date.now() - 4e10, previousLastDone: null, usedParts: [] },
   ],
-  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, showHistoryCost: true, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, contentWidth: 'default', sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true },
+  settings: { theme: 'system', showLocations: true, textSize: 'default', textSizeNarrow: 'default', badgeOverdue: false, showHistoryCost: true, viewRoutines: 'list', viewEquipment: 'list', viewParts: 'list', cardsWide: 3, cardsNarrow: 2, contentWidth: 'default', sortEquipment: 'name', sortEquipmentDir: 'asc', sortPartsDir: 'asc', dueSoonDays: 14, notifyOverdue: true, showAnimals: false, viewAnimals: 'list', weightUnit: null },
+};
+
+/*
+ * Animals, kept apart from the house above. Off is Elmer's default and means
+ * there are none, so the ordinary sample has none either — every screen and
+ * check written before Animals existed runs on exactly the data it always
+ * did. ?animals=1, or __setData('animals'), adds these and turns the tab on.
+ *
+ * Every microchip, license and policy number is invented.
+ */
+const ANIMALS = {
+  equipment: [
+    { id: 'a1', type: 'animal', name: 'Biscuit', species: 'dog', breed: 'Golden Retriever', sex: 'm', fixed: 'yes',
+      birthDate: born(5, 4), location: 'House', color: 'Golden', weight: 68, weightUnit: 'lb',
+      microchip: '000 000 000 012 345', license: 'DOG-00000', adoptedOn: '2022-01-08', adoptedFrom: 'Prairie Paws Rescue',
+      vet: 'Elm Street Animal Clinic', phone: '(555) 010-2030', email: 'front@elmstreetvet.example',
+      insurer: 'Hearthside Pet Insurance', policy: 'POL-000000',
+      diet: 'Two cups of kibble, morning and evening. No chicken — it makes him itch.',
+      medications: [{ name: 'Heartworm Chew', dosage: '1 chew, on the 1st' }, { name: 'Flea And Tick Tablet', dosage: '1 tablet every 3 months' }],
+      vaccinations: [{ name: 'Rabies', date: ago(210) }, { name: 'DHPP', date: ago(210) }, { name: 'Bordetella', date: ago(45) }],
+      parts: [] },
+    { id: 'a2', type: 'animal', name: 'Mochi', species: 'cat', breed: 'Domestic Shorthair', sex: 'f', fixed: 'yes',
+      birthDate: '2019-06-01', birthApprox: true, location: 'House', color: 'Brown tabby', weight: 10, weightUnit: 'lb',
+      microchip: '000 000 000 067 890', vet: 'Elm Street Animal Clinic', phone: '(555) 010-2030',
+      vaccinations: [{ name: 'FVRCP', date: ago(320) }, { name: 'Rabies', date: ago(320) }], parts: [] },
+    { id: 'a3', type: 'animal', name: 'Juniper', species: 'horse', breed: 'Quarter Horse', sex: 'mare',
+      birthDate: born(12, 163), location: 'Barn', color: 'Bay, with a star', height: '15.1 hands', weight: 1050, weightUnit: 'lb',
+      vet: 'Valley Equine Veterinary', phone: '(555) 010-4455',
+      diet: 'Grass hay free choice, 2 lb ration balancer at night.',
+      vaccinations: [{ name: 'West Nile', date: ago(150) }, { name: 'Tetanus', date: ago(150) }, { name: 'Strangles', date: null }],
+      parts: [] },
+    { id: 'a4', type: 'animal', name: 'Backyard Hens', species: 'chicken', breed: 'Mixed flock', sex: 'hen', headCount: 6,
+      birthDate: '2024-04-01', birthApprox: true, location: 'Coop', parts: [] },
+  ],
+  tasks: [
+    { id: 'ta1', equipmentId: 'a1', name: 'Heartworm Prevention', lastDone: ago(28), intervalCount: 1, intervalUnit: 'months', partsUsed: [{ supplyId: 's5', quantity: 1 }] },
+    { id: 'ta2', equipmentId: 'a1', name: 'Flea & Tick Treatment', lastDone: ago(12), intervalCount: 1, intervalUnit: 'months', partsUsed: [] },
+    { id: 'ta3', equipmentId: 'a1', name: 'Annual Vet Exam', lastDone: ago(340), intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
+    { id: 'ta4', equipmentId: 'a1', name: 'Rabies Vaccine', lastDone: ago(800), intervalCount: 3, intervalUnit: 'years', partsUsed: [] },
+    { id: 'ta5', equipmentId: 'a2', name: 'Annual Vet Exam', lastDone: ago(380), intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
+    { id: 'ta6', equipmentId: 'a2', name: 'Change Litter', lastDone: ago(3), intervalCount: 1, intervalUnit: 'weeks', partsUsed: [] },
+    { id: 'ta7', equipmentId: 'a3', name: 'Farrier', lastDone: ago(44), intervalCount: 7, intervalUnit: 'weeks', partsUsed: [] },
+    { id: 'ta8', equipmentId: 'a3', name: 'Deworming', lastDone: ago(100), intervalCount: 3, intervalUnit: 'months', partsUsed: [] },
+    { id: 'ta9', equipmentId: 'a3', name: 'Dental Float', lastDone: ago(200), intervalCount: 1, intervalUnit: 'years', partsUsed: [] },
+    { id: 'ta10', equipmentId: 'a4', name: 'Clean Out Coop', lastDone: ago(20), intervalCount: 1, intervalUnit: 'months', partsUsed: [] },
+  ],
+  supplies: [
+    { id: 's5', name: 'Heartworm Chews (6-pack)', quantity: 3, reorderAt: 1, location: 'House' },
+  ],
+  log: [
+    { id: 'la1', taskId: 'ta3', equipmentId: 'a1', equipmentName: 'Biscuit', taskName: 'Annual Vet Exam', doneOn: ago(340),
+      notes: 'All good. Down two pounds since last year.', cost: '186.00', recordedAt: Date.now() - 2.9e10,
+      previousLastDone: ago(700), usedParts: [] },
+    { id: 'la2', taskId: 'ta1', equipmentId: 'a1', equipmentName: 'Biscuit', taskName: 'Heartworm Prevention', doneOn: ago(28),
+      notes: '', cost: '', recordedAt: Date.now() - 2.4e9, previousLastDone: ago(58), usedParts: [{ supplyId: 's5', quantity: 1 }] },
+    { id: 'la3', taskId: 'ta7', equipmentId: 'a3', equipmentName: 'Juniper', taskName: 'Farrier', doneOn: ago(44),
+      notes: 'Front shoes reset, back trimmed.', cost: '140.00', recordedAt: Date.now() - 3.8e9, previousLastDone: ago(93), usedParts: [] },
+  ],
 };
 
 /* ---------------------------------------------------------------- store -- */
@@ -326,6 +397,13 @@ function upsert(list, record) {
 function applyOp(kind, p) {
   if (kind === 'equipment.put') upsert(data.equipment, p);
   else if (kind === 'equipment.delete') {
+    // Mirrors the store: the history it leaves keeps the name it went by.
+    const gone = data.equipment.find((e) => e.id === p.id);
+    if (gone) {
+      for (const l of data.log) {
+        if (l.equipmentId === gone.id && !l.equipmentName) l.equipmentName = gone.name || '';
+      }
+    }
     data.equipment = data.equipment.filter((e) => e.id !== p.id);
     data.tasks = data.tasks.filter((t) => t.equipmentId !== p.id);
   } else if (kind === 'routine.put') {
@@ -350,6 +428,13 @@ function applyOp(kind, p) {
     if (!data.log.some((l) => l.id === p.id)) data.log.unshift(p);
   } else if (kind === 'log.remove') data.log = data.log.filter((l) => l.id !== p.id);
   else if (kind === 'settings.put') Object.assign(data.settings, p);
+}
+
+const isAnimalRecord = (e) => e && e.type === 'animal';
+
+/** The store's rule, after every batch: any animal means the tab is on. */
+function animalsOnIfAny() {
+  if (!data.settings.showAnimals && data.equipment.some(isAnimalRecord)) data.settings.showAnimals = true;
 }
 
 function snapshot() {
@@ -379,7 +464,8 @@ function snapshot() {
         done: vals.filter((s) => s.status === 'done').length,
         ok: vals.filter((s) => s.status === 'ok').length,
         lowStock: Object.values(stock).filter((s) => s !== 'ok').length,
-        equipment: data.equipment.length,
+        equipment: data.equipment.filter((e) => !isAnimalRecord(e)).length,
+        animals: data.equipment.filter(isAnimalRecord).length,
       },
     },
   };
@@ -403,6 +489,7 @@ const connection = {
 
     if (msg.type === 'elmer/apply') {
       for (const op of msg.ops) applyOp(op.kind, op.payload);
+      animalsOnIfAny();
       notify();
       return { ok: true };
     }
@@ -422,6 +509,7 @@ const connection = {
         id: `log_${logSeq += 1}`,
         taskId: msg.taskId,
         equipmentId: task.equipmentId,
+        equipmentName: (data.equipment.find((e) => e.id === task.equipmentId) || {}).name || null,
         taskName: task.name,
         doneOn,
         notes: msg.notes || '',
@@ -439,6 +527,7 @@ const connection = {
     if (msg.type === 'elmer/import') {
       const incoming = msg.data || {};
       const take = (k) => (Array.isArray(incoming[k]) ? incoming[k] : []);
+      const wasOn = Boolean(data.settings.showAnimals);
       if (!msg.merge) {
         data.equipment = take('equipment');
         data.tasks = take('tasks');
@@ -452,10 +541,14 @@ const connection = {
         for (const s of take('supplies')) applyOp('part.put', s);
         for (const l of [...take('log')].reverse()) applyOp('log.append', l);
       }
+      animalsOnIfAny();
       notify();
+      const animals = take('equipment').filter(isAnimalRecord).length;
       return {
         counts: {
-          equipment: take('equipment').length,
+          equipment: take('equipment').length - animals,
+          animals,
+          animalsTurnedOn: Boolean(animals) && !wasOn && Boolean(data.settings.showAnimals),
           routines: take('tasks').length,
           parts: take('supplies').length,
           history: take('log').length,
@@ -526,7 +619,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.9.2' } };
+panel.panel = { config: { version: '1.10.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves
@@ -545,6 +638,11 @@ window.__setData = (mode) => {
   const next = mode === 'empty'
     ? { equipment: [], tasks: [], supplies: [], log: [], settings: { ...SEED.settings } }
     : JSON.parse(JSON.stringify(SEED));
+  if (mode === 'animals') {
+    for (const key of ['equipment', 'tasks', 'supplies', 'log']) next[key].push(...JSON.parse(JSON.stringify(ANIMALS[key])));
+    next.log.sort((x, y) => String(y.doneOn).localeCompare(String(x.doneOn)));
+    next.settings.showAnimals = true;
+  }
   data.equipment = next.equipment;
   data.tasks = next.tasks;
   data.supplies = next.supplies;
@@ -554,5 +652,6 @@ window.__setData = (mode) => {
 };
 
 if (params.get('empty') === '1') window.__setData('empty');
+if (params.get('animals') === '1') window.__setData('animals');
 
 window.__ready = true;

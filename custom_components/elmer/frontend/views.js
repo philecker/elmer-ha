@@ -10,7 +10,7 @@
 // The cost is that every interpolation has to be escaped by hand, so all of them
 // go through `html` or `esc` in util.js. There is no exception for any field.
 
-import { icon, hasIcon, EQUIPMENT_ICONS } from './icons.js';
+import { icon, hasIcon, EQUIPMENT_ICONS, ANIMAL_ICONS } from './icons.js';
 import {
   esc, html, raw, meter, relative, formatDay, categoryLabel, CATEGORIES,
   INTERVAL_UNITS, intervalText, scheduleText, monthsText, MONTHS_LONG,
@@ -40,11 +40,14 @@ function emptyState({ ic, title, body }) {
  * searching routines and then looking at parts does not hand you a parts list
  * silently narrowed by a word you typed on another screen.
  */
-export function searchBox(state, placeholder) {
+export function searchBox(state, label) {
+  // The box itself just says Search: which list it searches is the tab you
+  // are on, and repeating it in grey made every tab's first line a sentence.
+  // A screen reader has no tab to look at, so the label keeps the detail.
   return html`<div class="search">
     ${raw(icon('search', 16))}
     <input type="search" data-act="search" value="${state.query || ''}"
-      placeholder="${placeholder}" aria-label="${placeholder}"
+      placeholder="Search" aria-label="${label}"
       autocomplete="off" spellcheck="false">
     ${raw(state.query
       ? `<button class="clear" data-act="search-clear" aria-label="Clear search">${icon('x', 15)}</button>`
@@ -54,7 +57,9 @@ export function searchBox(state, placeholder) {
 
 /** Which shape a tab is drawn in. Anything unrecognised reads as a list. */
 export function viewOf(state, tab) {
-  const key = { routines: 'viewRoutines', equipment: 'viewEquipment', parts: 'viewParts' }[tab];
+  const key = {
+    routines: 'viewRoutines', equipment: 'viewEquipment', parts: 'viewParts', animals: 'viewAnimals',
+  }[tab];
   return state.settings[key] === 'cards' ? 'cards' : 'list';
 }
 
@@ -175,27 +180,15 @@ export function routineRow(row, state, opts = {}) {
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
   const off = st.status === 'paused';
-  // Snoozed, not wrong: no colour, and not dimmed the way a paused one is.
-  // What it really is stays on the line beside it, so putting something off
-  // never hides how long it has been waiting.
-  const snoozed = st.status === 'snoozed';
-  // A finished one-off has no days left, and "not scheduled" would be a poor
-  // way to say so: nothing is scheduled because the job is over, which is
-  // the one case where that is the answer rather than a gap.
-  const over = st.status === 'done';
-  const lead = off
-    ? 'Paused'
-    : (snoozed ? `Snoozed until ${shortDay(t.snoozedUntil)}`
-      : (over ? `Done ${relative(daysBetween(state.computed.today, t.lastDone))}` : relative(st.daysLeft)));
-  // Snoozed, the line says when it wakes and what it is underneath, in one
-  // word. The full "due 30 days ago" and the equipment name both wanted room
-  // this row does not have on a phone; which state it is in is the part the
-  // snooze is hiding, and the sheet has the detail.
-  const realDays = snoozed && st.due ? daysBetween(state.computed.today, st.due) : null;
-  const context = snoozed
-    ? (realDays === null || realDays > (state.settings.dueSoonDays ?? 14)
-      ? '' : (realDays < 0 ? 'overdue' : 'due soon'))
-    : where;
+  // Snoozed is a new due date, so the row counts down to it like any other
+  // — "Due in 3 days", in the due-soon colour once it is inside the window —
+  // and says Snoozed beside it, so it is plain why the date moved.
+  const snoozed = Boolean(st.snoozedUntil);
+  const lead = off ? 'Paused' : relative(st.daysLeft);
+  // Snoozed takes the place of where it is: the equipment name and the word
+  // both wanted room this row does not have on a phone, and the snooze is
+  // the part that explains the date. The sheet has the rest.
+  const context = snoozed ? 'Snoozed' : where;
 
   return html`<div class="row" data-act="routine" data-id="${t.id}" role="button" tabindex="0"${raw(off ? ' data-paused="1"' : '')}>
     ${raw(meter(st))}
@@ -224,9 +217,10 @@ export function routineRow(row, state, opts = {}) {
 export function routineTile(row, state, opts = {}) {
   const t = row.task;
   const st = row.state;
-  const where = opts.hideEquipment
+  const place = opts.hideEquipment
     ? scheduleText(t)
     : whereLine(row.equipment, state.settings.showLocations);
+  const where = st.snoozedUntil ? ['Snoozed', place].filter(Boolean).join(' · ') : place;
   const tone = st.status === 'overdue' || st.status === 'due' ? st.status : '';
   const busy = opts.busy ? ' data-busy="1"' : '';
   const off = st.status === 'paused';
@@ -242,7 +236,7 @@ export function routineTile(row, state, opts = {}) {
     </div>
     <div class="name">${t.name}</div>
     <div class="meta"><b${raw(tone ? ` data-tone="${esc(tone)}"` : '')}>${raw(
-    off ? 'Paused' : esc(st.status === 'done' ? 'Finished' : relative(st.daysLeft))
+    off ? 'Paused' : esc(relative(st.daysLeft))
   )}</b>${raw(
       where ? `<br>${esc(where)}` : ''
     )}</div>
@@ -277,10 +271,6 @@ const GROUPS = [
   // order the statuses sort in. A snooze that left the thing at the top of
   // the list would not have been a snooze.
   ['snoozed', 'Snoozed'],
-  // A one-off that has been done. Below the on-track ones because it is not
-  // waiting for anything, and above paused because it finished rather than
-  // being set aside.
-  ['done', 'Finished'],
   ['paused', 'Paused'],
 ];
 
@@ -300,6 +290,15 @@ function matchesQuery(row, needle) {
   ).includes(needle);
 }
 
+/**
+ * The routines still running, for one owner or all of them. A one-time
+ * routine that has been done is not among them: it lives in the history.
+ */
+export function liveTasks(state, ownerId) {
+  return state.tasks.filter((t) => (ownerId === undefined || t.equipmentId === ownerId)
+    && (state.computed.states[t.id] || {}).status !== 'done');
+}
+
 export function routinesView(state) {
   const needle = (state.query || '').trim().toLowerCase();
   const rows = state.rows
@@ -311,7 +310,7 @@ export function routinesView(state) {
   // row of filter pills, and both did the same job — showed how many were in a
   // state and filtered to it when tapped. The count now lives in the pill.
   const pills = FILTERS.map(([key, label]) => {
-    const n = key === 'all' ? state.tasks.length : (counts[key] || 0);
+    const n = key === 'all' ? state.rows.length : (counts[key] || 0);
     // The figure reads first and the label under it, so an aria-label puts them
     // back in the order they would be spoken.
     return html`<button class="pill" data-act="filter" data-value="${key}"
@@ -332,7 +331,7 @@ export function routinesView(state) {
     : html`<div class="card">${group.map((r) => routineRow(r, state, { busy: state.busy[r.task.id] }))}</div>`);
 
   let body;
-  if (!state.tasks.length) {
+  if (!state.rows.length) {
     body = emptyState({
       ic: 'today',
       title: 'Nothing to track yet',
@@ -379,7 +378,7 @@ export function routinesView(state) {
   // zeros above an empty state is noise on the one screen where someone new
   // most needs a clear instruction.
   return html`<div class="scroll"><div class="pad">
-    ${raw(state.tasks.length ? search + html`<div class="pills">${pills}</div>` : '')}
+    ${raw(state.rows.length ? search + html`<div class="pills">${pills}</div>` : '')}
     ${raw(body)}
   </div></div>`;
 }
@@ -419,7 +418,7 @@ export function equipmentView(state) {
     .map(([where, items]) => {
       const rows = sortRecords(items, 'equipment', state.settings.sortEquipment, state.settings.sortEquipmentDir)
         .map((eq) => {
-          const tasks = state.tasks.filter((t) => t.equipmentId === eq.id);
+          const tasks = liveTasks(state, eq.id);
           const worst = rollUp(tasks, state);
           const n = tasks.length;
           const routines = `${n} ${n === 1 ? 'routine' : 'routines'}`;
@@ -546,7 +545,7 @@ export function equipmentDetail(state, id) {
  */
 export function partDetail(state, id) {
   const part = state.supplies.find((s2) => s2.id === id);
-  if (!part) return html`<div class="center">That part is gone.</div>`;
+  if (!part) return html`<div class="center">That supply is gone.</div>`;
 
   const tone = state.computed.stock[part.id] || 'ok';
   const users = state.rows.filter(
@@ -571,7 +570,7 @@ export function partDetail(state, id) {
   if (part.purchasedFrom && !buy) add('Buy from', part.purchasedFrom);
 
   return html`<div class="scroll"><div class="pad">
-    ${raw(crumb('Parts', part.name))}
+    ${raw(crumb('Supplies', part.name))}
 
     <!-- One card, not two. How many are on the shelf and what to reorder at
          are the same subject, and splitting them made the page read as a
@@ -621,8 +620,8 @@ export function partsView(state) {
   if (!state.supplies.length) {
     return html`<div class="scroll"><div class="pad">${raw(emptyState({
       ic: 'supplies',
-      title: 'No parts on hand',
-      body: 'Track the filters and cartridges you keep in the cupboard. Completing a routine takes them off the shelf automatically.',
+      title: 'No supplies on hand',
+      body: 'Track what you keep in the cupboard — filters, salt, batteries, flea treatment. Completing a routine takes what it uses off the shelf automatically.',
     }))}</div></div>`;
   }
 
@@ -633,11 +632,11 @@ export function partsView(state) {
 
   if (!matched.length) {
     return html`<div class="scroll"><div class="pad">
-      ${raw(findRow(state, 'parts', 'Search parts'))}
+      ${raw(findRow(state, 'parts', 'Search supplies'))}
       ${raw(emptyState({
         ic: 'search',
         title: 'Nothing matches that',
-        body: `No part matching \u201c${state.query.trim()}\u201d.`,
+        body: `No supply matching \u201c${state.query.trim()}\u201d.`,
       }))}
     </div></div>`;
   }
@@ -647,7 +646,7 @@ export function partsView(state) {
   const shape = viewOf(state, 'parts');
   const rows = sorted.map((p) => {
     const tone = state.computed.stock[p.id] || 'ok';
-    const uses = state.tasks.filter((t) => (t.partsUsed || []).some((u) => u.supplyId === p.id)).length;
+    const uses = liveTasks(state).filter((t) => (t.partsUsed || []).some((u) => u.supplyId === p.id)).length;
     const bits = [];
     if (p.reorderAt) bits.push(`reorder at ${p.reorderAt}`);
     if (uses) bits.push(`${uses} ${uses === 1 ? 'routine' : 'routines'}`);
@@ -697,7 +696,7 @@ export function partsView(state) {
       <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${raw(items.map((x) => x.markup).join(''))}</div>`);
 
   return html`<div class="scroll"><div class="pad">
-    ${raw(findRow(state, 'parts', 'Search parts'))}
+    ${raw(findRow(state, 'parts', 'Search supplies'))}
     ${sections}
   </div></div>`;
 }
@@ -710,14 +709,6 @@ export const RANGES = [
   ['12m', '12 months', 366],
   ['all', 'All time', null],
 ];
-
-/** "Aug 9" — the day of an entry, for the timeline's left column. */
-function shortDay(iso) {
-  const parts = String(iso || '').split('-');
-  if (parts.length < 3) return String(iso || '');
-  const [, m, d] = parts.map(Number);
-  return `${MONTHS[m - 1] || ''} ${d}`;
-}
 
 export function historyView(state) {
   if (!state.log.length) {
@@ -783,7 +774,7 @@ export function historyView(state) {
 
     const blocks = [...months.entries()].map(([month, entries]) => {
       const items = entries.map((l) => {
-        const eq = state.equipment.find((e) => e.id === l.equipmentId);
+        const owner = ownerName(state, l);
         const parts = (l.usedParts || [])
           .map((u) => {
             const sup = state.supplies.find((x) => x.id === u.supplyId);
@@ -794,7 +785,7 @@ export function historyView(state) {
         // to be ellipsised on a single line with the cost buried in it, which
         // put the interesting half of every entry behind a tap.
         const bits = [];
-        if (eq) bits.push(eq.name);
+        if (owner) bits.push(owner);
         if (parts.length) bits.push(parts.join(', '));
         if (l.notes) bits.push(l.notes);
 
@@ -843,7 +834,27 @@ export function historyView(state) {
  * clears the field on each — there is nothing else to delete. The count is
  * shown because both actions touch that many pieces at once.
  */
-export function groupsInUse(state, field) {
+/**
+ * The lists you build by using them. None is stored on its own: a location
+ * or a species is whatever the records carrying it say, so each list is
+ * gathered from those records, and renaming or removing one is an edit to
+ * every record that carries it — and to nothing else.
+ *
+ * Three of them. Locations are one list for everything with a place —
+ * equipment, animals, and the supplies kept somewhere — because a place is a
+ * place: the barn holds the tractor, the horse and the hay, and renaming it
+ * has to take all three with it. Categories are equipment's, species the
+ * animals'. `field` is the record's key; the flags say whose records carry it.
+ */
+export const LISTS = {
+  location: { field: 'location', equipment: true, animals: true, parts: true, what: 'location', owner: 'what is in it' },
+  category: { field: 'category', equipment: true, what: 'category', owner: 'the equipment' },
+  species: { field: 'species', animals: true, what: 'species', owner: 'the animals' },
+};
+
+export function groupsInUse(state, kind) {
+  const spec = LISTS[kind] || LISTS.location;
+  const field = spec.field;
   const counts = new Map();
   // Locations are carried by parts as well as equipment, and the editor has
   // to see all of it: a rename that reached only the equipment would leave
@@ -854,23 +865,25 @@ export function groupsInUse(state, field) {
     for (const r of list) {
       const value = (r[field] || '').trim();
       if (!value) continue;
-      const at = counts.get(value) || { equipment: 0, parts: 0 };
+      const at = counts.get(value) || { equipment: 0, animals: 0, parts: 0 };
       at[key] += 1;
       counts.set(value, at);
     }
   };
-  tally(state.equipment, 'equipment');
-  if (field === 'location') tally(state.supplies, 'parts');
+  if (spec.equipment) tally(state.equipment, 'equipment');
+  if (spec.animals) tally(state.animals || [], 'animals');
+  if (spec.parts) tally(state.supplies, 'parts');
 
   return [...counts.entries()]
     .map(([value, at]) => {
-      const count = at.equipment + at.parts;
+      const count = at.equipment + at.animals + at.parts;
       // A category is either one of Elmer's own — which carries an icon and a
       // name of its own, and is not ours to rename — or free text somebody
       // typed, which is. A location is always free text.
-      const built = field === 'category' ? categoryLabel(value) : null;
+      const built = kind === 'category' ? categoryLabel(value)
+        : kind === 'species' ? builtInSpeciesLabel(value) : null;
       return {
-        value, count, equipment: at.equipment, parts: at.parts,
+        value, count, equipment: at.equipment, animals: at.animals, parts: at.parts,
         label: built || value, builtIn: !!built,
       };
     })
@@ -881,15 +894,17 @@ export function groupsInUse(state, field) {
 function reachText(g) {
   const bits = [];
   if (g.equipment) bits.push(`${g.equipment} ${g.equipment === 1 ? 'piece' : 'pieces'} of equipment`);
-  if (g.parts) bits.push(`${g.parts} ${g.parts === 1 ? 'part' : 'parts'}`);
-  return bits.join(' and ') || 'nothing';
+  if (g.animals) bits.push(`${g.animals} ${g.animals === 1 ? 'animal' : 'animals'}`);
+  if (g.parts) bits.push(`${g.parts} ${g.parts === 1 ? 'supply' : 'supplies'}`);
+  if (bits.length < 3) return bits.join(' and ') || 'nothing';
+  return `${bits.slice(0, -1).join(', ')} and ${bits[bits.length - 1]}`;
 }
 
 function groupCard(state, field, empty) {
   const rows = groupsInUse(state, field);
-  if (!rows.length) return html`<div class="card"><div class="note">${empty}</div></div>`;
+  if (!rows.length) return html`<div class="card" data-list="${field}"><div class="note">${empty}</div></div>`;
 
-  return html`<div class="card">${rows.map((g) => {
+  return html`<div class="card" data-list="${field}">${rows.map((g) => {
     const tally = reachText(g);
     return html`<div class="row groprow">
     <div class="body">
@@ -905,11 +920,10 @@ function groupCard(state, field, empty) {
 }
 
 /** Renaming one of them, in a form rather than a browser prompt. */
-export function groupForm(state, field, value) {
-  const found = groupsInUse(state, field).find((g) => g.value === value)
-    || { count: 0, equipment: 0, parts: 0 };
-  const what = field === 'location' ? 'location' : 'category';
-  const owner = field === 'location' ? 'what is in it' : 'the equipment';
+export function groupForm(state, kind, value) {
+  const found = groupsInUse(state, kind).find((g) => g.value === value)
+    || { count: 0, equipment: 0, animals: 0, parts: 0 };
+  const { what, owner } = LISTS[kind] || LISTS.location;
   return html`<div class="field">
       <label for="f-group">Name</label>
       <input id="f-group" name="groupName" value="${value}" data-titlecase autocomplete="off">
@@ -918,7 +932,7 @@ export function groupForm(state, field, value) {
     <div class="btnrow">
       <button class="btn" data-act="close">Cancel</button>
       <button class="btn" data-variant="primary" data-act="save-group"
-        data-field="${field}" data-value="${value}">Save</button>
+        data-field="${kind}" data-value="${value}">Save</button>
     </div>`;
 }
 
@@ -1085,6 +1099,22 @@ export function settingsView(state) {
     options: [['1', 'Yes, group by location'], ['0', 'No, one flat list']],
     value: s.showLocations ? '1' : '0',
   }))}
+      ${raw(selectField({
+    id: 'animals',
+    act: 'set-animals',
+    label: 'Animals',
+    options: [['0', 'Off'], ['1', 'On, show the Animals tab']],
+    value: s.showAnimals ? '1' : '0',
+    hint: 'Adds an Animals tab for pets and livestock: their details, their age and next birthday, and routines such as vet visits, flea treatment and the farrier. Turning it off deletes every animal and its routines, and Elmer asks before it does. Their service history is kept.',
+  }))}
+${raw(s.showAnimals ? selectField({
+    id: 'weightunit',
+    act: 'set-weight-unit',
+    label: 'Weigh animals in',
+    options: [['lb', 'Pounds (lbs)'], ['kg', 'Kilograms (kg)']],
+    value: state.weightUnit,
+    hint: 'How a weight is shown and typed. Weights already entered are converted, not lost, so you can change this whenever you like. Until you choose, Elmer follows Home Assistant\'s unit system.',
+  }) : '')}
     </div></div>
 
     <!-- One per list rather than one for both: equipment has dates to sort by
@@ -1093,17 +1123,22 @@ export function settingsView(state) {
     <div class="label">Sorting</div>
     <div class="card"><div style="padding:4px 12px 14px">
       ${raw(sortRow(s, 'equipment', 'Equipment'))}
-      ${raw(sortRow(s, 'parts', 'Parts'))}
+      ${raw(sortRow(s, 'parts', 'Supplies'))}
       <div class="field">
         <div class="hint">Chronological equipment goes by its installed date, or by the purchased date when there is no installed one. Lists grouped by location are sorted inside each group, so a room is ordered against itself; rooms stay alphabetical with Unassigned last. Anything with no date goes to the bottom either way round.</div>
       </div>
     </div></div>
 
+    <!-- One list, for equipment, animals and supplies alike: each row says
+         what it holds, and a rename reaches all of it. -->
     <div class="label">Locations</div>
-    ${raw(groupCard(state, 'location', 'No locations yet. They appear here once a piece of equipment has one.'))}
+    ${raw(groupCard(state, 'location', 'No locations yet. They appear here once something has one.'))}
 
     <div class="label">Categories</div>
     ${raw(groupCard(state, 'category', 'No categories yet. They appear here once a piece of equipment has one.'))}
+${raw(state.settings.showAnimals ? html`
+    <div class="label">Species</div>
+    ${raw(groupCard(state, 'species', 'No species yet. They appear here once an animal has one.'))}` : '')}
 
     <div class="label">Scheduling</div>
     <div class="card"><div style="padding:4px 12px 14px">
@@ -1122,7 +1157,7 @@ The same import and export below are available as the elmer.import_json and elme
 
     <div class="label">Data export</div>
     <div class="card"><div class="panelbody">
-      <div class="note" style="padding:8px 0 4px">${counts.equipment} ${raw(counts.equipment === 1 ? 'piece' : 'pieces')} of equipment, ${state.tasks.length} ${raw(state.tasks.length === 1 ? 'routine' : 'routines')}, ${state.supplies.length} ${raw(state.supplies.length === 1 ? 'part' : 'parts')}, ${state.log.length} history ${raw(state.log.length === 1 ? 'entry' : 'entries')}.</div>
+      <div class="note" style="padding:8px 0 4px">${counts.equipment} ${raw(counts.equipment === 1 ? 'piece' : 'pieces')} of equipment, ${raw(counts.animals ? `${counts.animals} ${counts.animals === 1 ? 'animal' : 'animals'}, ` : '')}${state.tasks.length} ${raw(state.tasks.length === 1 ? 'routine' : 'routines')}, ${state.supplies.length} ${raw(state.supplies.length === 1 ? 'supply' : 'supplies')}, ${state.log.length} history ${raw(state.log.length === 1 ? 'entry' : 'entries')}.</div>
       <div class="btnrow">
         <button class="btn" data-act="export">${raw(icon('download', 16))}Export Data</button>
         <button class="btn" data-act="import">${raw(icon('upload', 16))}Import Data</button>
@@ -1152,7 +1187,7 @@ export function importForm(state, file) {
   return html`<div class="note" style="padding:8px 0 2px">
 <b>${file.name}</b>
 
-${c.equipment} ${raw(c.equipment === 1 ? 'piece' : 'pieces')} of equipment · ${c.routines} ${raw(c.routines === 1 ? 'routine' : 'routines')} · ${c.parts} ${raw(c.parts === 1 ? 'part' : 'parts')} · ${c.history} history ${raw(c.history === 1 ? 'entry' : 'entries')}</div>
+${c.equipment} ${raw(c.equipment === 1 ? 'piece' : 'pieces')} of equipment · ${raw(c.animals ? `${c.animals} ${c.animals === 1 ? 'animal' : 'animals'} · ` : '')}${c.routines} ${raw(c.routines === 1 ? 'routine' : 'routines')} · ${c.parts} ${raw(c.parts === 1 ? 'supply' : 'supplies')} · ${c.history} history ${raw(c.history === 1 ? 'entry' : 'entries')}</div>
 
     <div class="field">
       <label for="f-mode">How to bring it in</label>
@@ -1180,6 +1215,33 @@ ${c.equipment} ${raw(c.equipment === 1 ? 'piece' : 'pieces')} of equipment · ${
  * "Bsmt" becoming three different places that group separately, and the same
  * argument applies to categories.
  */
+/**
+ * The values a field is using, as a menu: Settings' list for that field, and
+ * nothing it does not have. A built-in one reads by its name — Heating &
+ * Cooling, Dog — and one somebody added reads as they typed it. A built-in
+ * nobody has used yet is not offered; typing its name brings it back, with
+ * its icon and its suggestions (see builtInFor).
+ */
+function inUse(records, field, labelOf) {
+  const values = [...new Set(records.map((r) => String(r[field] || '').trim()).filter(Boolean))];
+  return values
+    .map((v) => [v, labelOf(v) || v])
+    .sort((a, b) => a[1].localeCompare(b[1]));
+}
+
+/**
+ * A typed category or species, taken as Elmer's own when it names one —
+ * by key or by name, ignoring case and "&" against "and" — so typing "dog"
+ * or "heating and cooling" gives the built-in rather than a twin of it.
+ */
+export function builtInFor(list, typed) {
+  const norm = (t) => String(t || '').trim().toLowerCase().replace(/\s*&\s*/g, ' and ').replace(/\s+/g, ' ');
+  const want = norm(typed);
+  if (!want) return null;
+  const hit = list.find(([key, label]) => norm(key) === want || norm(label) === want);
+  return hit ? hit[0] : null;
+}
+
 export function pickOrNew({ label, id, pickName, newName, known, current, newLabel, placeholder }) {
   const has = known.length > 0;
   if (!has) {
@@ -1210,16 +1272,18 @@ export function pickOrNew({ label, id, pickName, newName, known, current, newLab
 
 /** Where a piece of equipment is. */
 /**
- * Every location anything is in, equipment and parts together.
+ * Every location anything is in — equipment, animals and supplies together.
  *
- * One vocabulary, not two. A house has the rooms it has: the shelf the spare
- * filters sit on is in the same basement as the furnace they go in, and
- * offering a separate list of part-places would mean typing "Basement" twice
- * and renaming it twice. It also means the Settings editor governs both.
+ * One vocabulary, not three. A place has the things it has: the shelf the
+ * spare filters sit on is in the same basement as the furnace they go in, and
+ * the barn holds the tractor, the horse and the hay. Separate lists would mean
+ * typing "Barn" twice and renaming it twice. It also means the one Settings
+ * editor governs all of them.
  */
 export function knownLocations(state) {
   const all = [
     ...state.equipment.map((x) => (x.location || '').trim()),
+    ...(state.animals || []).map((x) => (x.location || '').trim()),
     ...state.supplies.map((x) => (x.location || '').trim()),
   ].filter(Boolean);
   return [...new Set(all)].sort((a, b) => a.localeCompare(b));
@@ -1235,7 +1299,7 @@ export function locationField(state, record, opts = {}) {
     id: 'f-location',
     pickName: 'locationPick',
     newName: 'locationNew',
-    known: knownLocations(state).map((l) => [l, l]),
+    known: (opts.known || knownLocations(state)).map((l) => [l, l]),
     current: ((record && record.location) || '').trim(),
     newLabel: 'New Location…',
     placeholder: opts.placeholder || 'Kitchen',
@@ -1250,18 +1314,12 @@ export function locationField(state, record, opts = {}) {
  * back to the generic icon, which is the cost of not being on the list.
  */
 export function categoryField(state, equipment) {
-  const builtIn = CATEGORIES.map(([v, l]) => [v, l]);
-  const names = new Set(builtIn.map(([v]) => v));
-  const custom = [...new Set(
-    state.equipment.map((x) => (x.category || '').trim()).filter((c) => c && !names.has(c)),
-  )].sort((a, b) => a.localeCompare(b)).map((c) => [c, c]);
-
   return pickOrNew({
     label: 'Category',
     id: 'f-category',
     pickName: 'categoryPick',
     newName: 'categoryNew',
-    known: [...builtIn, ...custom],
+    known: inUse(state.equipment, 'category', categoryLabel),
     current: (equipment.category || '').trim(),
     newLabel: 'New Category…',
     placeholder: 'What kind of thing?',
@@ -1317,11 +1375,11 @@ export function equipmentForm(state, eq) {
     <div class="two">
       <div class="field">
         <label for="f-purchasedOn">Purchased</label>
-        <input id="f-purchasedOn" name="purchasedOn" type="date" value="${e.purchasedOn || ''}">
+        <input id="f-purchasedOn" name="purchasedOn" type="date" data-optional value="${e.purchasedOn || ''}">
       </div>
       <div class="field">
         <label for="f-installedOn">Installed</label>
-        <input id="f-installedOn" name="installedOn" type="date" value="${e.installedOn || ''}">
+        <input id="f-installedOn" name="installedOn" type="date" data-optional value="${e.installedOn || ''}">
       </div>
     </div>
     <div class="two">
@@ -1400,7 +1458,7 @@ export function partRow(supply, quantity) {
 export function partOptions(state, used) {
   const taken = new Set((used || []).map((u) => u.supplyId));
   const free = state.supplies.filter((p) => !taken.has(p.id));
-  return html`<option value="">${raw(free.length ? 'Add a part…' : 'All parts added')}</option>
+  return html`<option value="">${raw(free.length ? 'Add a supply…' : 'All supplies added')}</option>
     ${free.map((p) => html`<option value="${p.id}">${p.name}</option>`)}`;
 }
 
@@ -1419,14 +1477,19 @@ export function routineForm(state, task, equipmentId) {
   const show = (k) => raw(kind === k ? '' : ' hidden');
   return html`<div class="field">
       <label for="f-rname">Routine</label>
-      <input id="f-rname" name="name" value="${t.name || ''}" placeholder="Replace air filter"
+      <input id="f-rname" name="name" value="${t.name || ''}" placeholder="${isAnimal(ownerOf(state, eqId)) ? 'Flea treatment' : 'Replace air filter'}"
         data-titlecase autocomplete="off">
     </div>
     <div class="field">
-      <label for="f-equipment">Equipment</label>
+      <!-- With Animals on, a routine can be for either, so the picker is
+           "For" and the two are grouped. Off, it is the Equipment picker it
+           has always been, word for word. -->
+      <label for="f-equipment">${(state.animals || []).length ? 'For' : 'Equipment'}</label>
       <select id="f-equipment" name="equipmentId">
         <option value="">—</option>
-        ${state.equipment.map((e) => html`<option value="${e.id}"${raw(eqId === e.id ? ' selected' : '')}>${e.name}</option>`)}
+        ${raw((state.animals || []).length
+    ? `<optgroup label="Equipment">${ownerOptions(state.equipment, eqId)}</optgroup><optgroup label="Animals">${ownerOptions(state.animals, eqId)}</optgroup>`
+    : ownerOptions(state.equipment, eqId))}
       </select>
     </div>
     <!-- Four ways to be due, and only one showing at a time. An interval
@@ -1498,15 +1561,15 @@ export function routineForm(state, task, equipmentId) {
     </div>
     <div class="field">
       <label for="f-lastDone">Last done</label>
-      <input id="f-lastDone" name="lastDone" type="date" value="${t.lastDone || ''}">
-      <div class="hint">Leave this empty if you have never done it. A routine anchored to months, a clock change or a date still knows when it is next due; one on an interval has nothing to count from, so it reads as due now.</div>
+      <input id="f-lastDone" name="lastDone" type="date" data-optional value="${t.lastDone || ''}">
+      <div class="hint">Leave this empty if you have never done it. Elmer then counts from the day the routine was added: one on an interval is due that day, and one on months, a clock change or a date comes due at the next one.</div>
     </div>
     ${raw(state.supplies.length ? html`<div class="field">
-      <label for="f-pickpart">Parts this uses</label>
-      <select id="f-pickpart" data-act="pick-part" aria-label="Add a part this routine uses">
+      <label for="f-pickpart">Supplies this uses</label>
+      <select id="f-pickpart" data-act="pick-part" aria-label="Add a supply this routine uses">
         ${raw(partOptions(state, used))}
       </select>
-      <div class="hint">Only the parts this routine actually uses — marking it done takes them off the shelf.</div>
+      <div class="hint">Only the supplies this routine actually uses — marking it done takes them off the shelf.</div>
       <div class="partlist">${used.map((u) => {
         const p = state.supplies.find((x) => x.id === u.supplyId);
         return p ? partRow(p, u.quantity) : '';
@@ -1522,7 +1585,7 @@ export function routineForm(state, task, equipmentId) {
 export function partForm(state, part) {
   const p = part || {};
   return html`<div class="field">
-      <label for="f-pname">Part</label>
+      <label for="f-pname">Name</label>
       <input id="f-pname" name="name" value="${p.name || ''}" placeholder="20x25x1 MERV 11"
         data-titlecase autocomplete="off">
     </div>
@@ -1611,7 +1674,9 @@ export function routineActions(state, task, st) {
     </div>`;
   }
 
-  const snoozed = st && st.status === 'snoozed';
+  const snoozed = Boolean(st && st.snoozedUntil);
+  const was = snoozed && st.realDue && st.realDue < task.snoozedUntil
+    ? ` It was due ${formatDay(st.realDue, state.computed.today)}; waking it puts it back on that date.` : '';
   return html`<div class="btnrow">
     ${raw(edit)}
     ${raw(snoozed
@@ -1619,19 +1684,19 @@ export function routineActions(state, task, st) {
       : `<button class="btn" data-act="snooze-open" data-id="${id}">${icon('today', 16)}Snooze</button>`)}
     <button class="btn" data-variant="primary" data-act="save-log" data-id="${task.id}">${raw(icon('check', 16))}Mark done</button>
   </div>
-  ${raw(snoozed ? `<div class="hint" style="margin-top:8px">Snoozed until ${esc(formatDay(task.snoozedUntil, state.computed.today))}. It will say what it really is again when it wakes.</div>` : '')}`;
+  ${raw(snoozed ? `<div class="hint" style="margin-top:8px">Snoozed until ${esc(formatDay(task.snoozedUntil, state.computed.today))}.${esc(was)}</div>` : '')}`;
 }
 
 /** The dialog behind a long-press or a row tap: log a service with detail. */
 export function logForm(state, taskId) {
   const task = state.tasks.find((t) => t.id === taskId);
   if (!task) return html`<div class="note">That routine is gone.</div>`;
-  const eq = state.equipment.find((e) => e.id === task.equipmentId);
+  const eq = ownerOf(state, task.equipmentId);
   const st = state.computed.states[taskId] || {};
   const used = task.partsUsed || [];
 
   return html`<dl class="kv" style="padding:4px 0 10px">
-      ${raw(eq ? `<dt>Equipment</dt><dd>${esc(eq.name)}</dd>` : '')}
+      ${raw(eq ? `<dt>${isAnimal(eq) ? 'Animal' : 'Equipment'}</dt><dd>${esc(eq.name)}</dd>` : '')}
       <dt>Schedule</dt><dd>${scheduleText(task)}</dd>
       <dt>Last done</dt><dd>${raw(task.lastDone ? esc(formatDay(task.lastDone, state.computed.today)) : 'never')}</dd>
       ${raw(st.due ? `<dt>Due</dt><dd>${esc(formatDay(st.due, state.computed.today))} · ${esc(relative(st.daysLeft))}</dd>` : '')}
@@ -1654,7 +1719,7 @@ export function logForm(state, taskId) {
       </div>
     </div>
     ${raw(used.length ? html`<div class="field">
-      <label>Parts used</label>
+      <label>Supplies used</label>
       ${used.map((u) => {
         const p = state.supplies.find((s) => s.id === u.supplyId);
         if (!p) return '';
@@ -1695,24 +1760,564 @@ export function logForm(state, taskId) {
 export function logDetail(state, logId) {
   const l = state.log.find((x) => x.id === logId);
   if (!l) return html`<div class="note">That entry is gone.</div>`;
-  const eq = state.equipment.find((e) => e.id === l.equipmentId);
+  const eq = ownerOf(state, l.equipmentId);
+  // A finished one-time routine is listed nowhere else, so its history entry
+  // is the way back to it — to change its date, or make it yearly after all.
+  const routine = state.tasks.find((t) => t.id === l.taskId);
+  const finished = routine && (state.computed.states[routine.id] || {}).status === 'done' ? routine : null;
   const parts = (l.usedParts || []).map((u) => {
     const p = state.supplies.find((s) => s.id === u.supplyId);
-    return p ? `${u.quantity} × ${p.name}` : `${u.quantity} × (deleted part)`;
+    return p ? `${u.quantity} × ${p.name}` : `${u.quantity} × (deleted supply)`;
   });
 
   // Equipment first: the sheet is titled "History entry", so what this was
   // done to is the thing that identifies it. The date is the detail.
   return html`<dl class="kv" style="padding:4px 0 10px">
-      ${raw(eq ? `<dt>Equipment</dt><dd>${esc(eq.name)}</dd>` : '')}
+      ${raw(eq
+    ? `<dt>${isAnimal(eq) ? 'Animal' : 'Equipment'}</dt><dd>${esc(eq.name)}</dd>`
+    : (l.equipmentName ? `<dt>For</dt><dd>${esc(l.equipmentName)}</dd>` : ''))}
       <dt>Done on</dt><dd>${formatDay(l.doneOn, state.computed.today)}</dd>
       ${raw(l.cost ? `<dt>Cost</dt><dd>${esc(l.cost)}</dd>` : '')}
-      ${raw(parts.length ? `<dt>Parts used</dt><dd>${esc(parts.join(', '))}</dd>` : '')}
+      ${raw(parts.length ? `<dt>Supplies used</dt><dd>${esc(parts.join(', '))}</dd>` : '')}
       ${raw(l.previousLastDone ? `<dt>Previous</dt><dd>${esc(formatDay(l.previousLastDone, state.computed.today))}</dd>` : '')}
     </dl>
     ${raw(l.notes ? `<div class="label">Notes</div><div class="note" style="padding:0 0 12px">${esc(l.notes)}</div>` : '')}
+    ${raw(finished ? `<div class="btnrow">
+      <button class="btn" data-act="edit-routine" data-id="${esc(finished.id)}">${icon('edit', 16)}Edit routine</button>
+    </div>` : '')}
     <div class="btnrow">
       <button class="btn" data-act="close">Close</button>
       <button class="btn" data-variant="danger" data-act="undo" data-id="${l.id}">${raw(icon('undo', 16))}Undo</button>
+    </div>`;
+}
+
+/* ---------------------------------------------------------------- animals --
+
+   An animal is a record in the equipment list marked type: 'animal'. The
+   panel's state hands the two out separately — state.equipment is equipment
+   only, state.animals the animals — so every screen that was written for
+   equipment goes on seeing exactly what it always saw. Anything that has to
+   find a routine's owner by id, whichever kind it is, goes through ownerOf.
+*/
+
+export function isAnimal(record) {
+  return Boolean(record) && record.type === 'animal';
+}
+
+/** A routine's or history entry's owner by id, equipment or animal. */
+export function ownerOf(state, id) {
+  if (!id) return null;
+  return state.equipment.find((e) => e.id === id)
+    || (state.animals || []).find((a) => a.id === id)
+    || null;
+}
+
+/** What a history entry belonged to: the live name, or the one it kept. */
+function ownerName(state, entry) {
+  const live = ownerOf(state, entry.equipmentId);
+  return live ? live.name : entry.equipmentName || '';
+}
+
+function ownerOptions(list, chosen) {
+  return list.map((e) => `<option value="${esc(e.id)}"${chosen === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('');
+}
+
+/** Each species: its key, its name, and the icon it is drawn with. */
+export const SPECIES = [
+  ['dog', 'Dog', 'dog'], ['cat', 'Cat', 'cat'], ['bird', 'Bird', 'bird'], ['fish', 'Fish', 'fish'],
+  ['rabbit', 'Rabbit', 'rabbit'], ['smallpet', 'Small pet', 'mouse'], ['reptile', 'Reptile', 'turtle'],
+  ['horse', 'Horse', 'horse'], ['donkey', 'Donkey', 'horse'], ['cattle', 'Cattle', 'cow'],
+  ['goat', 'Goat', 'goat'], ['sheep', 'Sheep', 'sheep'], ['pig', 'Pig', 'pig'],
+  ['chicken', 'Chicken', 'chicken'], ['duck', 'Duck', 'duck'], ['alpaca', 'Alpaca / llama', 'alpaca'],
+  ['other', 'Other', 'paw'],
+];
+
+/** Horses and farm animals: the ones with registries, brands, herds and flocks. */
+export const LIVESTOCK = new Set(['horse', 'donkey', 'cattle', 'goat', 'sheep', 'pig', 'chicken', 'duck', 'alpaca']);
+
+// What a farm animal's sex is actually called. "Female, spayed" is a pet's
+// answer; a horse is a mare, a stallion or a gelding.
+const SEXES = {
+  horse: [['mare', 'Mare'], ['stallion', 'Stallion'], ['gelding', 'Gelding']],
+  donkey: [['jenny', 'Jenny'], ['jack', 'Jack'], ['gelding', 'Gelding']],
+  cattle: [['cow', 'Cow'], ['heifer', 'Heifer'], ['bull', 'Bull'], ['steer', 'Steer']],
+  goat: [['doe', 'Doe'], ['buck', 'Buck'], ['wether', 'Wether']],
+  sheep: [['ewe', 'Ewe'], ['ram', 'Ram'], ['wether', 'Wether']],
+  pig: [['sow', 'Sow'], ['gilt', 'Gilt'], ['boar', 'Boar'], ['barrow', 'Barrow']],
+  chicken: [['hen', 'Hens'], ['rooster', 'Rooster'], ['mixed', 'Mixed']],
+  duck: [['hen', 'Hens'], ['drake', 'Drake'], ['mixed', 'Mixed']],
+};
+const PET_SEXES = [['f', 'Female'], ['m', 'Male']];
+
+/** The sex menu's options for a species, with "not set" first. */
+export function sexOptions(species) {
+  return [['', '—'], ...(SEXES[species] || PET_SEXES)];
+}
+
+function speciesOf(a) {
+  const built = SPECIES.find(([k]) => k === a.species);
+  if (built) return built;
+  // One added by hand: shown as typed, with the paw, and the pet's form.
+  const own = String(a.species || '').trim();
+  return own ? [own, own, 'paw'] : SPECIES[SPECIES.length - 1];
+}
+
+function builtInSpeciesLabel(value) {
+  const built = SPECIES.find(([k]) => k === value);
+  return built ? built[1] : null;
+}
+
+/**
+ * What kind of animal, the way Category works for equipment: Elmer's own
+ * species, which carry an icon, the right words for sex and, for farm
+ * animals, How many; then any the house has added, which carry the paw and
+ * the pet's form. One typed once is offered from then on, and
+ * Settings ▸ Species renames or removes it.
+ */
+export function speciesField(state, animal) {
+  return pickOrNew({
+    label: 'Species',
+    id: 'f-species',
+    pickName: 'speciesPick',
+    newName: 'speciesNew',
+    known: inUse(state.animals || [], 'species', builtInSpeciesLabel),
+    current: ((animal && animal.species) || '').trim(),
+    newLabel: 'New Species…',
+    placeholder: 'What kind of animal?',
+  });
+}
+
+function sexLabel(a) {
+  const found = sexOptions(a.species).find(([k]) => k && k === a.sex);
+  return found ? found[1] : '';
+}
+
+function parseIso(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+  return m ? { y: Number(m[1]), m: Number(m[2]), d: Number(m[3]) } : null;
+}
+
+/**
+ * How old, in the unit that reads naturally: weeks for a puppy, months for
+ * the first two years, then years. "About 7 years" when only the year is
+ * known, which is most rescues.
+ */
+export function ageText(a, todayIso) {
+  const b = parseIso(a.birthDate);
+  const t = parseIso(todayIso);
+  if (!b || !t || a.birthDate > todayIso) return '';
+  if (a.birthApprox) {
+    const years = t.y - b.y;
+    return years < 1 ? 'under a year' : `about ${years} ${years === 1 ? 'year' : 'years'}`;
+  }
+  const months = (t.y - b.y) * 12 + (t.m - b.m) - (t.d < b.d ? 1 : 0);
+  if (months >= 24) return `${Math.floor(months / 12)} years`;
+  if (months >= 12) {
+    const r = months - 12;
+    return r ? `1 year, ${r} ${r === 1 ? 'month' : 'months'}` : '1 year';
+  }
+  if (months >= 1) return `${months} ${months === 1 ? 'month' : 'months'}`;
+  const days = daysBetween(a.birthDate, todayIso);
+  const weeks = Math.floor(days / 7);
+  if (weeks >= 1) return `${weeks} ${weeks === 1 ? 'week' : 'weeks'}`;
+  return `${days} ${days === 1 ? 'day' : 'days'}`;
+}
+
+/**
+ * The next birthday: the day, the age it brings, how far off.
+ *
+ * Nothing when only the year is known — a birthday on a guessed day would be
+ * a made-up date. A 29 February birthday falls on 1 March in other years,
+ * the same rule Elmer's yearly dates already follow, so the two never
+ * disagree about when the day is.
+ */
+export function nextBirthday(a, todayIso) {
+  const b = parseIso(a.birthDate);
+  if (!b || !parseIso(todayIso) || a.birthApprox || a.birthDate > todayIso) return null;
+  const pad = (n) => String(n).padStart(2, '0');
+  const leap = (y) => (y % 4 === 0 && y % 100 !== 0) || y % 400 === 0;
+  const on = (y) => (b.m === 2 && b.d === 29 && !leap(y) ? `${y}-03-01` : `${y}-${pad(b.m)}-${pad(b.d)}`);
+  let year = Number(todayIso.slice(0, 4));
+  if (on(year) < todayIso) year += 1;
+  if (year === b.y) year += 1;   // born today: the first birthday is next year
+  return { on: on(year), turns: year - b.y, inDays: daysBetween(todayIso, on(year)) };
+}
+
+// How long before a birthday the list mentions it.
+const BIRTHDAY_AHEAD = 30;
+
+function birthdayLine(n) {
+  if (n.inDays === 0) return `Turns ${n.turns} today`;
+  if (n.inDays === 1) return `Turns ${n.turns} tomorrow`;
+  return `Turns ${n.turns} in ${n.inDays} days`;
+}
+
+/** The icon an animal shows: one picked for it, or its species' own. */
+export function animalIcon(a) {
+  if (a && a.icon && hasIcon(a.icon)) return a.icon;
+  const name = speciesOf(a || {})[2];
+  return hasIcon(name) ? name : 'paw';
+}
+
+function animalGlyph(a, size = 19) {
+  return `<div class="glyph">${icon(animalIcon(a), size)}</div>`;
+}
+
+export function animalsView(state) {
+  const animals = state.animals || [];
+  const today = state.computed.today;
+  if (!animals.length) {
+    return html`<div class="scroll"><div class="pad">${raw(emptyState({
+      ic: 'paw',
+      title: 'No animals yet',
+      body: 'Add the dog, the cats, the horses or the hens, and keep their vet visits, treatments and farrier on the same list as the furnace filter.',
+    }))}</div></div>`;
+  }
+
+  const needle = (state.query || '').trim().toLowerCase();
+  const matched = animals.filter((a) => !needle || haystack(
+    a.name, a.location, speciesOf(a)[1], a.breed, a.color, a.microchip, a.license,
+    ...medicationsOf(a).map((m) => m.name), ...vaccinationsOf(a).map((v) => v.name),
+  ).includes(needle));
+  if (!matched.length) {
+    return html`<div class="scroll"><div class="pad">
+      ${raw(findRow(state, 'animals', 'Search animals'))}
+      ${raw(emptyState({ ic: 'search', title: 'Nothing matches that', body: `No animals matching “${state.query.trim()}”.` }))}
+    </div></div>`;
+  }
+
+  // Grouped by location the way equipment is, so the barn reads together.
+  const shape = viewOf(state, 'animals');
+  const sections = groupByLocation(matched, { grouped: state.settings.showLocations }).map(([where, items]) => {
+    const rows = [...items].sort((x, y) => x.name.localeCompare(y.name)).map((a) => {
+      const tasks = liveTasks(state, a.id);
+      const worst = rollUp(tasks, state);
+      const tag = worst === 'idle' ? '' : `<span class="tag" data-tone="${esc(worst)}">${esc(worst)}</span>`;
+      // A flock is a number of birds rather than an age.
+      const what = a.headCount > 1 ? `${a.headCount} ${['chicken', 'duck'].includes(a.species) ? 'birds' : 'head'}` : ageText(a, today);
+      const nb = nextBirthday(a, today);
+      const bday = nb && nb.inDays <= BIRTHDAY_AHEAD ? birthdayLine(nb) : '';
+      const kind = speciesOf(a)[1];
+
+      if (shape === 'cards') {
+        return html`<div class="tile" data-act="animal" data-id="${a.id}" role="button" tabindex="0">
+          <div class="top">${raw(animalGlyph(a, 21))}${raw(tag)}</div>
+          <div class="name">${a.name}</div>
+          <div class="meta">${[kind, what].filter(Boolean).join(' · ')}${raw(bday ? `<span class="bday">${esc(bday)}</span>` : '')}</div>
+        </div>`;
+      }
+      // One line on a row, so a coming birthday takes the age's place — it
+      // says the age as well, and a phone has no room for both.
+      return html`<div class="row" data-act="animal" data-id="${a.id}" role="button" tabindex="0">
+        ${raw(animalGlyph(a))}
+        <div class="body">
+          <div class="title">${a.name}</div>
+          <div class="sub"><span class="txt">${raw(bday
+    ? `${esc(kind)} · <span class="bday">${esc(bday)}</span>`
+    : esc([kind, what].filter(Boolean).join(' · ')))}</span></div>
+        </div>
+        ${raw(tag)}
+        ${raw(icon('chevron', 16))}
+      </div>`;
+    });
+    return html`${raw(where ? `<div class="label">${esc(where)}</div>` : '')}
+      <div class="${raw(shape === 'cards' ? 'tiles' : 'card')}">${rows}</div>`;
+  });
+
+  return html`<div class="scroll"><div class="pad">
+    ${raw(findRow(state, 'animals', 'Search animals'))}
+    ${sections}
+  </div></div>`;
+}
+
+/* Weight. Kept as a number and the unit it was typed in, and shown in the
+   unit Settings asks for — so changing the setting converts every animal
+   rather than leaving half of them in the other unit. Text that is not a
+   number (an older or hand-edited "about 60") is shown as it was written. */
+const LB_PER_KG = 2.20462262185;
+
+/** Pounds or kilograms: the setting once chosen, Home Assistant's own units until then. */
+export function weightUnitOf(settings, hass) {
+  const set = settings && settings.weightUnit;
+  if (set === 'lb' || set === 'kg') return set;
+  const mass = hass && hass.config && hass.config.unit_system && hass.config.unit_system.mass;
+  return mass === 'kg' ? 'kg' : 'lb';
+}
+
+/** "68", "68 lb", "1,050", "31kg" → { weight, weightUnit }; null for blank or text that is no number. */
+export function parseWeight(text, unit) {
+  const m = String(text == null ? '' : text).trim().replace(/,/g, '')
+    .match(/^(\d+(?:\.\d+)?|\.\d+)\s*(lbs?|pounds?|kgs?|kilos?|kilograms?)?\.?$/i);
+  if (!m) return null;
+  const said = (m[2] || '').toLowerCase();
+  return { weight: Number(m[1]), weightUnit: said ? (said.startsWith('k') ? 'kg' : 'lb') : unit };
+}
+
+/** The weight as a number in `unit`, rounded the way it is shown; null when there is none. */
+export function weightIn(a, unit) {
+  if (!a || typeof a.weight !== 'number' || !Number.isFinite(a.weight)) return null;
+  const from = a.weightUnit === 'kg' ? 'kg' : 'lb';
+  const v = from === unit ? a.weight : unit === 'kg' ? a.weight / LB_PER_KG : a.weight * LB_PER_KG;
+  // A tenth where a tenth is worth saying — a cat, a hen, a puppy — and whole
+  // numbers past that, where a decimal on a horse is noise.
+  const places = v < (unit === 'kg' ? 100 : 10) ? 1 : 0;
+  return Number(v.toFixed(places));
+}
+
+/** How each unit is written. Stored as "lb", shown as "lbs", the way it is said. */
+export const UNIT_LABEL = { lb: 'lbs', kg: 'kg' };
+
+/** "68 lbs", "476 kg", or whatever text was there; '' for none. */
+export function weightText(a, unit) {
+  const v = weightIn(a, unit);
+  if (v != null) return `${v.toLocaleString('en-US', { maximumFractionDigits: 1 })} ${UNIT_LABEL[unit]}`;
+  return typeof (a && a.weight) === 'string' ? a.weight.trim() : '';
+}
+
+/** What the form's box holds: the bare number in `unit`, so it can be typed over. */
+export function weightField(a, unit) {
+  const v = weightIn(a, unit);
+  if (v != null) return String(v);
+  return typeof (a && a.weight) === 'string' ? a.weight : '';
+}
+
+export function animalDetail(state, id) {
+  const a = (state.animals || []).find((x) => x.id === id);
+  if (!a) return html`<div class="center">That animal is gone.</div>`;
+  const today = state.computed.today;
+  const rows = state.rows.filter((r) => r.task.equipmentId === id);
+
+  const facts = [];
+  const add = (k, v, cls) => {
+    if (v) facts.push(html`<dt>${k}</dt><dd${raw(cls ? ` class="${cls}"` : '')}>${v}</dd>`);
+  };
+  add('Species', speciesOf(a)[1]);
+  add('Breed', a.breed);
+  if (a.headCount > 1) add('How many', String(a.headCount));
+  const fixed = !LIVESTOCK.has(a.species) && a.fixed === 'yes'
+    ? (a.sex === 'f' ? 'spayed' : a.sex === 'm' ? 'neutered' : 'spayed or neutered')
+    : '';
+  add('Sex', [sexLabel(a), fixed].filter(Boolean).join(', ').replace(/^./, (c) => c.toUpperCase()));
+  if (a.birthDate) {
+    const age = ageText(a, today);
+    const born = a.birthApprox ? `About ${a.birthDate.slice(0, 4)}` : formatDay(a.birthDate);
+    add('Born', age ? `${born} · ${age} old` : born);
+  }
+  const nb = nextBirthday(a, today);
+  if (nb) {
+    facts.push(html`<dt>Next birthday</dt><dd>${formatDay(nb.on, today)} · <span class="bday">${birthdayLine(nb).replace(/^T/, 't')}</span></dd>`);
+  }
+  add('Location', a.location);
+  add('Color', a.color);
+  add('Weight', weightText(a, state.weightUnit));
+  add('Height', a.height);
+  add('Microchip', a.microchip, 'mono');
+  add('License', a.license, 'mono');
+  add('From', a.adoptedFrom);
+  add('Adopted', a.adoptedOn ? formatDay(a.adoptedOn, today) : '');
+  add('Vet', a.vet);
+  const tel = safeHref(a.phone ? `tel:${String(a.phone).replace(/[^\d+]/g, '')}` : '');
+  if (a.phone) {
+    facts.push(html`<dt>Phone</dt><dd>${raw(tel ? `<a href="${esc(tel)}">${esc(a.phone)}</a>` : esc(a.phone))}</dd>`);
+  }
+  if (a.email) {
+    facts.push(html`<dt>Email</dt><dd>${raw(`<a href="mailto:${esc(a.email)}">${esc(a.email)}</a>`)}</dd>`);
+  }
+  add('Insurance', a.insurer);
+  // Its own row, in the number face like the microchip, rather than run on
+  // after the insurer's name where a phone breaks it at the hyphen.
+  add('Policy', a.policy, 'mono');
+
+  const note = (label, text) => (text
+    ? `<div class="label">${label}</div><div class="card"><div class="note">${esc(text)}</div></div>`
+    : '');
+  // A list of things, each a title and a line under it, in a card of its own.
+  const list = (label, items) => (items.length
+    ? `<div class="label">${label}</div><div class="card">${items.map(([title, sub]) => `<div class="row static"><div class="body">
+        <div class="title">${esc(title)}</div>${sub ? `<div class="sub"><span class="txt">${esc(sub)}</span></div>` : ''}
+      </div></div>`).join('')}</div>`
+    : '');
+  // Latest first: the one you are asked about at the vet is the last one given.
+  const shots = vaccinationsOf(a).slice().sort((x, y) => String(y.date || '').localeCompare(String(x.date || '')));
+
+  return html`<div class="scroll"><div class="pad">
+    ${raw(crumb('Animals', a.name))}
+    ${raw(facts.length ? `<div class="card"><dl class="kv">${facts.join('')}</dl></div>` : '')}
+    ${raw(note('Diet', a.diet))}
+    ${raw(list('Medications', medicationsOf(a).map((m) => [m.name || m.dosage, m.name ? m.dosage : ''])))}
+    ${raw(list('Vaccinations', shots.map((v) => [v.name, v.date ? `Given ${formatDay(v.date, today)}` : 'Date not recorded'])))}
+    ${raw(note('Notes', a.notes))}
+
+    <div class="label">Routines</div>
+    ${raw(rows.length
+    ? `<div class="card">${rows.map((r) => routineRow(r, state, { busy: state.busy[r.task.id], hideEquipment: true })).join('')}</div>`
+    : '<div class="card"><div class="note">No routines yet. Add one to start tracking this.</div></div>')}
+    <div class="btnrow">
+      <button class="btn" data-act="add-routine" data-id="${a.id}">${raw(icon('plus', 16))}Add routine</button>
+    </div>
+
+    <div class="btnrow">
+      <button class="btn" data-act="edit-animal" data-id="${a.id}">${raw(icon('edit', 16))}Edit</button>
+      <button class="btn" data-variant="danger" data-act="delete-equipment" data-id="${a.id}">${raw(icon('trash', 16))}Delete</button>
+    </div>
+  </div></div>`;
+}
+
+/* Medications and vaccinations: a list of rows, two boxes each, added one at
+   a time with a button under them and removed with the × beside each — the
+   equipment form's links, laid out as a little table. The column names sit
+   over the rows once there are any, since a filled box has lost its
+   placeholder and a date box never shows one. */
+const PAIRS = {
+  med: { label: 'Medications', add: 'Add medication', a: 'Medication', b: 'Dosage' },
+  vax: { label: 'Vaccinations', add: 'Add vaccination', a: 'Vaccine', b: 'Date given' },
+};
+
+/** An animal's medications as rows; a note from before they were rows is one row. */
+export function medicationsOf(a) {
+  const m = a && a.medications;
+  if (typeof m === 'string') return m.split('\n').map((s) => s.trim()).filter(Boolean).map((name) => ({ name, dosage: '' }));
+  return Array.isArray(m) ? m.filter((x) => x && (x.name || x.dosage)) : [];
+}
+
+export function vaccinationsOf(a) {
+  const v = a && a.vaccinations;
+  return Array.isArray(v) ? v.filter((x) => x && x.name) : [];
+}
+
+/** One row. Rendered here and appended by the panel, so an added row matches. */
+export function pairRow(kind, item, today) {
+  const k = PAIRS[kind];
+  const it = item || {};
+  const second = kind === 'vax'
+    ? `<input class="pairb" type="date" data-optional${today ? ` max="${esc(today)}"` : ''} value="${esc(it.date || '')}" aria-label="${k.b}">`
+    : `<input class="pairb" value="${esc(it.dosage || '')}" placeholder="${k.b}" aria-label="${k.b}" autocomplete="off">`;
+  return `<div class="row pairrow">
+    <div class="pairfields">
+      <input class="paira" value="${esc(it.name || '')}" placeholder="${k.a}" aria-label="${k.a}" autocomplete="off">
+      ${second}
+    </div>
+    <button class="iconbtn" data-act="unpair" type="button" aria-label="Remove this ${k.a.toLowerCase()}">${icon('x', 16)}</button>
+  </div>`;
+}
+
+function pairList(kind, items, today) {
+  const k = PAIRS[kind];
+  return `<div class="field pairs" data-kind="${kind}">
+    <label>${k.label}</label>
+    <div class="pairhead" aria-hidden="true"><span>${k.a}</span><span>${k.b}</span></div>
+    <div class="pairlist">${items.map((it) => pairRow(kind, it, today)).join('')}</div>
+    <button class="btn addpair" data-act="add-pair" data-kind="${kind}" type="button">${icon('plus', 15)}${k.add}</button>
+  </div>`;
+}
+
+function textField(name, label, value, extra = '') {
+  return `<div class="field"><label for="f-${name}">${esc(label)}</label><input id="f-${name}" name="${name}" value="${esc(value == null ? '' : value)}" autocomplete="off"${extra ? ` ${extra}` : ''}></div>`;
+}
+
+function menuField(name, label, options, value) {
+  return `<div class="field"><label for="f-${name}">${esc(label)}</label><select id="f-${name}" name="${name}">${options
+    .map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(value == null ? '' : value) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`;
+}
+
+/**
+ * One form for every animal. Choosing a horse or a farm animal turns Sex into
+ * that animal's own words and puts How many where Spayed / neutered was — a
+ * flock is usually one record. Both are in the form and the species decides
+ * which shows, so changing your mind about the species loses nothing typed.
+ */
+export function animalForm(state, a) {
+  const e = a || {};
+  const species = e.species || '';
+  const farm = LIVESTOCK.has(species);
+  const today = state.computed.today;
+  const hide = (show) => (show ? '' : ' hidden');
+  return html`<div class="field">
+      <label for="f-name">Name</label>
+      <input id="f-name" name="name" value="${e.name || ''}" placeholder="Biscuit" data-titlecase autocomplete="off">
+    </div>
+    <div class="two">
+      ${raw(speciesField(state, e))}
+      ${raw(textField('breed', 'Breed', e.breed))}
+    </div>
+    <div class="two">
+      ${raw(menuField('sex', 'Sex', sexOptions(species), e.sex))}
+      <div data-pet${raw(hide(!farm))}>${raw(menuField('fixed', 'Spayed / neutered', [['', 'Not sure'], ['yes', 'Yes'], ['no', 'No']], e.fixed))}</div>
+      <div data-livestock${raw(hide(farm))}>${raw(textField('headCount', 'How many', e.headCount, 'type="number" inputmode="numeric" min="1" placeholder="1"'))}</div>
+    </div>
+    <div class="two">
+      <div class="field">
+        <label for="f-birthDate">Birthdate</label>
+        <input id="f-birthDate" name="birthDate" type="date" data-optional max="${today}" value="${e.birthDate || ''}">
+      </div>
+      ${raw(menuField('birthApprox', 'Birthdate is', [['', 'Exact'], ['1', 'Only the year']], e.birthApprox ? '1' : ''))}
+    </div>
+    <div class="field"><div class="hint">Age is worked out from this. With an exact date the list mentions a birthday in the month before it; with only the year, it shows the age alone.</div></div>
+    <div class="two">
+      ${raw(locationField(state, e, { placeholder: 'Barn' }))}
+      ${raw(textField('color', 'Color / markings', e.color))}
+    </div>
+    <div class="two">
+      ${raw(textField('weight', `Weight (${UNIT_LABEL[state.weightUnit]})`, weightField(e, state.weightUnit), `inputmode="decimal" placeholder="${state.weightUnit === 'kg' ? '31' : '68'}"`))}
+      ${raw(textField('height', 'Height', e.height))}
+    </div>
+    <div class="two">
+      ${raw(textField('adoptedFrom', 'From', e.adoptedFrom, 'placeholder="Breeder, Shelter, Farm…"'))}
+      <div class="field">
+        <label for="f-adoptedOn">Adopted / acquired</label>
+        <input id="f-adoptedOn" name="adoptedOn" type="date" data-optional max="${today}" value="${e.adoptedOn || ''}">
+      </div>
+    </div>
+    <div class="two">
+      ${raw(textField('microchip', 'Microchip', e.microchip))}
+      ${raw(textField('license', 'License / tag number', e.license))}
+    </div>
+
+    <div class="label">Care</div>
+    ${raw(textField('vet', 'Vet', e.vet))}
+    <div class="two">
+      <div class="field"><label for="f-phone">Phone</label><input id="f-phone" name="phone" type="tel" value="${e.phone || ''}" autocomplete="off"></div>
+      <div class="field"><label for="f-email">Email</label><input id="f-email" name="email" type="email" value="${e.email || ''}" autocomplete="off"></div>
+    </div>
+    <div class="two">
+      ${raw(textField('insurer', 'Insurance', e.insurer))}
+      ${raw(textField('policy', 'Policy number', e.policy))}
+    </div>
+    <div class="field"><label for="f-diet">Diet</label><textarea id="f-diet" name="diet">${e.diet || ''}</textarea></div>
+    ${raw(pairList('med', medicationsOf(e), today))}
+    ${raw(pairList('vax', vaccinationsOf(e), today))}
+    <div class="field"><label for="f-notes">Notes</label><textarea id="f-notes" name="notes">${e.notes || ''}</textarea></div>
+    <div class="field">
+      <label>Icon</label>
+      <div class="iconpick" data-for="animal">
+        ${ANIMAL_ICONS.map((n) => html`<button type="button" data-act="pick-icon" data-value="${n}"
+          aria-pressed="${animalIcon(e) === n}" aria-label="${n}">${raw(icon(n, 20))}</button>`)}
+      </div>
+      <!-- Empty until somebody picks one, for the reason the equipment form
+           gives: the highlight shows what the species would give, and
+           storing that as a choice would stop it following the species. -->
+      <input type="hidden" name="icon" value="${e.icon || ''}">
+    </div>
+    <div class="btnrow">
+      <button class="btn" data-act="close">Cancel</button>
+      <button class="btn" data-variant="primary" data-act="save-animal" data-id="${e.id || ''}">Save</button>
+    </div>`;
+}
+
+/** What turning Animals off is about to delete, said before it does. */
+export function animalsOffSheet(state) {
+  const animals = state.animals || [];
+  const ids = new Set(animals.map((a) => a.id));
+  const n = liveTasks(state).filter((t) => ids.has(t.equipmentId)).length;
+  const names = animals.map((a) => a.name);
+  const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0] || '';
+  return html`<div class="field"><p class="sheetp">This deletes <b>${list}</b>${raw(n ? `, and their ${n} ${n === 1 ? 'routine' : 'routines'}` : '')}.</p></div>
+    <div class="field"><p class="sheetp quiet">Their service history is kept, and any supplies they used stay on the shelf. It cannot be undone — if you might want them back, export your data first and import it again later.</p></div>
+    <div class="btnrow">
+      <button class="btn" data-act="export">${raw(icon('download', 16))}Export Data</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn" data-act="close">Cancel</button>
+      <button class="btn" data-variant="danger" data-act="confirm-animals-off">${raw(icon('trash', 16))}Delete</button>
     </div>`;
 }

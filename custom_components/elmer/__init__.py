@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 
@@ -13,6 +12,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.typing import ConfigType
+from homeassistant.loader import async_get_integration
 
 from .const import (
     DOMAIN,
@@ -38,14 +38,19 @@ PLATFORMS: list[Platform] = [Platform.SENSOR]
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
-def _integration_version() -> str:
-    """Read the version out of our own manifest, for cache busting."""
+async def _async_integration_version(hass: HomeAssistant) -> str:
+    """Our own manifest's version, for cache busting.
+
+    Asked of Home Assistant's loader, which has read the manifest already.
+    This used to open manifest.json itself, which is blocking file I/O inside
+    the event loop — Home Assistant logs that as a bug in the integration and
+    asks people to report it, on every start.
+    """
     try:
-        path = os.path.join(os.path.dirname(__file__), "manifest.json")
-        with open(path, encoding="utf-8") as fh:
-            return json.load(fh).get("version", "0")
-    except (OSError, ValueError):
+        integration = await async_get_integration(hass, DOMAIN)
+    except Exception:  # noqa: BLE001
         return "0"
+    return str(integration.version or "0")
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -130,7 +135,7 @@ async def _async_register_frontend(hass: HomeAssistant) -> None:
     here = os.path.dirname(__file__)
     frontend_dir = os.path.join(here, "frontend")
 
-    version = _integration_version()
+    version = await _async_integration_version(hass)
 
     # The version goes in the PATH, not in a query string, and this is the
     # whole reason the panel can be updated without breaking.

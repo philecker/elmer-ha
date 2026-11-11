@@ -58,10 +58,10 @@ const base = `http://127.0.0.1:${port}/tools/harness/index.html`;
 const browser = await chromium.launch({ executablePath: CHROME });
 const made = [];
 
-async function open({ viewport, dark = false, narrow = true }) {
+async function open({ viewport, dark = false, narrow = true, animals = false }) {
   const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2 });
   const page = await ctx.newPage();
-  await page.goto(`${base}?narrow=${narrow ? 1 : 0}&dark=${dark ? 1 : 0}`);
+  await page.goto(`${base}?narrow=${narrow ? 1 : 0}&dark=${dark ? 1 : 0}${animals ? '&animals=1' : ''}`);
   await page.waitForSelector('.tabs .tab');
   await page.waitForSelector('.card .row');
   return { ctx, page };
@@ -90,6 +90,7 @@ async function shot(page, name) {
 const SCREENS = [
   'routines', 'equipment', 'cards', 'parts', 'history', 'settings',
   'log-service', 'snooze', 'schedule', 'clocks', 'ondate',
+  'animals', 'animal',
 ];
 const OWNED = [
   ...SCREENS.map((n) => `${n}.png`),
@@ -177,8 +178,28 @@ async function phoneScreens(dark) {
   await ctx.close();
 }
 
+/**
+ * The Animals tab, from its own sample. Animals are off by default and off
+ * means there are none, so every shot above is of a house without any —
+ * exactly as it was before the tab existed — and these come from a second
+ * page with the dog, the cat, the horse and the hens added.
+ */
+async function animalScreens(dark) {
+  const suffix = dark ? '-dark' : '';
+  const { ctx, page } = await open({ viewport: PHONE, dark, animals: true });
+  await page.click('.tab[data-value="animals"]');
+  await page.waitForSelector('.row[data-act="animal"]');
+  await shot(page, `animals${suffix}.png`);
+  await page.click('.row[data-id="a1"]');
+  await page.waitForSelector('.kv');
+  await shot(page, `animal${suffix}.png`);
+  await ctx.close();
+}
+
 await phoneScreens(false);
 await phoneScreens(true);
+await animalScreens(false);
+await animalScreens(true);
 
 /* -------------------------------------------------------------- desktop -- */
 for (const dark of [false, true]) {

@@ -229,11 +229,15 @@ class ElmerRoutineSensor(ElmerEntity):
         eq = self._store.equipment(task.get("equipmentId"))
         if not eq:
             return super().device_info
+        # An animal is a device of the same kind, with its breed where a
+        # machine has its model. Same identifier scheme either way, so a
+        # routine's entity never moves device because of what it belongs to.
+        animal = eq.get("type") == "animal"
         return DeviceInfo(
             identifiers={(DOMAIN, f"equipment_{eq['id']}")},
-            name=eq.get("name") or "Equipment",
+            name=eq.get("name") or ("Animal" if animal else "Equipment"),
             manufacturer=eq.get("brand") or "Elmer",
-            model=eq.get("model") or None,
+            model=(eq.get("breed") if animal else eq.get("model")) or None,
             serial_number=eq.get("serial") or None,
             suggested_area=eq.get("location") or None,
             via_device=(DOMAIN, self._entry.entry_id),

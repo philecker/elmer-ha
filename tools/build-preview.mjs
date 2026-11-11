@@ -19,6 +19,8 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
 const args = process.argv.slice(2);
 const EMPTY = args.includes('--empty');
+// --animals opens with the sample dog, cat, horse and hens, on their tab.
+const ANIMALS = !EMPTY && args.includes('--animals');
 const OUT = args.find((a) => !a.startsWith('--')) || path.join(ROOT, 'elmer-ha-preview.html');
 
 const result = await build({
@@ -72,6 +74,7 @@ const html = `<!doctype html>
   <span class="note">Home Assistant sidebar panel &middot; ${EMPTY ? 'a fresh install' : 'sample data'}, nothing is saved</span>
   <span class="sp"></span>
   <button id="data">${EMPTY ? 'Add the sample house' : 'Empty it'}</button>
+  <button id="animals">${ANIMALS ? 'Remove animals' : 'Add animals'}</button>
   <button id="size">Desktop width</button>
   <button id="theme">Dark</button>
 </div>
@@ -101,11 +104,32 @@ ${js}
     };
 
     var empty = ${EMPTY ? 'true' : 'false'};
+    var animals = ${ANIMALS ? 'true' : 'false'};
+    var animalsButton = document.getElementById('animals');
     if (empty) window.__setData('empty');
+    if (animals) {
+      window.__setData('animals');
+      panel.tab = 'animals';
+      panel._render();
+    }
     document.getElementById('data').onclick = function (e) {
       empty = !empty;
+      animals = false;
       window.__setData(empty ? 'empty' : 'sample');
       e.target.textContent = empty ? 'Add the sample house' : 'Empty it';
+      animalsButton.textContent = 'Add animals';
+    };
+    // The sample animals, with the Animals setting on; off again puts the
+    // house back as it was, the way turning Animals off in Settings would.
+    animalsButton.onclick = function (e) {
+      animals = !animals;
+      empty = false;
+      document.getElementById('data').textContent = 'Empty it';
+      window.__setData(animals ? 'animals' : 'sample');
+      panel.tab = animals ? 'animals' : 'routines';
+      panel.detail = null;
+      panel._render();
+      e.target.textContent = animals ? 'Remove animals' : 'Add animals';
     };
 
     document.getElementById('theme').onclick = function (e) {

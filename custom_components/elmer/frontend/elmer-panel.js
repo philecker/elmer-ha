@@ -13,19 +13,26 @@
 
 import { CSS } from './styles.js';
 import { icon } from './icons.js';
+import { Calendar, wantsOwnCalendar, firstWeekday } from './calendar.js';
 import {
-  esc, html, raw, titleCase, uid, todayIso, intervalText, addDays, formatDay,
+  esc, html, raw, titleCase, uid, todayIso, intervalText, addDays, formatDay, CATEGORIES,
 } from './util.js';
 import {
   routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
   equipmentForm, routineForm, partForm, logForm, logDetail, importForm,
-  partRow, partOptions, linkRow, groupForm, routineActions,
+  animalsView, animalDetail, animalForm, animalsOffSheet, isAnimal, sexOptions, LIVESTOCK,
+  LISTS, SPECIES, builtInFor, animalIcon, weightUnitOf, weightField, parseWeight,
+  partRow, partOptions, linkRow, pairRow, groupForm, routineActions,
 } from './views.js';
 
 const TABS = [
   ['routines', 'Routines', 'today'],
   ['equipment', 'Equipment', 'equipment'],
-  ['parts', 'Parts', 'supplies'],
+  // Only while the Animals setting is on; _tabs leaves it out otherwise.
+  ['animals', 'Animals', 'paw'],
+  // Supplies on screen; 'parts' in the code and the stored settings, which
+  // predate the name and are not worth breaking every saved preference over.
+  ['parts', 'Supplies', 'supplies'],
   ['history', 'History', 'history'],
   ['settings', 'Settings', 'settings'],
 ];
@@ -254,6 +261,7 @@ const SETTING_CONTROLS = {
   'set-badge': { key: () => 'badgeOverdue', value: (v) => v === '1' },
   'set-locations': { key: () => 'showLocations', value: (v) => v === '1' },
   'set-history-cost': { key: () => 'showHistoryCost', value: (v) => v === '1' },
+  'set-weight-unit': { key: () => 'weightUnit', value: (v) => (v === 'kg' ? 'kg' : 'lb') },
   'set-soon': { key: () => 'dueSoonDays', value: (v) => clampInt(v, 0, 365, 0) },
 };
 
@@ -289,6 +297,12 @@ class ElmerPanel extends HTMLElement {
     this._onBlur = this._onBlur.bind(this);
     this._onThemeChange = this._onThemeChange.bind(this);
     this._onResize = () => this._measurePanel();
+    this._onPress = this._onPress.bind(this);
+
+    // Only in the Home Assistant app for Mac, where a date field would
+    // otherwise open the iPad's picker; calendar.js says why.
+    this._ownCalendar = wantsOwnCalendar();
+    this._calendar = null;
   }
 
   /* ---------------------------------------------------------- lifecycle -- */
@@ -333,10 +347,15 @@ class ElmerPanel extends HTMLElement {
       layer.className = 'layer';
       root.appendChild(layer);
       this._layer = layer;
+      this._calendar = new Calendar(layer);
     }
+    this.toggleAttribute('data-own-calendar', this._ownCalendar);
     root.addEventListener('click', this._onClick);
     root.addEventListener('change', this._onChange);
     root.addEventListener('input', this._onInput);
+    // Capture, so a press on a date field is seen before the field acts on it.
+    root.addEventListener('pointerdown', this._onPress, true);
+    root.addEventListener('mousedown', this._onPress, true);
     // Capture, because blur does not bubble.
     root.addEventListener('blur', this._onBlur, true);
     // Keys are listened for on the window, not the shadow root. Opening a sheet
@@ -377,7 +396,10 @@ class ElmerPanel extends HTMLElement {
     root.removeEventListener('click', this._onClick);
     root.removeEventListener('change', this._onChange);
     root.removeEventListener('input', this._onInput);
+    root.removeEventListener('pointerdown', this._onPress, true);
+    root.removeEventListener('mousedown', this._onPress, true);
     root.removeEventListener('blur', this._onBlur, true);
+    if (this._calendar) this._calendar.hide();
     window.removeEventListener('keydown', this._onKeydown, true);
     if (this._media) this._media.removeEventListener('change', this._onThemeChange);
     if (this._resize) { this._resize.disconnect(); this._resize = null; }
@@ -527,14 +549,26 @@ class ElmerPanel extends HTMLElement {
         state: d.computed.states[task.id] || { status: 'new', daysLeft: null, progress: 0, due: null },
         equipment: d.equipment.find((e) => e.id === task.equipmentId) || null,
       }))
+      // A one-time routine that has been done is over, and lives in the
+      // history from then on rather than in any list of things to do. The
+      // record stays — it is what Undo on the toast puts back, and what
+      // its history entry belongs to — but nothing lists it.
+      .filter((r) => r.state.status !== 'done')
       .sort(byUrgency);
 
     return {
-      equipment: d.equipment,
+      // Animals live in the same list as equipment, marked as animals. They
+      // are handed out separately so every screen written for equipment
+      // goes on seeing only equipment — the Equipment tab, its form, the
+      // category list, the suggestions — and nothing there had to change.
+      equipment: d.equipment.filter((e) => !isAnimal(e)),
+      animals: d.equipment.filter(isAnimal),
       tasks: d.tasks,
       supplies: d.supplies,
       log: d.log,
       settings: d.settings,
+      // Pounds or kilograms, resolved once here so every screen agrees.
+      weightUnit: weightUnitOf(d.settings, this._hass),
       computed: d.computed,
       rows,
       filter: this.filter,
@@ -552,6 +586,14 @@ class ElmerPanel extends HTMLElement {
 
   _render() {
     if (!this._mount) return;
+
+    // Animals switched off — from this screen or another one — takes the tab
+    // with it. Whoever was looking at it lands on Routines, not on a blank
+    // page under a tab that has gone.
+    if (this.tab === 'animals' && this.data && !this.data.settings.showAnimals) {
+      this.tab = 'routines';
+      this.detail = null;
+    }
 
     // Keep the scroll position across a re-render, so ticking the fourth row of
     // a long list does not throw you back to the top.
@@ -618,9 +660,13 @@ class ElmerPanel extends HTMLElement {
       // Focus the dialog itself so Escape and a screen reader both land inside
       // it. On a wide screen the first field is focused instead, but never on a
       // phone — the keyboard sliding up would cover what you are filling in.
-      const first = this._narrow
-        ? null
-        : this.shadowRoot.querySelector('.sheet input, .sheet select, .sheet textarea');
+      // In the app for Mac a date field is never the one: focus is what opens
+      // the iPad's picker there, so the sheet would arrive with it already
+      // hanging off the first field.
+      const fields = this._ownCalendar
+        ? '.sheet input:not([type="date"]), .sheet select, .sheet textarea'
+        : '.sheet input, .sheet select, .sheet textarea';
+      const first = this._narrow ? null : this.shadowRoot.querySelector(fields);
       (first || this.shadowRoot.querySelector('.sheet'))?.focus();
       this._sheetFocused = true;
     }
@@ -680,8 +726,12 @@ class ElmerPanel extends HTMLElement {
     if (this.detail && this.detail.kind === 'equipment') {
       return { act: 'add-routine', id: this.detail.id, label: 'Add Routine' };
     }
+    if (this.detail && this.detail.kind === 'animal') {
+      return { act: 'add-routine', id: this.detail.id, label: 'Add Routine' };
+    }
     if (this.tab === 'equipment') return { act: 'add-equipment', label: 'Add Equipment' };
-    if (this.tab === 'parts') return { act: 'add-part', label: 'Add Part' };
+    if (this.tab === 'animals') return { act: 'add-animal', label: 'Add Animal' };
+    if (this.tab === 'parts') return { act: 'add-part', label: 'Add Supply' };
     // A routine does not have to belong to anything — equipment is a blank
     // option on the form, and the store has always accepted a routine without
     // it. This used to be hidden until some equipment existed, which left a
@@ -694,6 +744,7 @@ class ElmerPanel extends HTMLElement {
   _renderTab(state) {
     switch (this.tab) {
       case 'equipment': return equipmentView(state);
+      case 'animals': return animalsView(state);
       case 'parts': return partsView(state);
       case 'history': return historyView(state);
       case 'settings': return settingsView(state);
@@ -704,6 +755,7 @@ class ElmerPanel extends HTMLElement {
   _renderDetail(state) {
     if (this.detail.kind === 'equipment') return equipmentDetail(state, this.detail.id);
     if (this.detail.kind === 'part') return partDetail(state, this.detail.id);
+    if (this.detail.kind === 'animal') return animalDetail(state, this.detail.id);
     return '<div class="center">—</div>';
   }
 
@@ -713,7 +765,7 @@ class ElmerPanel extends HTMLElement {
     // The bar spans the panel so its rule reaches both edges, but the tabs sit
     // in an inner column of the same measure as the content, so the first tab
     // starts exactly where the list below it does.
-    return html`<nav class="tabs"><div class="tabsinner" role="tablist">${TABS.map(([key, label, ic]) => {
+    return html`<nav class="tabs"><div class="tabsinner" role="tablist">${TABS.filter(([key]) => key !== 'animals' || state.settings.showAnimals).map(([key, label, ic]) => {
       const badge = key === 'routines' && overdue > 0
         ? `<span class="badge">${overdue > 99 ? '99+' : overdue}</span>`
         : '';
@@ -746,6 +798,8 @@ class ElmerPanel extends HTMLElement {
     if (key !== this._sheetKey) {
       this._sheetKey = key;
       this._sheetFocused = false;
+      // The field it was opened against is about to be thrown away.
+      if (this._calendar) this._calendar.hide();
       const existing = this._layer.querySelector('.scrim');
       if (existing) existing.remove();
       if (this.sheet) {
@@ -764,6 +818,18 @@ class ElmerPanel extends HTMLElement {
             <div class="inner">${raw(body)}</div>
           </div>
         </div>`);
+        if (this._ownCalendar) {
+          // Read-only is the other half of keeping the iPad's picker away,
+          // for the time a date field gets focus from the keyboard rather than
+          // a click. It only stops typing, and there is no typing into a date
+          // field in that app: it is a button there. Picking still writes the
+          // value, which read-only does not prevent.
+          for (const input of this._layer.querySelectorAll('.sheet input[type="date"]')) {
+            input.readOnly = true;
+            input.setAttribute('aria-haspopup', 'dialog');
+            input.setAttribute('aria-expanded', 'false');
+          }
+        }
       }
     }
 
@@ -785,6 +851,12 @@ class ElmerPanel extends HTMLElement {
         const eq = s.id ? state.equipment.find((e) => e.id === s.id) : null;
         return { title: eq ? `Edit ${eq.name}` : 'Add equipment', body: equipmentForm(state, eq) };
       }
+      case 'animal-form': {
+        const a = s.id ? state.animals.find((x) => x.id === s.id) : null;
+        return { title: a ? `Edit ${a.name}` : 'Add an animal', body: animalForm(state, a) };
+      }
+      case 'animals-off':
+        return { title: 'Turn off Animals?', body: animalsOffSheet(state) };
       case 'routine-form': {
         const task = s.id ? state.tasks.find((t) => t.id === s.id) : null;
         return {
@@ -794,7 +866,7 @@ class ElmerPanel extends HTMLElement {
       }
       case 'part-form': {
         const part = s.id ? state.supplies.find((p) => p.id === s.id) : null;
-        return { title: part ? `Edit ${part.name}` : 'Add a part', body: partForm(state, part) };
+        return { title: part ? `Edit ${part.name}` : 'Add a supply', body: partForm(state, part) };
       }
       case 'routine': {
         const task = state.tasks.find((t) => t.id === s.id);
@@ -834,6 +906,20 @@ class ElmerPanel extends HTMLElement {
   /* ------------------------------------------------------------- events -- */
 
   _onKeydown(ev) {
+    if (this._calendar && this._calendar.isOpen && ev.key === 'Escape') {
+      ev.preventDefault();
+      ev.stopPropagation();
+      this._calendar.hide({ restore: true });
+      return;
+    }
+    if (this._ownCalendar && ['Enter', ' ', 'ArrowDown'].includes(ev.key)) {
+      const inner = ev.composedPath()[0];
+      if (inner && inner.matches && inner.matches('input[type="date"]') && this.shadowRoot.contains(inner)) {
+        ev.preventDefault();
+        this._openCalendar(inner, true);
+        return;
+      }
+    }
     if (ev.key === 'Escape' && this.sheet) {
       ev.preventDefault();
       ev.stopPropagation();
@@ -854,6 +940,36 @@ class ElmerPanel extends HTMLElement {
     }
   }
 
+  /**
+   * A press on a date field, in the app for Mac.
+   *
+   * Taken on the way down, before the field can take focus — focus is what
+   * opens the iPad's picker there — and the press's default is cancelled so
+   * it never does. The calendar opens on the press rather than the click, so
+   * it is up as quickly as a native one would be; a second press closes it.
+   */
+  _onPress(ev) {
+    if (!this._ownCalendar) return;
+    const inner = ev.composedPath()[0];
+    const input = inner && inner.closest && inner.closest('input[type="date"]');
+    if (!input) return;
+    ev.preventDefault();
+    if (ev.type !== 'pointerdown' || ev.button !== 0) return;
+    if (this._calendar.isFor(input)) this._calendar.hide();
+    else this._openCalendar(input, false);
+  }
+
+  _openCalendar(input, byKeyboard) {
+    if (!this._calendar || input.disabled) return;
+    const today = (this.data && this.state && this.state.computed && this.state.computed.today)
+      || todayIso();
+    this._calendar.show(input, {
+      today,
+      firstDay: firstWeekday(this._hass && this._hass.locale),
+      byKeyboard,
+    });
+  }
+
   _onClick(ev) {
     // A real link does its own thing. It matters because a link can sit
     // inside something clickable — the Buy chip is in the card that opens a
@@ -868,6 +984,7 @@ class ElmerPanel extends HTMLElement {
     // somebody aiming at the month or the year to type over it, and hijacking
     // that would make the field unusable from a keyboard.
     const date = ev.target.closest && ev.target.closest('input[type="date"]');
+    if (date && this._ownCalendar) return;  // the press already opened ours
     if (date) {
       const box = date.getBoundingClientRect();
       const glyph = parseFloat(getComputedStyle(date).paddingRight) || 0;
@@ -895,6 +1012,12 @@ class ElmerPanel extends HTMLElement {
    * while the box has focus, such as a push arriving from another device.
    */
   _onInput(ev) {
+    // A species typed rather than picked reworks the form as it is typed:
+    // "horse" brings the livestock fields and a horse's words for sex.
+    const typed = ev.composedPath()[0];
+    if (typed && typed.name === 'speciesNew' && typed.closest && typed.closest('.sheet')) {
+      this._speciesChanged(typed.value, typed);
+    }
     const el = ev.target.closest && ev.target.closest('[data-act="search"]');
     if (!el) return;
     this.query = el.value;
@@ -902,9 +1025,31 @@ class ElmerPanel extends HTMLElement {
   }
 
   _onChange(ev) {
+    const changed = ev.composedPath()[0];
+    if (changed && changed.name === 'speciesPick' && changed.closest && changed.closest('.sheet')) {
+      this._speciesChanged(changed.value === '__new__'
+        ? (changed.closest('.field').querySelector('input[name="speciesNew"]') || {}).value
+        : changed.value, changed);
+    }
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (!el) return;
     const act = el.dataset.act;
+
+    if (act === 'set-animals') {
+      if (el.value === '1') {
+        this._apply([{ kind: 'settings.put', payload: { showAnimals: true } }]);
+        return;
+      }
+      if ((this.data.equipment || []).some(isAnimal)) {
+        // Nothing changes until the warning is answered, so the menu goes
+        // back to On; Cancel then leaves it exactly as it was.
+        el.value = '1';
+        this._openSheet({ kind: 'animals-off' });
+        return;
+      }
+      this._apply([{ kind: 'settings.put', payload: { showAnimals: false } }]);
+      return;
+    }
 
     const control = SETTING_CONTROLS[act];
     if (control) {
@@ -1008,6 +1153,13 @@ class ElmerPanel extends HTMLElement {
       case 'add-link':
         this._addLink();
         return;
+      case 'add-pair':
+        this._addPair(el.dataset.kind);
+        return;
+      case 'unpair':
+        // Out of the DOM, like a link: a re-render would lose what is typed.
+        el.closest('.pairrow')?.remove();
+        return;
       case 'unlink':
         // Straight out of the DOM. A re-render here would throw away every
         // other half-typed field in the form.
@@ -1027,6 +1179,22 @@ class ElmerPanel extends HTMLElement {
       case 'equipment':
         this.detail = { kind: 'equipment', id };
         this._render();
+        return;
+      case 'animal':
+        this.detail = { kind: 'animal', id };
+        this._render();
+        return;
+      case 'add-animal':
+        this._openSheet({ kind: 'animal-form' });
+        return;
+      case 'edit-animal':
+        this._openSheet({ kind: 'animal-form', id });
+        return;
+      case 'save-animal':
+        this._saveAnimal(id);
+        return;
+      case 'confirm-animals-off':
+        this._turnOffAnimals();
         return;
       case 'routine':
         this._openSheet({ kind: 'routine', id });
@@ -1096,7 +1264,7 @@ class ElmerPanel extends HTMLElement {
         this._confirmDelete('routine.delete', id, 'Routine deleted');
         return;
       case 'delete-part':
-        this._confirmDelete('part.delete', id, 'Part deleted');
+        this._confirmDelete('part.delete', id, 'Supply deleted');
         return;
       case 'export':
         this._export();
@@ -1127,15 +1295,21 @@ class ElmerPanel extends HTMLElement {
    * it, and removing one clears the field on each — there is nothing else to
    * delete.
    *
-   * A location is carried by parts as well as equipment, and both have to
-   * move together: renaming the room the furnace is in has to take the spare
-   * filters on the shelf with it, or they are left pointing at a name nothing
-   * else uses. A category is equipment's alone.
+   * Which records a list reaches is LISTS' to say. Equipment's locations
+   * are carried by its parts as well, and both move together: renaming the
+   * room the furnace is in has to take the spare filters on the shelf with
+   * it. Animals' locations and species are the animals' alone — a barn
+   * renamed for the horses leaves a barn of equipment exactly where it was.
    */
-  _recordsWith(field, value) {
-    const hit = (r) => (r[field] || '').trim() === value;
-    const out = this.data.equipment.filter(hit).map((r) => ({ kind: 'equipment.put', record: r }));
-    if (field === 'location') {
+  _recordsWith(kind, value) {
+    const spec = LISTS[kind] || LISTS.location;
+    const hit = (r) => (r[spec.field] || '').trim() === value;
+    const out = [];
+    for (const r of this.data.equipment) {
+      if (!hit(r)) continue;
+      if (isAnimal(r) ? spec.animals : spec.equipment) out.push({ kind: 'equipment.put', record: r });
+    }
+    if (spec.parts) {
       out.push(...this.data.supplies.filter(hit).map((r) => ({ kind: 'part.put', record: r })));
     }
     return out;
@@ -1143,11 +1317,13 @@ class ElmerPanel extends HTMLElement {
 
   /** "3 pieces of equipment and 2 parts" — what a bulk edit is about to touch. */
   static _reach(affected) {
-    const eq = affected.filter((a) => a.kind === 'equipment.put').length;
-    const parts = affected.length - eq;
+    const animals = affected.filter((a) => a.kind === 'equipment.put' && isAnimal(a.record)).length;
+    const eq = affected.filter((a) => a.kind === 'equipment.put').length - animals;
+    const parts = affected.filter((a) => a.kind === 'part.put').length;
     const bits = [];
     if (eq) bits.push(`${eq} ${eq === 1 ? 'piece' : 'pieces'} of equipment`);
-    if (parts) bits.push(`${parts} ${parts === 1 ? 'part' : 'parts'}`);
+    if (animals) bits.push(`${animals} ${animals === 1 ? 'animal' : 'animals'}`);
+    if (parts) bits.push(`${parts} ${parts === 1 ? 'supply' : 'supplies'}`);
     return bits.join(' and ') || 'nothing';
   }
 
@@ -1221,7 +1397,9 @@ class ElmerPanel extends HTMLElement {
   }
 
   _setView(tab, value) {
-    const key = { routines: 'viewRoutines', equipment: 'viewEquipment', parts: 'viewParts' }[tab];
+    const key = {
+      routines: 'viewRoutines', equipment: 'viewEquipment', parts: 'viewParts', animals: 'viewAnimals',
+    }[tab];
     if (!key || (value !== 'list' && value !== 'cards')) return;
     if (this.data.settings[key] === value) return;
     this.data.settings[key] = value;
@@ -1229,12 +1407,13 @@ class ElmerPanel extends HTMLElement {
     this._apply([{ kind: 'settings.put', payload: { [key]: value } }]);
   }
 
-  async _saveGroup(field, value) {
+  async _saveGroup(group, value) {
     const next = titleCase((this._fields().groupName || '').trim());
     if (!next) return this._flash('Give it a name first.', 'error');
     if (next === value) { this._closeSheet(); return undefined; }
 
-    const affected = this._recordsWith(field, value);
+    const { field } = LISTS[group] || LISTS.location;
+    const affected = this._recordsWith(group, value);
     const ok = await this._apply(affected.map(({ kind, record }) => ({
       kind,
       payload: { ...record, [field]: next },
@@ -1244,17 +1423,18 @@ class ElmerPanel extends HTMLElement {
     return this._flash(`Renamed on ${ElmerPanel._reach(affected)}`);
   }
 
-  async _clearGroup(field, value, label) {
-    const affected = this._recordsWith(field, value);
-    const what = field === 'location' ? 'location' : 'category';
+  async _clearGroup(group, value, label) {
+    const { field, what } = LISTS[group] || LISTS.location;
+    const affected = this._recordsWith(group, value);
     const n = ElmerPanel._reach(affected);
     // Spelled out: it is a bulk edit, and nothing else says how far it reaches
     // until after it has happened.
-    if (!window.confirm(
-      `Remove the ${what} "${label || value}"?\n\n`
-      + `It is cleared from ${n}. Nothing is deleted — they simply stop `
-      + `having a ${what}.`,
-    )) return undefined;
+    const after = group === 'species'
+      ? 'Nothing is deleted — they show as Other until you give them another.'
+      : `Nothing is deleted — they simply stop having a ${what}.`;
+    if (!window.confirm(`Remove the ${what} "${label || value}"?\n\nIt is cleared from ${n}. ${after}`)) {
+      return undefined;
+    }
 
     const ok = await this._apply(affected.map(({ kind, record }) => ({
       kind,
@@ -1270,6 +1450,32 @@ class ElmerPanel extends HTMLElement {
     if (!list) return;
     list.insertAdjacentHTML('beforeend', linkRow({}));
     list.lastElementChild?.querySelector('.linklabel')?.focus();
+  }
+
+  /** Another empty medication or vaccination row, focused to type in. */
+  _addPair(kind) {
+    const list = this.shadowRoot.querySelector(`.sheet .pairs[data-kind="${kind}"] .pairlist`);
+    if (!list) return;
+    list.insertAdjacentHTML('beforeend', pairRow(kind, {}, this.data.computed.today));
+    const row = list.lastElementChild;
+    // In the Mac app a date box is a button for Elmer's own calendar, and the
+    // rows the form opened with were set up for that when it opened.
+    const date = row && row.querySelector('input[type="date"]');
+    if (date && this._ownCalendar) {
+      date.readOnly = true;
+      date.setAttribute('aria-haspopup', 'dialog');
+      date.setAttribute('aria-expanded', 'false');
+    }
+    row?.querySelector('.paira')?.focus();
+  }
+
+  /** The rows of one list, as the form has them; a row with nothing in it is dropped. */
+  _pairFields(kind) {
+    const rows = [...this.shadowRoot.querySelectorAll(`.sheet .pairs[data-kind="${kind}"] .pairrow`)];
+    const read = (row) => [(row.querySelector('.paira')?.value || '').trim(), (row.querySelector('.pairb')?.value || '').trim()];
+    return kind === 'vax'
+      ? rows.map(read).filter(([name]) => name).map(([name, date]) => ({ name: titleCase(name), date: date || null }))
+      : rows.map(read).filter(([name, dosage]) => name || dosage).map(([name, dosage]) => ({ name: titleCase(name), dosage }));
   }
 
   /**
@@ -1356,6 +1562,122 @@ class ElmerPanel extends HTMLElement {
     return out;
   }
 
+  /**
+   * The weight box, as a number and the unit it is in. Left as it was shown,
+   * the stored weight is kept exactly — otherwise opening a dog in kilograms
+   * and saving would round 68 lb to 30.8 kg and back to 67.9. Text that is
+   * not a number is kept as text rather than thrown away.
+   */
+  _weightField(f, id) {
+    const unit = this.state.weightUnit;
+    const before = id ? this.data.equipment.find((e) => e.id === id) : null;
+    const typed = (f.weight || '').trim();
+    if (before && typed === weightField(before, unit).trim()) {
+      return { weight: before.weight == null ? null : before.weight, weightUnit: before.weightUnit || null };
+    }
+    if (!typed) return { weight: null, weightUnit: null };
+    const parsed = parseWeight(typed, unit);
+    return parsed || { weight: typed, weightUnit: null };
+  }
+
+  async _saveAnimal(id) {
+    const f = this._fields();
+    const name = (f.name || '').trim();
+    if (!name) return this._flash('Give it a name first.', 'error');
+
+    // Picked from the list, or typed in. One typed that is really a built-in
+    // — "horse", "Horse" — is taken as that one, so it gets its icon, its
+    // words for sex and its livestock fields rather than a twin of its own.
+    const typed = (f.speciesPick && f.speciesPick !== '__new__' ? f.speciesPick : f.speciesNew || '').trim();
+    const species = builtInFor(SPECIES, typed) || titleCase(typed) || 'other';
+    const farm = LIVESTOCK.has(species);
+    const trim = (v) => (v || '').trim();
+    const head = Math.round(Number(f.headCount));
+    const record = {
+      id: id || uid('an'),
+      type: 'animal',
+      name: titleCase(name),
+      species,
+      breed: trim(f.breed),
+      sex: f.sex || '',
+      // A pet's answer, kept off farm animals, whose sex already says it.
+      fixed: farm ? '' : f.fixed || '',
+      headCount: farm && head >= 1 ? head : null,
+      birthDate: f.birthDate || null,
+      birthApprox: f.birthApprox === '1',
+      location: this._locationField(f),
+      color: trim(f.color),
+      ...this._weightField(f, id),
+      microchip: trim(f.microchip),
+      license: trim(f.license),
+      adoptedOn: f.adoptedOn || null,
+      adoptedFrom: trim(f.adoptedFrom),
+      height: trim(f.height),
+      vet: trim(f.vet),
+      phone: trim(f.phone),
+      email: trim(f.email),
+      insurer: trim(f.insurer),
+      policy: trim(f.policy),
+      diet: f.diet || '',
+      medications: this._pairFields('med'),
+      vaccinations: this._pairFields('vax'),
+      notes: f.notes || '',
+      icon: f.icon || '',
+      parts: [],
+    };
+    if (record.birthDate && record.birthDate > this.state.computed.today) {
+      return this._flash('A birthdate cannot be in the future.', 'error');
+    }
+
+    await this._apply([{ kind: 'equipment.put', payload: record }]);
+    this._closeSheet();
+    // Straight to its page, as equipment goes to its own. No suggestions
+    // yet: equipment's are for furnaces and fridges, and a dog offered a
+    // filter change is worse than a dog offered nothing.
+    this.tab = 'animals';
+    this.detail = { kind: 'animal', id: record.id };
+    this._render();
+  }
+
+  /** Delete every animal and its routines, then switch the setting off. */
+  async _turnOffAnimals() {
+    const ops = (this.data.equipment || []).filter(isAnimal)
+      .map((a) => ({ kind: 'equipment.delete', payload: { id: a.id } }));
+    ops.push({ kind: 'settings.put', payload: { showAnimals: false } });
+    if (!(await this._apply(ops))) return;
+    this._closeSheet();
+    if (this.tab === 'animals') { this.tab = 'routines'; this.detail = null; }
+    this._flash('Animals turned off');
+  }
+
+  /**
+   * The species decides which half of the form shows — a pet's Spayed /
+   * neutered or a herd's How many — and what Sex is
+   * called. Both halves stay in the form, so nothing typed is lost by
+   * changing your mind about the species.
+   */
+  _speciesChanged(value, from) {
+    const sheet = from.closest('.sheet');
+    const species = builtInFor(SPECIES, value) || String(value || '').trim();
+    const farm = LIVESTOCK.has(species);
+    for (const n of sheet.querySelectorAll('[data-livestock]')) n.hidden = !farm;
+    for (const n of sheet.querySelectorAll('[data-pet]')) n.hidden = farm;
+    // The icon follows the species until one has been picked on purpose.
+    const chosen = sheet.querySelector('input[name="icon"]');
+    if (chosen && !chosen.value) {
+      const shows = animalIcon({ species });
+      for (const b of sheet.querySelectorAll('.iconpick [data-act="pick-icon"]')) {
+        b.setAttribute('aria-pressed', String(b.dataset.value === shows));
+      }
+    }
+    const sex = sheet.querySelector('select[name="sex"]');
+    if (sex) {
+      const options = sexOptions(species);
+      const keep = options.some(([v]) => v === sex.value) ? sex.value : '';
+      sex.innerHTML = options.map(([v, l]) => `<option value="${esc(v)}"${v === keep ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    }
+  }
+
   async _saveEquipment(id) {
     const f = this._fields();
     const name = (f.name || '').trim();
@@ -1368,9 +1690,7 @@ class ElmerPanel extends HTMLElement {
       location: this._locationField(f),
       // Either the picker or the new-category box, the same way Located
       // works; "__new__" means the box.
-      category: (f.categoryPick && f.categoryPick !== '__new__'
-        ? f.categoryPick
-        : f.categoryNew || '').trim(),
+      category: this._categoryField(f),
       brand: (f.brand || '').trim(),
       model: (f.model || '').trim(),
       serial: (f.serial || '').trim(),
@@ -1472,8 +1792,41 @@ class ElmerPanel extends HTMLElement {
       // quietly starting it counting again. There is a test on that, because
       // it is a property of the store rather than of this form.
     };
-    await this._apply([{ kind: 'routine.put', payload: record }]);
+    const ops = [{ kind: 'routine.put', payload: record }];
+
+    // A one-time routine with a Last done is finished, and a finished one
+    // lives in the history and nowhere else. Typed into this form, the date
+    // has no history entry behind it, so saving would make the routine
+    // vanish without a trace. Saying it was done on that day records it, the
+    // way ticking it off would — without drawing down supplies, since
+    // nothing here says any were used. One already in the history for that
+    // day is left alone, so saving it again does not log it twice.
+    const before = id ? this.data.tasks.find((t) => t.id === id) : null;
+    const finishing = kind === 'date' && !record.onDateYearly && record.lastDone
+      && !this.data.log.some((l) => l.taskId === record.id && l.doneOn === record.lastDone);
+    if (finishing) {
+      const owner = record.equipmentId ? this.data.equipment.find((e) => e.id === record.equipmentId) : null;
+      ops.push({
+        kind: 'log.append',
+        payload: {
+          id: uid('log'),
+          taskId: record.id,
+          equipmentId: record.equipmentId,
+          equipmentName: owner ? owner.name || null : null,
+          taskName: record.name,
+          doneOn: record.lastDone,
+          notes: '',
+          cost: '',
+          recordedAt: Date.now(),
+          // What Undo puts back: the last-done it had before this save.
+          previousLastDone: before && before.lastDone !== record.lastDone ? before.lastDone || null : null,
+          usedParts: [],
+        },
+      });
+    }
+    await this._apply(ops);
     this._closeSheet();
+    if (finishing) this._flash(`${record.name} is done, so it is in History now`);
   }
 
   /**
@@ -1483,6 +1836,17 @@ class ElmerPanel extends HTMLElement {
    * showing; "__new__" means the box. Shared by equipment and parts, which
    * draw from one list of rooms.
    */
+  /**
+   * The category, picked or typed. One typed that names a built-in — "water",
+   * "Heating and Cooling" — is that built-in, with its icon and suggestions;
+   * the menu only offers categories in use, so typing is how a built-in
+   * nobody has used yet comes back.
+   */
+  _categoryField(f) {
+    const typed = (f.categoryPick && f.categoryPick !== '__new__' ? f.categoryPick : f.categoryNew || '').trim();
+    return builtInFor(CATEGORIES, typed) || (f.categoryPick && f.categoryPick !== '__new__' ? typed : titleCase(typed));
+  }
+
   _locationField(f) {
     const picked = f.locationPick && f.locationPick !== '__new__'
       ? f.locationPick
@@ -1493,7 +1857,7 @@ class ElmerPanel extends HTMLElement {
   async _savePart(id) {
     const f = this._fields();
     const name = (f.name || '').trim();
-    if (!name) return this._flash('Give the part a name first.', 'error');
+    if (!name) return this._flash('Give the supply a name first.', 'error');
     const record = {
       id: id || uid('sup'),
       name: titleCase(name),
@@ -1554,7 +1918,7 @@ class ElmerPanel extends HTMLElement {
 
   async _deleteEquipment(id) {
     const eq = this.data.equipment.find((e) => e.id === id);
-    const n = this.data.tasks.filter((t) => t.equipmentId === id).length;
+    const n = this.state.rows.filter((r) => r.task.equipmentId === id).length;
     const warning = n
       ? `Delete ${eq ? eq.name : 'this'} and its ${n} ${n === 1 ? 'routine' : 'routines'}? History is kept.`
       : `Delete ${eq ? eq.name : 'this'}?`;
@@ -1693,13 +2057,16 @@ class ElmerPanel extends HTMLElement {
         this._flash("That does not look like an Elmer backup.", 'error');
         return;
       }
+      const records = Array.isArray(parsed.equipment) ? parsed.equipment : [];
+      const animals = records.filter(isAnimal).length;
       const counts = {
-        equipment: countOf(parsed.equipment),
+        equipment: records.length - animals,
+        animals,
         routines: countOf(parsed.tasks),
         parts: countOf(parsed.supplies),
         history: countOf(parsed.log),
       };
-      if (!counts.equipment && !counts.routines && !counts.parts && !counts.history) {
+      if (!counts.equipment && !counts.animals && !counts.routines && !counts.parts && !counts.history) {
         this._flash('There is nothing in that file to import.', 'error');
         return;
       }
@@ -1731,7 +2098,10 @@ class ElmerPanel extends HTMLElement {
       });
       this._closeSheet();
       const c = res && res.counts ? res.counts : sheet.file.counts;
-      this._flash(`Imported ${c.equipment} equipment, ${c.routines} routines, ${c.parts} parts`);
+      const animals = c.animals ? `, ${c.animals} ${c.animals === 1 ? 'animal' : 'animals'}` : '';
+      this._flash(c.animalsTurnedOn
+        ? `Imported ${c.equipment} equipment${animals}, ${c.routines} routines, ${c.parts} supplies. Animals has been turned on.`
+        : `Imported ${c.equipment} equipment${animals}, ${c.routines} routines, ${c.parts} supplies`);
     } catch (err) {
       this._flash(this._reason(err, 'Could not import that file.'), 'error');
     }

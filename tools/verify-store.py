@@ -473,24 +473,39 @@ async def main() -> int:
         got = store_mod.normalize({"tasks": [{"id": "t", "snoozedUntil": given}]})["tasks"][0]
         check(f"snoozedUntil {given!r} normalises to {want!r}", got["snoozedUntil"], want)
 
+    # A snooze is a new due date: the day it wakes. Inside the warn-ahead
+    # window that is due soon, past it the routine is filed as snoozed, and
+    # either way it says how long until it is back.
     soon = schedule.add_interval(schedule.today(), 10, "days")
+    later = schedule.add_interval(schedule.today(), 30, "days")
     asleep = {"id": "t", "lastDone": schedule.add_interval(schedule.today(), -90, "days"),
               "intervalCount": 1, "intervalUnit": "months", "snoozedUntil": soon}
     st = schedule.task_state(asleep)
-    check("an asleep routine reads as asleep", st["status"], "snoozed")
-    check("and reports no days left, so no automation fires on it",
-          st["daysLeft"], None)
+    check("snoozed to a day inside the window, it is due soon", st["status"], "due")
+    check("counting down to the day it wakes", [st["due"], st["daysLeft"]], [soon, 10])
     check("while still saying when it was really due",
-          st["due"], schedule.add_interval(asleep["lastDone"], 1, "months"))
+          st["realDue"], schedule.add_interval(asleep["lastDone"], 1, "months"))
     check("and when it wakes", st["snoozedUntil"], soon)
+    st = schedule.task_state(dict(asleep, snoozedUntil=later))
+    check("snoozed past the window, it is snoozed, with its days", [st["status"], st["daysLeft"]], ["snoozed", 30])
+    check("the window is the one Settings gives",
+          schedule.task_state(dict(asleep, snoozedUntil=later), 30)["status"], "due")
+    check("never overdue while asleep, so an overdue automation stays quiet",
+          min(schedule.task_state(dict(asleep, snoozedUntil=schedule.add_interval(schedule.today(), d, "days")))["daysLeft"]
+              for d in range(1, 40)) >= 1, True)
+    ahead = {"id": "t", "lastDone": schedule.today(), "intervalCount": 2, "intervalUnit": "months",
+             "snoozedUntil": schedule.add_interval(schedule.today(), 3, "days")}
+    check("snoozing something not due yet never brings it forward",
+          schedule.task_state(ahead)["due"], schedule.add_interval(schedule.today(), 2, "months"))
     # A snooze that ends today has ended: the comparison is strict, so there
     # is no day where it is both over and still hiding the routine.
     check("a snooze ending today is over",
           schedule.task_state(dict(asleep, snoozedUntil=schedule.today()))["status"],
           "overdue")
-    check("one ending tomorrow is not",
-          schedule.task_state(dict(asleep, snoozedUntil=schedule.add_interval(schedule.today(), 1, "days")))["status"],
-          "snoozed")
+    check("one ending tomorrow is due tomorrow",
+          [schedule.task_state(dict(asleep, snoozedUntil=schedule.add_interval(schedule.today(), 1, "days")))[k]
+           for k in ("status", "daysLeft")],
+          ["due", 1])
     # Paused beats asleep: pausing is the deliberate one, and a routine
     # carrying both should read as the stronger of the two.
     check("paused wins over asleep",
@@ -788,7 +803,7 @@ async def main() -> int:
     # stops the nagging rather than only changing how a row is drawn.
     check("counts", s.counts(), {"paused": 1, "snoozed": 0, "overdue": 1, "due": 2,
                                  "new": 1, "done": 1, "ok": 1, "lowStock": 2,
-                                 "partsShort": 0, "equipment": 0})
+                                 "partsShort": 0, "equipment": 0, "animals": 0})
     done_state = schedule.task_state(s.task("g"), s.due_soon_days)
     check("a finished one-off is done rather than overdue", done_state["status"], "done")
     check("and reports no days left, so nothing fires on it", done_state["daysLeft"], None)
@@ -895,6 +910,185 @@ async def main() -> int:
     remove()
     await s.async_apply([("part.adjust", {"id": "s1", "delta": 1})])
     check("removed listener stays quiet", hits[0], 1)
+
+    # --- animals -----------------------------------------------------------
+    # An animal is a record in the equipment list marked as one. Equipment is
+    # never written to on the way: no type appears on it, so a file from any
+    # earlier version means exactly what it meant.
+    shaped = store_mod.normalize({
+        "equipment": [
+            {"id": "e1", "name": "Furnace"},
+            {"id": "a1", "type": "animal", "name": "Biscuit", "species": " Dog ",
+             "birthDate": "2021-11-14", "adoptedOn": "not a date", "headCount": "0",
+             "birthApprox": 1},
+            {"id": "a2", "type": "animal", "name": "Flock", "species": " Emu ", "headCount": "6"},
+        ],
+    })
+    furnace, biscuit, flock = shaped["equipment"]
+    check("equipment gains no type", "type" in furnace, False)
+    check("an animal keeps its type", biscuit["type"], "animal")
+    check("species is tidied", biscuit["species"], "dog")
+    check("a species somebody added keeps the case they gave it", flock["species"], "Emu")
+    # The store's list of built-in species is the panel's, kept in step here.
+    with open(os.path.join(PKG, "frontend", "views.js"), encoding="utf-8") as fh:
+        views_js = fh.read()
+    block = re.search(r"export const SPECIES = \[(.*?)\];", views_js, re.S).group(1)
+    panel_species = set(re.findall(r"\['([a-z]+)', '", block))
+    check("the store knows the panel's species", sorted(store_mod.BUILTIN_SPECIES), sorted(panel_species))
+    # Every species is drawn by an icon the picker offers, and every icon the
+    # picker offers is drawn.
+    with open(os.path.join(PKG, "frontend", "icons.js"), encoding="utf-8") as fh:
+        icons_js = fh.read()
+    picker = re.findall(r"'([a-z]+)'", re.search(r"export const ANIMAL_ICONS = \[(.*?)\];", icons_js, re.S).group(1))
+    drawn = set(re.findall(r"^  ([a-z]+): '<", icons_js, re.M))
+    species_icons = set(re.findall(r"\['[a-z]+', '[^']+', '([a-z]+)'\]", block))
+    check("every species' icon is in the picker", sorted(species_icons - set(picker)), [])
+    check("and every icon in the picker is drawn", sorted(set(picker) - drawn), [])
+    check("with a drawing of its own for each farm animal",
+          sorted(k for k, v in re.findall(r"\['([a-z]+)', '[^']+', '([a-z]+)'\]", block)
+                 if v == "paw" and k not in ("other",)), [])
+    check("a real birthdate is kept", biscuit["birthDate"], "2021-11-14")
+    check("a bad date becomes nothing", biscuit["adoptedOn"], None)
+    check("only the year known is a yes or no", biscuit["birthApprox"], True)
+    check("a head count below one is no count", biscuit["headCount"], None)
+    check("a herd's count is a number", flock["headCount"], 6)
+    check("animals in a file turn the tab on", shaped["settings"]["showAnimals"], True)
+    check("and with none it stays off",
+          store_mod.normalize({"equipment": [{"id": "e1", "name": "Furnace"}]})["settings"]["showAnimals"],
+          False)
+    check("cards or list for the tab, like the others",
+          store_mod.normalize({"settings": {"viewAnimals": "tiles"}})["settings"]["viewAnimals"], "list")
+
+    # Weight: a number and the unit it was typed in. Text that names a number
+    # becomes one; text that does not is kept as it was written.
+    def weighed(records, settings=None):
+        raw = {"equipment": [dict(r, type="animal", id=f"w{i}") for i, r in enumerate(records)]}
+        if settings is not None:
+            raw["settings"] = settings
+        return [(a["weight"], a["weightUnit"]) for a in store_mod.normalize(raw)["equipment"]]
+    check("weights in text become numbers with their unit",
+          weighed([{"weight": "68 lb"}, {"weight": "1,050 lb"}, {"weight": "31kg"}, {"weight": "4.5 Kilograms"},
+                   {"weight": "12 lbs."}]),
+          [(68, "lb"), (1050, "lb"), (31, "kg"), (4.5, "kg"), (12, "lb")])
+    check("a number keeps the unit it came with",
+          weighed([{"weight": 30.8, "weightUnit": "kg"}, {"weight": 68, "weightUnit": "lb"}]),
+          [(30.8, "kg"), (68, "lb")])
+    check("a bare number takes the file's unit, else pounds",
+          [weighed([{"weight": "40"}], {"weightUnit": "kg"}), weighed([{"weight": 40}])],
+          [[(40, "kg")], [(40, "lb")]])
+    check("text that is no number is kept, with no unit",
+          weighed([{"weight": "about 60"}]), [("about 60", None)])
+    check("nothing, or nonsense, is no weight",
+          weighed([{}, {"weight": ""}, {"weight": -3}, {"weight": True}]),
+          [(None, None)] * 4)
+    check("equipment is not weighed", "weight" in store_mod.normalize(
+        {"equipment": [{"id": "e1", "name": "Scale"}]})["equipment"][0], False)
+    check("the unit is pounds, kilograms or not yet chosen",
+          [store_mod.normalize({"settings": {"weightUnit": u}})["settings"]["weightUnit"]
+           for u in ("kg", "lb", "stone", None)],
+          ["kg", "lb", None, None])
+    check("and not yet chosen by default", store_mod.normalize(None)["settings"]["weightUnit"], None)
+
+    # Medications and vaccinations are rows. The box of text medications used
+    # to be becomes a row per line, so nothing written there is lost.
+    def animal_with(**kw):
+        return store_mod.normalize({"equipment": [dict(id="m", type="animal", **kw)]})["equipment"][0]
+    check("old medication text becomes a row per line",
+          animal_with(medications="Heartworm chew\n\n  Fish oil daily ")["medications"],
+          [{"name": "Heartworm chew", "dosage": ""}, {"name": "Fish oil daily", "dosage": ""}])
+    check("rows are tidied, and empty ones dropped",
+          animal_with(medications=[{"name": " Apoquel ", "dosage": " 16 mg daily "}, {"name": "", "dosage": ""}, "junk", {"dosage": "2 drops"}])["medications"],
+          [{"name": "Apoquel", "dosage": "16 mg daily"}, {"name": "", "dosage": "2 drops"}])
+    check("vaccinations keep a real date and drop a bad one",
+          animal_with(vaccinations=[{"name": "Rabies", "date": "2026-03-01"}, {"name": " DHPP ", "date": "soon"}, {"name": ""}, None])["vaccinations"],
+          [{"name": "Rabies", "date": "2026-03-01"}, {"name": "DHPP", "date": None}])
+    check("an animal with neither has two empty lists",
+          [animal_with()["medications"], animal_with()["vaccinations"]], [[], []])
+    # The parser is the panel's parseWeight, kept in step here.
+    js_re = re.search(r"\.match\(/(\^.*?\$)/i\)", views_js).group(1)
+    check("the store reads weights as the panel does", js_re, store_mod._WEIGHT.pattern)
+
+    s = new_store()
+    await s.async_load()
+    await s.async_replace({
+        "equipment": [{"id": "e1", "name": "Furnace"},
+                      {"id": "a1", "type": "animal", "name": "Biscuit", "species": "dog"}],
+        "tasks": [{"id": "t1", "name": "Filter", "equipmentId": "e1", "intervalCount": 3, "intervalUnit": "months"},
+                  {"id": "t2", "name": "Heartworm", "equipmentId": "a1", "intervalCount": 1, "intervalUnit": "months"}],
+        "settings": {"showAnimals": True},
+    }, merge=False)
+    counts = s.counts()
+    check("equipment is counted without the animals", (counts["equipment"], counts["animals"]), (1, 1))
+
+    # Turning Animals off is the panel deleting every animal and switching
+    # the setting in one batch. Their routines go with them; history stays.
+    entry = await s.async_complete("t2", done_on="2026-10-01")
+    check("a service logged for an animal records whose it was", entry["equipmentName"], "Biscuit")
+    await s.async_apply([("equipment.delete", {"id": "a1"}), ("settings.put", {"showAnimals": False})])
+    check("turning off leaves no animals", [e["id"] for e in s.data["equipment"]], ["e1"])
+    check("and no routines of theirs", [t["id"] for t in s.data["tasks"]], ["t1"])
+    check("and the setting off", s.data["settings"]["showAnimals"], False)
+    check("their history is kept, with the name",
+          [(l["taskName"], l["equipmentName"]) for l in s.data["log"]], [("Heartworm", "Biscuit")])
+
+    # The setting cannot be switched off underneath animals that are still
+    # here — an older file merged in carries showAnimals false by default.
+    s = new_store()
+    await s.async_load()
+    await s.async_replace({"equipment": [{"id": "a1", "type": "animal", "name": "Biscuit"}]}, merge=False)
+    await s.async_replace({"equipment": [{"id": "e9", "name": "Kettle"}], "settings": {"showAnimals": False}}, merge=True)
+    check("a merge cannot switch Animals off under existing animals", s.data["settings"]["showAnimals"], True)
+
+    # Importing animals into an install with the tab off turns it on, and says.
+    s = new_store()
+    await s.async_load()
+    got = await s.async_replace({
+        "equipment": [{"id": "e1", "name": "Furnace"},
+                      {"id": "a1", "type": "animal", "name": "Biscuit"},
+                      {"id": "a2", "type": "animal", "name": "Mochi"}],
+    }, merge=True)
+    check("an import counts animals apart from equipment", (got["equipment"], got["animals"]), (1, 2))
+    check("and reports that it turned Animals on", got["animalsTurnedOn"], True)
+    check("which it did", s.data["settings"]["showAnimals"], True)
+    again = await s.async_replace({"equipment": [{"id": "a3", "type": "animal", "name": "Pip"}]}, merge=True)
+    check("but not when it was already on", again["animalsTurnedOn"], False)
+
+    # --- history keeps what it belonged to ---------------------------------
+    named = store_mod.normalize({
+        "equipment": [{"id": "e1", "name": "Furnace"}],
+        "log": [{"id": "l1", "equipmentId": "e1", "taskName": "Filter"},
+                {"id": "l2", "equipmentId": "gone", "taskName": "Oil change"},
+                {"id": "l3", "equipmentId": "e1", "equipmentName": "Old furnace", "taskName": "Service"},
+                "not an entry"],
+    })
+    check("an older entry is named from what is still here",
+          [l.get("equipmentName") for l in named["log"]], ["Furnace", None, "Old furnace"])
+    check("one already named keeps the name it was logged under", named["log"][2]["equipmentName"], "Old furnace")
+
+    # Named on the first load and written back, while there is still a name
+    # to give; a file with nothing to name is not rewritten for nothing.
+    s = new_store()
+    s._store._data = {"equipment": [{"id": "e1", "name": "Furnace"}],
+                      "tasks": [{"id": "t1", "name": "Filter", "equipmentId": "e1", "addedOn": "2026-01-01"}],
+                      "log": [{"id": "l1", "equipmentId": "e1", "taskName": "Filter"}]}
+    before = len(saved)
+    await s.async_load()
+    check("history is named and saved on the first load",
+          (len(saved) - before, saved[-1]["log"][0].get("equipmentName")), (1, "Furnace"))
+    s2 = new_store()
+    s2._store._data = saved[-1]
+    before = len(saved)
+    await s2.async_load()
+    check("and not again after that", len(saved) - before, 0)
+
+    # Deleting equipment names any of its history that was never named.
+    s = new_store()
+    await s.async_load()
+    await s.async_replace({"equipment": [{"id": "e1", "name": "Mower"}],
+                           "tasks": [{"id": "t1", "name": "Oil", "equipmentId": "e1"}]}, merge=False)
+    await s.async_apply([("log.append", {"id": "lx", "equipmentId": "e1", "taskName": "Oil"})])
+    await s.async_apply([("equipment.delete", {"id": "e1"})])
+    check("deleting equipment names the history it leaves", s.data["log"][0]["equipmentName"], "Mower")
 
     # --- everything we store survives JSON --------------------------------
     check("every save round-tripped through JSON", len(saved) > 0, True)

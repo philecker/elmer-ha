@@ -1,7 +1,7 @@
 complete:
   name: Mark a routine done
   description: >-
-    Records a routine as completed today, draws down any parts it consumes, and
+    Records a routine as completed today, draws down any supplies it consumes, and
     adds a history entry. The same thing the tick in the panel does.
   fields:
     routine:
@@ -38,7 +38,7 @@ undo:
   name: Undo a completion
   description: >-
     Reverses the most recent completion, restoring the previous due date and
-    putting back exactly the parts that completion took.
+    putting back exactly the supplies that completion took.
   fields:
     routine:
       name: Routine
@@ -51,12 +51,12 @@ undo:
         text:
 
 adjust_stock:
-  name: Adjust part stock
+  name: Adjust supply stock
   description: Add to or take from the quantity on hand. Never goes below zero.
   fields:
     part:
-      name: Part
-      description: The part's name, exactly as it appears in the Parts list.
+      name: Supply
+      description: The supply's name, exactly as it appears in the Supplies list.
       required: true
       example: "20x25x1 MERV 11"
       selector:

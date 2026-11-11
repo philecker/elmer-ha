@@ -151,6 +151,8 @@ def build_tasks():
         "2026-10-06",
         "2026-10-07",
         "2026-10-08",
+        "2026-10-21",
+        "2026-10-22",
         "2026-11-01",
         "2027-01-01",
         "2020-01-01",
@@ -355,6 +357,7 @@ const out = {
         // Only set while asleep, so undefined has to become null on both
         // sides or the comparison would differ on a field neither has.
         snoozedUntil: st.snoozedUntil === undefined ? null : st.snoozedUntil,
+        realDue: st.realDue === undefined ? null : st.realDue,
         // Round so float formatting can never be the thing that differs.
         progress: Math.round(st.progress * 1e9) / 1e9,
         cycle: st.cycle === undefined ? null : st.cycle,
@@ -445,6 +448,7 @@ def main() -> int:
             "progress": round(got["progress"], 9),
             "cycle": got["cycle"],
             "snoozedUntil": got.get("snoozedUntil"),
+            "realDue": got.get("realDue"),
         }
         check(
             "taskState",

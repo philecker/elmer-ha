@@ -161,10 +161,10 @@ function finished(task) {
 /**
  * When a routine is next due, or null if there is nothing to go on.
  *
- * Three of the four kinds know their own dates and need no last-done. Only an
- * interval has nothing to count from, and a routine never done is one that
- * wants doing, so it is due now. Done once, the next occurrence is the first
- * strictly after that date; never done, today itself counts.
+ * Everything counts from the anchor (anchorFor): the day it was last done,
+ * or, never done, the day it was added. An interval never done is due on the
+ * day it was added. Done once, the next occurrence is the first strictly
+ * after that date; never done, the day it was added itself counts.
  */
 function nextDue(task) {
   if (!task) return null;
@@ -198,17 +198,22 @@ function taskState(task, dueSoonDays = 14) {
   if (task && task.paused) {
     return { due: nextDue(task), daysLeft: null, status: 'paused', progress: 0, cycle: null };
   }
-  // Snoozed until a date. daysLeft goes null for the same reason pausing does
-  // — it is what the sensor reports — and a date in the past simply stops
-  // matching, so waking up needs no timer and no write.
-  if (task && task.snoozedUntil && today() < task.snoozedUntil) {
+  // A snooze is a new due date — the day it wakes, or the real one if later
+  // — and it is due soon once that is inside the window, snoozed past it.
+  const until = task ? task.snoozedUntil : null;
+  if (until && parseDay(until) && today() < until) {
+    const real = nextDue(task);
+    const due = real && real > until ? real : until;
+    const daysLeft = daysBetween(today(), due);
+    const span = Math.max(1, dueSoonDays);
     return {
-      due: nextDue(task),
-      daysLeft: null,
-      status: 'snoozed',
-      progress: 0,
+      due,
+      daysLeft,
+      status: daysLeft <= dueSoonDays ? 'due' : 'snoozed',
+      progress: Math.max(0, Math.min(1, (span - daysLeft) / span)),
       cycle: null,
-      snoozedUntil: task.snoozedUntil,
+      snoozedUntil: until,
+      realDue: real,
     };
   }
   const due = nextDue(task);

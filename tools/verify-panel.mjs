@@ -126,8 +126,10 @@ async function main() {
   const browser = await chromium.launch({ executablePath: CHROME });
   const errors = [];
 
-  async function open({ narrow = false, dark = false, viewport = PHONE } = {}) {
-    const ctx = await browser.newContext({ viewport, deviceScaleFactor: 2, acceptDownloads: true });
+  async function open({ narrow = false, dark = false, viewport = PHONE, userAgent, animals = false } = {}) {
+    const ctx = await browser.newContext({
+      viewport, deviceScaleFactor: 2, acceptDownloads: true, ...(userAgent ? { userAgent } : {}),
+    });
     const page = await ctx.newPage();
     page.on('console', (m) => {
       if (m.type() === 'error') errors.push(`console: ${m.text()}`);
@@ -138,7 +140,7 @@ async function main() {
     page.on('response', (r) => {
       if (r.status() >= 400) errors.push(`http ${r.status()}: ${r.url()}`);
     });
-    const q = `?narrow=${narrow ? 1 : 0}&dark=${dark ? 1 : 0}`;
+    const q = `?narrow=${narrow ? 1 : 0}&dark=${dark ? 1 : 0}${animals ? '&animals=1' : ''}`;
     await page.goto(base + q);
     await page.waitForFunction('window.__ready === true');
     // The first snapshot arrives on a timeout, so wait for real content.
@@ -186,12 +188,13 @@ async function main() {
     tone: n.dataset.tone,
     n: Number(n.querySelector('.n').textContent),
   })));
-  // All is every routine there is, which is more than the four pills beside
-  // it add up to: a finished one-off and a paused routine are both in the
-  // list, under headings of their own, and neither has a pill.
+  // All is every routine still running, which is more than the four pills
+  // beside it add up to: a paused or snoozed one is in the list under a
+  // heading of its own with no pill. A finished one-off is not counted at
+  // all — it lives in the history.
   check('every filter carries its count', pillCounts, [
     { tone: 'all', n: counts.overdue + counts.due + counts.ok + counts.new
-      + counts.done + counts.paused + counts.snoozed },
+      + counts.paused + counts.snoozed },
     { tone: 'overdue', n: counts.overdue },
     { tone: 'due', n: counts.due },
     { tone: 'new', n: counts.new },
@@ -299,13 +302,31 @@ async function main() {
       rows: l.nextElementSibling.querySelectorAll('.row').length,
     }));
   });
-  check('groups run worst first', grouped.map((g) => g.label),
-    ['Overdue', 'Due soon', 'Up to date', 'Finished']);
+  {
+    const gone = await page.evaluate(() => {
+      const s = window.__snapshot();
+      const id = Object.keys(s.computed.states).find((k) => s.computed.states[k].status === 'done');
+      const t = s.tasks.find((x) => x.id === id);
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      return { id, kept: Boolean(t), listed: Boolean(root.querySelector(`[data-act="routine"][data-id="${id}"]`)),
+        equipmentId: t && t.equipmentId, logged: s.log.some((l) => l.taskId === id) };
+    });
+    ok('the sample has a one-time routine that is done', Boolean(gone.id));
+    check('it is kept, for its history, but not listed', [gone.kept, gone.listed], [true, false]);
+    if (gone.equipmentId) {
+      await page.evaluate((eid) => { const p = document.querySelector('elmer-panel'); p.tab = 'equipment'; p.detail = { kind: 'equipment', id: eid }; p._render(); }, gone.equipmentId);
+      check('nor on its equipment\'s page',
+        await page.evaluate((id) => Boolean(document.querySelector('elmer-panel').shadowRoot.querySelector(`[data-act="routine"][data-id="${id}"]`)), gone.id), false);
+      await page.evaluate(() => { const p = document.querySelector('elmer-panel'); p.tab = 'routines'; p.detail = null; p._render(); });
+    }
+  }
+  check('groups run worst first, with no Finished group', grouped.map((g) => g.label),
+    ['Overdue', 'Due soon', 'Up to date']);
   ok('every heading counts its own group',
     grouped.every((g) => g.count === g.rows), JSON.stringify(grouped));
-  check('and together they are every routine',
+  check('and together they are every routine still running',
     grouped.reduce((n, g) => n + g.rows, 0),
-    counts.overdue + counts.due + counts.new + counts.ok + counts.done);
+    counts.overdue + counts.due + counts.new + counts.ok);
   check('the overdue group matches the pill', grouped[0].count, counts.overdue);
 
   // Typing filters the list. Each keystroke re-renders, which replaces the
@@ -372,7 +393,7 @@ async function main() {
   ok('and leaves focus in it', cleared.focused);
   ok('the clear button goes when there is nothing to clear', cleared.clearGone);
   check('and every group is back', cleared.groups,
-    ['Overdue', 'Due soon', 'Up to date', 'Finished']);
+    ['Overdue', 'Due soon', 'Up to date']);
 
   // Narrowing with a pill leaves one group, so a heading would only repeat the
   // pill; the list goes flat instead.
@@ -384,7 +405,7 @@ async function main() {
     (await page.$$(el('.row'))).length, counts.overdue);
   await page.click(el('.pill[data-value="overdue"]'));
   await page.waitForTimeout(140);
-  check('and the headings come back', (await page.$$(el('.pad > .label'))).length, 4);
+  check('and the headings come back', (await page.$$(el('.pad > .label'))).length, 3);
 
   // --- every row is the same height -------------------------------------
   // A relative time that wraps to a second line makes its row taller than its
@@ -452,7 +473,7 @@ async function main() {
   check('the add button names what it adds', addLabels, {
     routines: 'Add Routine',
     equipment: 'Add Equipment',
-    parts: 'Add Part',
+    parts: 'Add Supply',
     history: null,
     settings: null,
   });
@@ -674,8 +695,11 @@ async function main() {
       boxHidden: !root.querySelector('.sheet input[name="categoryNew"]').offsetParent,
     };
   });
-  ok('the built-in categories are offered', cats.options.includes('hvac')
+  // The menu is Settings' list: the categories in use, built-in or not, and
+  // nothing else. A built-in nobody has used yet comes back by being typed.
+  ok('the categories in use are offered', cats.options.includes('hvac')
     && cats.options.includes('water'), JSON.stringify(cats.options));
+  ok('and only those — not a built-in nobody uses', !cats.options.includes('exterior'), JSON.stringify(cats.options));
   check('with a way to name a new one', cats.newLabel, 'New Category…');
   ok('whose box stays out of the way until asked for', cats.boxHidden);
   check('and the new-location option reads the same way',
@@ -883,7 +907,10 @@ async function main() {
   await page.click(el('.addbtn[data-act="add-equipment"]'));
   await page.waitForSelector(el('.sheet input[name="name"]'));
   await page.fill(el('.sheet input[name="name"]'), 'Swimming Pool');
-  await page.selectOption(el('.sheet select[name="categoryPick"]'), 'exterior');
+  // Typed, since nothing is Exterior yet. It comes back as the built-in —
+  // checked below, where the pool is still an Exterior piece.
+  await page.selectOption(el('.sheet select[name="categoryPick"]'), '__new__');
+  await page.fill(el('.sheet input[name="categoryNew"]'), 'exterior');
   await page.click(el('.sheet [data-act="pick-icon"][data-value="pool"]'));
   await page.click(el('.sheet [data-act="save-equipment"]'));
   await page.waitForSelector(el('.sheet [data-act="save-templates"]'));
@@ -1293,6 +1320,78 @@ async function main() {
       return [t.schedule, t.onDate, t.onDateYearly, (st.due || '').slice(5)];
     }), ['date', '2027-12-25', true, '12-25']);
 
+  // --- a one-time routine finished from the form ---------------------------
+  // Done means it lives in the history and nowhere else. Typed into the form,
+  // the Last done has no history entry behind it, so saving records one —
+  // otherwise the routine would vanish without a trace. And the entry is the
+  // way back to it.
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.waitForTimeout(80);
+  await page.click(el('.addbtn'));
+  await page.waitForSelector(el('.sheet [data-act="pick-schedule"]'));
+  await page.fill(el('.sheet input[name="name"]'), 'replace anode rod');
+  await page.selectOption(el('.sheet [data-act="pick-schedule"]'), 'date');
+  await page.fill(el('.sheet input[name="onDate"]'), '2026-03-01');
+  await page.selectOption(el('.sheet select[name="onDateYearly"]'), '0');
+  await page.fill(el('.sheet input[name="lastDone"]'), '2026-03-02');
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(260);
+  const anode = await page.evaluate(() => {
+    const s = window.__snapshot();
+    const t = s.tasks.find((x) => x.name === 'Replace Anode Rod');
+    const root = document.querySelector('elmer-panel').shadowRoot;
+    return {
+      status: t && s.computed.states[t.id].status,
+      listed: Boolean(t && root.querySelector(`[data-act="routine"][data-id="${t.id}"]`)),
+      log: s.log.filter((l) => t && l.taskId === t.id).map((l) => [l.doneOn, l.taskName, l.usedParts.length, l.previousLastDone]),
+      toast: (root.querySelector('.toast span') || {}).textContent || '',
+      id: t && t.id,
+    };
+  });
+  check('saved finished, it is done and listed nowhere', [anode.status, anode.listed], ['done', false]);
+  check('and recorded in the history on its day, with no supplies drawn', anode.log, [['2026-03-02', 'Replace Anode Rod', 0, null]]);
+  ok('and the toast says where it went', anode.toast.includes('is in History now'), anode.toast);
+
+  await page.click(el('.tab[data-value="history"]'));
+  await page.waitForTimeout(120);
+  const anodeLog = await page.evaluate((id) => window.__snapshot().log.find((l) => l.taskId === id).id, anode.id);
+  await page.click(el(`.tl[data-id="${anodeLog}"]`));
+  await page.waitForSelector(el('.sheet [data-act="edit-routine"]'));
+  check('its history entry offers the routine back', await page.$eval(el('.sheet [data-act="edit-routine"]'), (b) => [b.dataset.id, b.textContent.trim()]), [anode.id, 'Edit routine']);
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet [data-act="save-routine"]'));
+  check('which opens the routine itself', await page.inputValue(el('.sheet input[name="name"]')), 'Replace Anode Rod');
+  // Saving it unchanged must not log it a second time.
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(220);
+  check('saving it again logs nothing new',
+    await page.evaluate((id) => window.__snapshot().log.filter((l) => l.taskId === id).length, anode.id), 1);
+  // Made yearly after all, it is a routine with a next date and back in the list.
+  await page.click(el(`.tl[data-id="${anodeLog}"]`));
+  await page.waitForSelector(el('.sheet [data-act="edit-routine"]'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet select[name="onDateYearly"]'));
+  await page.selectOption(el('.sheet select[name="onDateYearly"]'), '1');
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(220);
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.waitForTimeout(120);
+  check('made yearly, it is back in the list',
+    await page.evaluate((id) => Boolean(document.querySelector('elmer-panel').shadowRoot.querySelector(`[data-act="routine"][data-id="${id}"]`)), anode.id), true);
+  // An ordinary routine's history entry has no such button: it is in the list.
+  await page.click(el('.tab[data-value="history"]'));
+  await page.waitForTimeout(120);
+  await page.click(el(`.tl[data-id="${anodeLog}"]`));
+  await page.waitForSelector(el('.sheet [data-act="undo"]'));
+  check('a routine still listed gets no Edit routine there', await page.$$eval(el('.sheet [data-act="edit-routine"]'), (n) => n.length), 0);
+  await page.click(el('.sheet .btnrow [data-act="close"]'));
+  await page.waitForTimeout(120);
+  await page.evaluate((id) => window.__panel._hass.connection.sendMessagePromise({
+    type: 'elmer/apply', ops: [{ kind: 'routine.delete', payload: { id } }],
+  }), anode.id);
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.waitForTimeout(80);
+
   // --- the chrome does not change on a detail page ----------------------
   // The header used to turn into a back arrow and the thing's name, so the one
   // fixed point in the panel disappeared exactly when you had navigated away
@@ -1611,7 +1710,7 @@ async function main() {
     };
   });
   ok('tapping a part no longer throws you into a form', !partPage.sheet);
-  check('it opens a page under Parts', partPage.up, 'Parts');
+  check('it opens a page under Supplies', partPage.up, 'Supplies');
   check('named for the part', partPage.here, '20x25x1 MERV 11');
   ok('the header is unchanged there too', partPage.word === 'ELMER');
   ok('the page lists what uses it', partPage.labels.includes('Used by'));
@@ -2575,8 +2674,8 @@ async function main() {
   // because that is the reach of the two buttons beside it: renaming the room
   // the furnace is in has to take the spare filters on the shelf with it.
   check('with what carries it, of both kinds', groups.locations.map((r) => r.sub), [
-    '2 pieces of equipment and 2 parts', '1 piece of equipment',
-    '1 piece of equipment', '1 piece of equipment and 1 part',
+    '2 pieces of equipment and 2 supplies', '1 piece of equipment',
+    '1 piece of equipment', '1 piece of equipment and 1 supply',
   ]);
   ok('and each can be renamed', groups.locations.every((r) => r.rename));
 
@@ -3117,38 +3216,49 @@ async function main() {
   await page.click(el('.sheet [data-act="snooze"][data-days="14"]'));
   await page.waitForTimeout(320);
 
-  const slept = await page.evaluate((id) => {
+  const sleepState = () => page.evaluate((id) => {
     const s = window.__snapshot();
     const root = document.querySelector('elmer-panel').shadowRoot;
     const r = root.querySelector(`.row[data-id="${id}"]`);
+    const label = r && r.closest('.card') ? r.closest('.card').previousElementSibling : null;
     return {
       until: s.tasks.find((t) => t.id === id).snoozedUntil,
       status: s.computed.states[id].status,
       daysLeft: s.computed.states[id].daysLeft,
       counted: s.computed.counts.snoozed,
-      overdue: s.computed.counts.overdue,
       lead: r ? r.querySelector('.sub b').textContent.trim() : null,
-      headings: [...root.querySelectorAll('.pad .label')].map((n) => n.textContent.replace(/\d+$/, '').trim()),
+      txt: r && r.querySelector('.sub .txt') ? r.querySelector('.sub .txt').textContent.trim() : null,
+      group: label ? label.textContent.replace(/\d+$/, '').trim() : null,
     };
   }, sleeper);
+  // A snooze is a new due date. Two weeks with the default two-week window
+  // lands inside it, so the routine is due soon — counting down to the day
+  // it comes back, and saying why its date moved.
+  const slept = await sleepState();
   ok('it is asleep until a real day', /^\d{4}-\d{2}-\d{2}$/.test(slept.until || ''), String(slept.until));
-  check('and reads as asleep', slept.status, 'snoozed');
-  // The same reasoning as pausing: days-left is what the sensor reports, so
-  // an automation must not go on firing about what you just set aside.
-  check('with no days left for an automation to match', slept.daysLeft, null);
-  check('counted as asleep', slept.counted, 1);
-  ok('and out of the overdue band, which is the whole point',
-    slept.headings.includes('Snoozed'), JSON.stringify(slept.headings));
-  ok('the row says when it wakes', /^Snoozed until /.test(slept.lead || ''), String(slept.lead));
+  check('snoozed inside the due-soon window, it is due soon', [slept.status, slept.group], ['due', 'Due soon']);
+  check('and says how long until it is due', [slept.daysLeft, slept.lead], [14, 'in 14 days']);
+  check('with Snoozed beside it', slept.txt, 'Snoozed');
+  check('counted as due soon, not asleep', slept.counted, 0);
+  await shot(page, 'snoozed-due-soon.png');
 
-  // Still visibly overdue underneath: putting something off must not hide
-  // how long it has been waiting.
-  check('and what it really is, in a word',
-    await page.evaluate((id) => {
-      const root = document.querySelector('elmer-panel').shadowRoot;
-      const t = root.querySelector(`.row[data-id="${id}"] .sub .txt`);
-      return t ? t.textContent.trim() : null;
-    }, sleeper), 'overdue');
+  // Past the window it is filed as snoozed — still with its days.
+  await page.click(el(`.row[data-id="${sleeper}"]`));
+  await page.waitForSelector(el('.sheet [data-act="wake"]'));
+  const hint = await page.$eval(el('.sheet .actions .hint'), (n) => n.textContent.trim());
+  ok('the sheet says when it was really due', /^Snoozed until .+\. It was due .+; waking it puts it back on that date\.$/.test(hint), hint);
+  await page.click(el('.sheet [data-act="wake"]'));
+  await page.waitForTimeout(320);
+  await page.click(el(`.row[data-id="${sleeper}"]`));
+  await page.waitForSelector(el('.sheet [data-act="snooze-open"]'));
+  await page.click(el('.sheet [data-act="snooze-open"]'));
+  await page.waitForTimeout(200);
+  await page.click(el('.sheet [data-act="snooze"][data-days="30"]'));
+  await page.waitForTimeout(320);
+  const long = await sleepState();
+  check('snoozed past the window, it is under Snoozed', [long.status, long.group], ['snoozed', 'Snoozed']);
+  check('still saying how long until it is due', [long.daysLeft, long.lead, long.txt], [30, 'in 30 days', 'Snoozed']);
+  check('counted as asleep', long.counted, 1);
 
   // Waking it puts it back exactly where it was.
   await page.click(el(`.row[data-id="${sleeper}"]`));
@@ -3934,6 +4044,949 @@ async function main() {
     return threw;
   });
   check('a detached panel does not error on a push', leaked, false);
+
+  /* ------------------------------------------------------------ animals -- */
+  // Off by default, and off means there are none: everything above ran on a
+  // house with no animals in it and is the proof that equipment, routines,
+  // parts, history and settings are as they were. What follows turns them on.
+  {
+    const DESK = { width: 1000, height: 820 };
+    const panelText = (p, sel) => p.evaluate((q) => {
+      const n = document.querySelector('elmer-panel').shadowRoot.querySelector(q);
+      return n ? n.textContent.replace(/\s+/g, ' ').trim() : null;
+    }, sel);
+    const tabKeys = (p) => p.$$eval(el('.tabs .tab'), (n) => n.map((t) => t.dataset.value));
+    const go = (p, tab, detail = null) => p.evaluate(([t, d]) => {
+      const panel = document.querySelector('elmer-panel');
+      panel.tab = t; panel.detail = d; panel._render();
+    }, [tab, detail]);
+
+    // --- off: nothing to see, and the equipment screens say what they said
+    const off = await open({ viewport: DESK });
+    const op = off.page;
+    check('Animals is off by default, with no tab',
+      [(await tabKeys(op)).includes('animals'), await op.$eval(el('select[data-act="set-animals"]'), (n) => n.value).catch(() => null)],
+      [false, null]);
+    await go(op, 'settings');
+    check('with Animals off, Locations is one list with no headings',
+      await op.evaluate(() => {
+        const root = document.querySelector('elmer-panel').shadowRoot;
+        return [root.querySelectorAll('.subhead').length, root.querySelectorAll('.card[data-list]').length];
+      }), [0, 2]);
+    check('the setting is there, and Off',
+      await op.$eval(el('select[data-act="set-animals"]'), (n) => n.value), '0');
+    check('with no pounds-or-kilograms setting while it is off',
+      await op.$$eval(el('select[data-act="set-weight-unit"]'), (n) => n.length), 0);
+    await go(op, 'routines');
+    await op.evaluate(() => document.querySelector('elmer-panel')._openSheet({ kind: 'routine-form' }));
+    await op.waitForSelector(el('.sheet #f-equipment'));
+    check('the routine form keeps its Equipment picker, ungrouped',
+      [await panelText(op, '.sheet label[for="f-equipment"]'),
+        await op.$$eval(el('.sheet #f-equipment optgroup'), (n) => n.length)], ['Equipment', 0]);
+    await op.evaluate(() => document.querySelector('elmer-panel')._closeSheet());
+    for (const tab of ['routines', 'equipment', 'parts']) {
+      await go(op, tab);
+      check(`the ${tab} search box just says Search, and still says what it searches`,
+        await op.$eval(el('.search input'), (n) => [n.placeholder, n.getAttribute('aria-label')]),
+        ['Search', `Search ${tab === 'parts' ? 'supplies' : tab}`]);
+    }
+
+    // Turning it on with nothing to lose needs no question.
+    await go(op, 'settings');
+    await op.selectOption(el('select[data-act="set-animals"]'), '1');
+    await op.waitForFunction(() => window.__snapshot().settings.showAnimals === true);
+    await op.waitForTimeout(60);
+    check('turning it on adds the tab, between Equipment and Parts',
+      await tabKeys(op), ['routines', 'equipment', 'animals', 'parts', 'history', 'settings']);
+    await go(op, 'animals');
+    ok('with no animals it says how to start', (await panelText(op, '.scroll')).includes('No animals yet'));
+    check('and the header offers to add one', await panelText(op, '.addbtn'), 'Add Animal');
+    await op.selectOption(el('select[data-act="set-animals"]'), '0').catch(() => {});
+    await go(op, 'settings');
+    await op.selectOption(el('select[data-act="set-animals"]'), '0');
+    await op.waitForFunction(() => window.__snapshot().settings.showAnimals === false);
+    check('and off again with none, without asking', await op.$$eval(el('.sheet'), (n) => n.length), 0);
+    await off.ctx.close();
+
+    // --- on, with a dog, a cat, a horse and a flock ----------------------
+    const on = await open({ viewport: DESK, dark: true, animals: true });
+    const ap = on.page;
+    ap.on('dialog', (d) => d.accept());
+    const today = await ap.evaluate(() => window.__snapshot().computed.today);
+
+    await go(ap, 'equipment');
+    const equipmentNames = await ap.$$eval(el('.row .title'), (n) => n.map((t) => t.textContent.trim()));
+    ok('the Equipment tab shows no animals', !equipmentNames.some((n) => ['Biscuit', 'Mochi', 'Juniper', 'Backyard Hens'].includes(n)),
+      equipmentNames.join(', '));
+    check('and exactly the equipment it had', equipmentNames.length, 5);
+
+    await go(ap, 'animals');
+    const listed = await ap.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      return {
+        groups: [...root.querySelectorAll('.pad > .label')].map((n) => n.textContent.trim()),
+        rows: Object.fromEntries([...root.querySelectorAll('.row[data-act="animal"]')].map((r) => [
+          r.querySelector('.title').textContent.trim(), r.querySelector('.sub').textContent.replace(/\s+/g, ' ').trim(),
+        ])),
+        tags: [...root.querySelectorAll('.row[data-act="animal"] .tag')].map((t) => t.dataset.tone),
+      };
+    });
+    check('animals are grouped by location, like equipment', listed.groups, ['Barn', 'Coop', 'House']);
+    check('a birthday this month takes the age\'s place', listed.rows.Biscuit, 'Dog · Turns 5 in 4 days');
+    check('only the year known reads as about', listed.rows.Mochi, 'Cat · about 7 years');
+    check('otherwise the age', listed.rows.Juniper, 'Horse · 11 years');
+    check('a flock is counted rather than aged', listed.rows['Backyard Hens'], 'Chicken · 6 birds');
+    ok('each carries its most pressing routine\'s status', listed.tags.includes('overdue') && listed.tags.includes('due'),
+      listed.tags.join(','));
+    await shot(ap, 'desktop-animals-dark.png');
+
+    await ap.fill(el('.search input'), 'golden');
+    await ap.waitForTimeout(60);
+    check('search finds an animal by its breed',
+      await ap.$$eval(el('.row[data-act="animal"] .title'), (n) => n.map((t) => t.textContent.trim())), ['Biscuit']);
+    await ap.fill(el('.search input'), '');
+    await ap.click(el('.findrow [data-value="cards"]'));
+    await ap.waitForFunction(() => window.__snapshot().settings.viewAnimals === 'cards');
+    check('cards are remembered for this tab on its own',
+      await ap.evaluate(() => [window.__snapshot().settings.viewAnimals, window.__snapshot().settings.viewEquipment]),
+      ['cards', 'list']);
+    ok('a card keeps the birthday on a line of its own',
+      (await panelText(ap, '.tile[data-id="a1"] .meta')).includes('Turns 5 in 4 days'));
+    await ap.click(el('.findrow [data-value="list"]'));
+
+    // --- an animal's page
+    await ap.click(el('.row[data-id="a1"]'));
+    await ap.waitForSelector(el('.kv'));
+    const facts = await ap.evaluate(() => {
+      const dl = document.querySelector('elmer-panel').shadowRoot.querySelector('.kv');
+      const out = {};
+      const dts = [...dl.querySelectorAll('dt')];
+      for (const dt of dts) out[dt.textContent.trim()] = dt.nextElementSibling.textContent.replace(/\s+/g, ' ').trim();
+      return out;
+    });
+    check('sex, as a pet has it', facts.Sex, 'Male, neutered');
+    ok('born, with the age beside it', /· 4 years old$/.test(facts.Born), facts.Born);
+    ok('the next birthday, always on the page', /turns 5 in 4 days$/.test(facts['Next birthday']), facts['Next birthday']);
+    check('the microchip in the number face', await ap.$eval(el('.kv dd.mono'), (n) => n.textContent.trim()), '000 000 000 012 345');
+    check('Edit and Delete, as equipment has', await ap.$$eval(el('.pad > .btnrow:last-child .btn'), (n) => n.map((b) => b.textContent.trim())),
+      ['Edit', 'Delete']);
+    check('and the header adds a routine to it', await panelText(ap, '.addbtn'), 'Add Routine');
+    await shot(ap, 'desktop-animal-detail-dark.png');
+
+    // --- medications and vaccinations: rows on the page, rows in the form
+    const listedOn = (label) => ap.evaluate((l) => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const head = [...root.querySelectorAll('.pad > .label')].find((n) => n.textContent.trim() === l);
+      return head ? [...head.nextElementSibling.querySelectorAll('.row')].map((r) => [
+        r.querySelector('.title').textContent.trim(), (r.querySelector('.sub') || { textContent: '' }).textContent.trim()]) : null;
+    }, label);
+    const meds = await listedOn('Medications');
+    check('medications list each one with its dosage', meds,
+      [['Heartworm Chew', '1 chew, on the 1st'], ['Flea And Tick Tablet', '1 tablet every 3 months']]);
+    const vax = await listedOn('Vaccinations');
+    check('vaccinations list latest first, with the day given', vax && vax.map((v) => [v[0], /^Given /.test(v[1])]),
+      [['Bordetella', true], ['Rabies', true], ['DHPP', true]]);
+    await ap.click(el('.btn[data-act="edit-animal"]'));
+    await ap.waitForSelector(el('.sheet .pairs[data-kind="med"]'));
+    const pairsOf = (kind) => ap.$$eval(el(`.sheet .pairs[data-kind="${kind}"] .pairrow`), (rows) => rows.map((r) =>
+      [r.querySelector('.paira').value, r.querySelector('.pairb').value]));
+    check('the form opens with a row per medication', await pairsOf('med'),
+      [['Heartworm Chew', '1 chew, on the 1st'], ['Flea And Tick Tablet', '1 tablet every 3 months']]);
+    check('with Medication and Dosage over them', await ap.$$eval(el('.sheet .pairs[data-kind="med"] .pairhead span'), (n) => n.map((x) => x.textContent)), ['Medication', 'Dosage']);
+    check('and the boxes say so too', await ap.$eval(el('.sheet .pairs[data-kind="med"] .pairrow .pairb'), (n) => [n.placeholder, n.previousElementSibling.placeholder]), ['Dosage', 'Medication']);
+    check('vaccinations are a name and a date', await ap.$$eval(el('.sheet .pairs[data-kind="vax"] .pairrow .pairb'), (n) => n.map((x) => x.type)), ['date', 'date', 'date']);
+    await ap.click(el('.sheet [data-act="add-pair"][data-kind="med"]'));
+    check('Add medication adds an empty row, ready to type in',
+      [await pairsOf('med').then((r) => r.length), await ap.evaluate(() => document.querySelector('elmer-panel').shadowRoot.activeElement?.className)],
+      [3, 'paira']);
+    await ap.fill(el('.sheet .pairs[data-kind="med"] .pairrow:last-child .paira'), 'joint supplement');
+    await ap.fill(el('.sheet .pairs[data-kind="med"] .pairrow:last-child .pairb'), '1 scoop daily');
+    await ap.click(el('.sheet .pairs[data-kind="med"] .pairrow:first-child [data-act="unpair"]'));
+    await ap.click(el('.sheet [data-act="add-pair"][data-kind="med"]'));   // left empty: dropped
+    await ap.click(el('.sheet [data-act="add-pair"][data-kind="vax"]'));
+    await ap.fill(el('.sheet .pairs[data-kind="vax"] .pairrow:last-child .paira'), 'leptospirosis');
+    await ap.fill(el('.sheet .pairs[data-kind="vax"] .pairrow:last-child .pairb'), today);
+    await ap.fill(el('.sheet #f-breed'), 'Golden Retriever');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+    const biscuit = await ap.evaluate(() => window.__snapshot().equipment.find((e) => e.id === 'a1'));
+    check('saved: the removed one gone, the new one added, the empty one dropped', biscuit.medications,
+      [{ name: 'Flea And Tick Tablet', dosage: '1 tablet every 3 months' }, { name: 'Joint Supplement', dosage: '1 scoop daily' }]);
+    check('and the vaccination with its day', biscuit.vaccinations.slice(-1), [{ name: 'Leptospirosis', date: today }]);
+    check('the page leads with it now', (await listedOn('Vaccinations'))[0][0], 'Leptospirosis');
+    check('a dog with no medications shows no Medications heading', await (async () => {
+      await go(ap, 'animals', { kind: 'animal', id: 'a2' });
+      return listedOn('Medications');
+    })(), null);
+    check('and a medication finds its animal in search', await (async () => {
+      await go(ap, 'animals');
+      await ap.fill(el('[data-act="search"]'), 'joint');
+      await ap.waitForTimeout(150);
+      const ids = await ap.$$eval(el('[data-act="animal"]'), (n) => n.map((x) => x.dataset.id));
+      await ap.fill(el('[data-act="search"]'), '');
+      await ap.waitForTimeout(100);
+      return ids;
+    })(), ['a1']);
+
+    await go(ap, 'animals', { kind: 'animal', id: 'a3' });
+    await ap.waitForSelector(el('.kv'));
+    const horse = await ap.evaluate(() => {
+      const dl = document.querySelector('elmer-panel').shadowRoot.querySelector('.kv');
+      return Object.fromEntries([...dl.querySelectorAll('dt')].map((dt) => [dt.textContent.trim(), dt.nextElementSibling.textContent.trim()]));
+    });
+    check('a horse\'s sex is a horse\'s word', horse.Sex, 'Mare');
+    check('its height after its weight, and no livestock section', [Object.keys(horse).slice(Object.keys(horse).indexOf('Weight'), Object.keys(horse).indexOf('Weight') + 2), horse.Height, ['Registration', 'Sire', 'Dam', 'Tag / brand', 'Herd / flock'].filter((k) => k in horse)],
+      [['Weight', 'Height'], '15.1 hands', []]);
+
+    // --- a routine for an animal
+    await go(ap, 'animals', { kind: 'animal', id: 'a1' });
+    await ap.click(el('.addbtn'));
+    await ap.waitForSelector(el('.sheet #f-equipment'));
+    const picker = await ap.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const sel = root.querySelector('.sheet #f-equipment');
+      return {
+        label: root.querySelector('.sheet label[for="f-equipment"]').textContent.trim(),
+        groups: [...sel.querySelectorAll('optgroup')].map((g) => [g.label, g.children.length]),
+        chosen: sel.value,
+        placeholder: root.querySelector('.sheet #f-rname').placeholder,
+      };
+    });
+    check('the picker is For, with the two kinds grouped', [picker.label, picker.groups],
+      ['For', [['Equipment', 5], ['Animals', 4]]]);
+    check('opened from Biscuit, it is for Biscuit', picker.chosen, 'a1');
+    check('and the example name is one for an animal', picker.placeholder, 'Flea treatment');
+    await ap.evaluate(() => document.querySelector('elmer-panel')._closeSheet());
+
+    // --- logging a service records whose it was
+    await ap.evaluate(() => document.querySelector('elmer-panel')._openSheet({ kind: 'routine', id: 'ta2' }));
+    await ap.waitForSelector(el('.sheet .kv'));
+    check('a routine\'s sheet says Animal, not Equipment', await panelText(ap, '.sheet .kv dt'), 'Animal');
+    await ap.evaluate(() => document.querySelector('elmer-panel')._closeSheet());
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/complete', taskId: 'ta6' }));
+    await ap.waitForTimeout(80);
+    check('the history entry keeps the animal\'s name',
+      await ap.evaluate(() => window.__snapshot().log.find((l) => l.taskId === 'ta6').equipmentName), 'Mochi');
+
+    // --- one list of locations for everything; species apart
+    const cardRows = (p, list) => p.evaluate((want) => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const card = root.querySelector(`.card[data-list="${want}"]`);
+      if (!card) return null;
+      return [...card.querySelectorAll('.groprow')].map((r) => ({
+        name: r.querySelector('.title').textContent.trim(),
+        sub: r.querySelector('.sub').textContent.replace(/\s+/g, ' ').trim(),
+        rename: Boolean(r.querySelector('[data-act="rename-group"]')),
+        field: r.querySelector('[data-act="clear-group"]').dataset.field,
+      }));
+    }, list);
+    await go(ap, 'settings');
+    check('Locations is the one list, with no second one beside it',
+      await ap.evaluate(() => [...document.querySelector('elmer-panel').shadowRoot.querySelectorAll('.card[data-list]')]
+        .map((c) => c.dataset.list)), ['location', 'category', 'species']);
+    const rooms = Object.fromEntries((await cardRows(ap, 'location')).map((r) => [r.name, r.sub]));
+    check('and each place says what it holds, of every kind',
+      [rooms.Barn, rooms.House, rooms.Basement],
+      ['1 animal', '2 animals and 1 supply', '2 pieces of equipment and 2 supplies']);
+    const kinds = await cardRows(ap, 'species');
+    check('a list of species, Elmer\'s own marked built in and not renamable',
+      kinds.map((r) => [r.name, r.sub, r.rename]),
+      [['Cat', '1 animal · built in', false], ['Chicken', '1 animal · built in', false],
+        ['Dog', '1 animal · built in', false], ['Horse', '1 animal · built in', false]]);
+    ok('the data summary counts animals apart from equipment',
+      (await panelText(ap, '.scroll')).includes('5 pieces of equipment, 4 animals,'));
+
+    const pickerOptions = (p) => p.$$eval(el('.sheet select[name="locationPick"] option'), (n) => n.map((o) => o.value));
+    await ap.evaluate(() => document.querySelector('elmer-panel')._openSheet({ kind: 'equipment-form' }));
+    await ap.waitForSelector(el('.sheet select[name="locationPick"]'));
+    const eqRooms = await pickerOptions(ap);
+    ok('the equipment form offers every place, the barn included', eqRooms.includes('Basement') && eqRooms.includes('Barn'),
+      eqRooms.join(', '));
+    await ap.evaluate(() => document.querySelector('elmer-panel')._closeSheet());
+    await ap.evaluate(() => document.querySelector('elmer-panel')._openSheet({ kind: 'animal-form', id: 'a1' }));
+    await ap.waitForSelector(el('.sheet select[name="locationPick"]'));
+    const anRooms = await pickerOptions(ap);
+    ok('and so does the animal form, the basement included', anRooms.includes('Barn') && anRooms.includes('Basement'),
+      anRooms.join(', '));
+    await ap.evaluate(() => document.querySelector('elmer-panel')._closeSheet());
+
+    // One place, so one rename: the tractor and the horse in the barn both go.
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply', ops: [{ kind: 'equipment.put', payload: { id: 'eq5', location: 'Barn' } }],
+    }));
+    await ap.waitForTimeout(60);
+    await go(ap, 'settings');
+    await ap.click(el('[data-act="rename-group"][data-field="location"][data-value="Barn"]'));
+    await ap.waitForSelector(el('.sheet #f-group'));
+    ok('renaming says how far it reaches', (await panelText(ap, '.sheet .hint')).includes('1 piece of equipment and 1 animal'),
+      await panelText(ap, '.sheet .hint'));
+    await ap.fill(el('.sheet #f-group'), 'stable');
+    await ap.click(el('.sheet [data-act="save-group"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.find((e) => e.id === 'a3').location === 'Stable');
+    check('renaming a place moves everything in it',
+      await ap.evaluate(() => [window.__snapshot().equipment.find((e) => e.id === 'a3').location,
+        window.__snapshot().equipment.find((e) => e.id === 'eq5').location]), ['Stable', 'Stable']);
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply', ops: [{ kind: 'equipment.put', payload: { id: 'eq5', location: 'Garage' } }],
+    }));
+
+    // A species of your own: typed once, offered from then on, and yours to
+    // rename. One typed that is really a built-in is taken as that one.
+    await go(ap, 'animals');
+    await ap.click(el('.addbtn'));
+    await ap.waitForSelector(el('.sheet #f-species'));
+    await ap.fill(el('.sheet #f-name'), 'ellie');
+    await ap.selectOption(el('.sheet #f-species'), '__new__');
+    await ap.fill(el('.sheet input[name="speciesNew"]'), 'emu');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.some((e) => e.name === 'Ellie'));
+    check('a species typed in is kept, title-cased',
+      await ap.evaluate(() => window.__snapshot().equipment.find((e) => e.name === 'Ellie').species), 'Emu');
+    check('and shown as itself on the animal\'s page', await ap.evaluate(() => {
+      const dl = document.querySelector('elmer-panel').shadowRoot.querySelector('.kv');
+      return dl.querySelector('dd').textContent.trim();
+    }), 'Emu');
+    await ap.evaluate(() => document.querySelector('elmer-panel')._openSheet({ kind: 'animal-form' }));
+    await ap.waitForSelector(el('.sheet #f-species'));
+    ok('the next form offers it', (await ap.$$eval(el('.sheet #f-species option'), (n) => n.map((o) => o.value))).includes('Emu'));
+    await ap.fill(el('.sheet #f-name'), 'dusty');
+    await ap.selectOption(el('.sheet #f-species'), '__new__');
+    await ap.fill(el('.sheet input[name="speciesNew"]'), 'HORSE');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.some((e) => e.name === 'Dusty'));
+    check('one typed that is really a built-in becomes that one',
+      await ap.evaluate(() => window.__snapshot().equipment.find((e) => e.name === 'Dusty').species), 'horse');
+
+    await go(ap, 'settings');
+    const withEmu = await cardRows(ap, 'species');
+    check('an added species is listed, and can be renamed',
+      withEmu.filter((r) => r.name === 'Emu').map((r) => [r.sub, r.rename]), [['1 animal', true]]);
+    await ap.click(el('[data-act="rename-group"][data-field="species"][data-value="Emu"]'));
+    await ap.waitForSelector(el('.sheet #f-group'));
+    await ap.fill(el('.sheet #f-group'), 'ostrich');
+    await ap.click(el('.sheet [data-act="save-group"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.find((e) => e.name === 'Ellie').species === 'Ostrich');
+    ok('renamed on every animal that had it', true);
+    await ap.click(el('[data-act="clear-group"][data-field="species"][data-value="Ostrich"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.find((e) => e.name === 'Ellie').species === '');
+    ok('removing it leaves the animal, as Other', true);
+    await shot(ap, 'desktop-animal-settings-dark.png');
+    // Tidy up, so the counts below are the sample's.
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply',
+      ops: window.__snapshot().equipment.filter((e) => ['Ellie', 'Dusty'].includes(e.name))
+        .map((e) => ({ kind: 'equipment.delete', payload: { id: e.id } })),
+    }));
+    await ap.waitForTimeout(60);
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply', ops: [{ kind: 'equipment.put', payload: { id: 'a3', location: 'Barn' } }],
+    }));
+    await ap.waitForTimeout(60);
+
+    // --- the form
+    await go(ap, 'animals');
+    await ap.click(el('.addbtn'));
+    await ap.waitForSelector(el('.sheet #f-species'));
+    const shown = (p) => p.evaluate(() => {
+      const sheet = document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet');
+      return {
+        pet: !sheet.querySelector('[data-pet]').hidden,
+        farm: [...sheet.querySelectorAll('[data-livestock]')].every((n) => !n.hidden),
+        sexes: [...sheet.querySelector('#f-sex').options].map((o) => o.value),
+      };
+    });
+    check('a new animal starts as a pet', await shown(ap), { pet: true, farm: false, sexes: ['', 'f', 'm'] });
+    // The menu is Settings' list: the species in use and nothing else. A
+    // goat is a built-in nobody here has, so it is typed — and the form
+    // follows the typing, not only the menu.
+    const offered = await ap.$$eval(el('.sheet #f-species option'), (n) => n.map((o) => o.value));
+    check('the species menu offers the ones in use, and a way to add one',
+      offered, ['', 'cat', 'chicken', 'dog', 'horse', '__new__']);
+    const pressed = (p) => p.$$eval(el('.sheet .iconpick [aria-pressed="true"]'), (n) => n.map((b) => b.dataset.value));
+    check('the icon picker starts on the paw', await pressed(ap), ['paw']);
+    await ap.fill(el('.sheet #f-name'), 'clover');
+    await ap.fill(el('.sheet #f-breed'), 'Nubian');
+    await ap.selectOption(el('.sheet #f-species'), '__new__');
+    await ap.fill(el('.sheet input[name="speciesNew"]'), 'goat');
+    check('typing goat brings How many and a goat\'s words for sex', await shown(ap),
+      { pet: false, farm: true, sexes: ['', 'doe', 'buck', 'wether'] });
+    await ap.selectOption(el('.sheet #f-sex'), 'doe');
+    await ap.fill(el('.sheet #f-headCount'), '4');
+    await ap.fill(el('.sheet input[name="speciesNew"]'), 'Rabbit');
+    check('a rabbit is a pet again, and the icon follows the species',
+      [(await shown(ap)).pet, await pressed(ap)], [true, ['rabbit']]);
+    await ap.fill(el('.sheet input[name="speciesNew"]'), 'goat');
+    await ap.selectOption(el('.sheet #f-sex'), 'doe');
+    await ap.click(el('.sheet .iconpick [data-value="cow"]'));
+    check('an icon picked on purpose is the one that sticks', await pressed(ap), ['cow']);
+    check('and what was typed survives the round trip', await ap.$eval(el('.sheet #f-headCount'), (n) => n.value), '4');
+    // No livestock section any more, and the fields run Weight, Height; From, Adopted.
+    check('the form has no Livestock fields', await ap.$$eval(el('.sheet #f-registry, .sheet #f-registration, .sheet #f-tag, .sheet #f-herd, .sheet #f-sire, .sheet #f-dam'), (n) => n.length), 0);
+    check('and labels the details in that order', await ap.$$eval(el('.sheet label'), (n) => n.map((l) => l.textContent.trim())
+      .filter((t) => /^(Color|Weight|Height|From|Adopted|Microchip|License)/.test(t))),
+      ['Color / markings', 'Weight (lbs)', 'Height', 'From', 'Adopted / acquired', 'Microchip', 'License / tag number']);
+    await ap.fill(el('.sheet #f-headCount'), '3');
+    check('where it came from suggests a few, capitalised',
+      await ap.$eval(el('.sheet #f-adoptedFrom'), (n) => n.placeholder), 'Breeder, Shelter, Farm…');
+    check('the weight box says its unit',
+      await ap.$eval(el('.sheet label[for="f-weight"]'), (n) => n.textContent), 'Weight (lbs)');
+    ok('the birthdate cannot be in the future', await ap.$eval(el('.sheet #f-birthDate'), (n, t) => n.max === t, today));
+    // One calendar icon per date field: ours, with the engine's own hidden.
+    // Firefox draws a button that cannot be hidden, so there ours stands
+    // down instead — Chromium cannot run that branch, but it can confirm the
+    // rule is there and does not apply here.
+    const dateIcons = await ap.$$eval(el('.sheet input[type="date"]'), (ns) => {
+      const root = ns[0].getRootNode();
+      const sheets = [...root.querySelectorAll('style')].map((st) => st.sheet).concat(root.adoptedStyleSheets || []);
+      const rules = sheets.flatMap((sh) => [...sh.cssRules]);
+      const nativeHidden = rules.some((r) => r.selectorText && r.selectorText.includes('::-webkit-calendar-picker-indicator')
+        && r.style.display === 'none' && ns.every((n) => n.matches(r.selectorText.replace(/::-webkit-calendar-picker-indicator/g, ''))));
+      return ns.map((n) => [n.name, /svg/.test(getComputedStyle(n).backgroundImage), nativeHidden ? 'none' : 'shown']);
+    });
+    check('each date field shows one calendar icon', dateIcons,
+      [['birthDate', true, 'none'], ['adoptedOn', true, 'none']]);
+    check('and Firefox, whose own cannot be hidden, gets only its own',
+      await ap.evaluate(() => [CSS.supports('-moz-appearance', 'none'),
+        [...document.querySelector('elmer-panel').shadowRoot.querySelectorAll('style')].some((st) =>
+          /@supports \(-moz-appearance: none\)\s*\{\s*\.field input\[type="date"\]\s*\{\s*background-image: none;/.test(st.textContent))]),
+      [false, true]);
+    await shot(ap, 'desktop-animal-form-dark.png');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.some((e) => e.name === 'Clover'));
+    const clover = await ap.evaluate(() => window.__snapshot().equipment.find((e) => e.name === 'Clover'));
+    check('saved as an animal, the typed species as the built-in, the icon as picked',
+      [clover.type, clover.species, clover.sex, clover.headCount, 'tag' in clover, clover.fixed, clover.icon],
+      ['animal', 'goat', 'doe', 3, false, '', 'cow']);
+    check('and opened on its own page, with no equipment suggestions',
+      await ap.evaluate(() => [document.querySelector('elmer-panel').detail, document.querySelectorAll('.sheet').length]),
+      [{ kind: 'animal', id: clover.id }, 0]);
+
+    // --- weight: pounds or kilograms, and changing it converts rather than
+    // relabels. Each animal keeps the number and unit it was typed in.
+    const weightOf = async (id) => {
+      await go(ap, 'animals', { kind: 'animal', id });
+      return ap.evaluate(() => {
+        const dts = [...document.querySelector('elmer-panel').shadowRoot.querySelectorAll('dl.kv dt')];
+        const dt = dts.find((n) => n.textContent === 'Weight');
+        return dt ? dt.nextElementSibling.textContent : null;
+      });
+    };
+    const stored = (id) => ap.evaluate((i) => {
+      const a = window.__snapshot().equipment.find((e) => e.id === i);
+      return [a.weight, a.weightUnit];
+    }, id);
+    check('weights show in pounds to start with',
+      [await weightOf('a1'), await weightOf('a2'), await weightOf('a3'), await weightOf('a4')],
+      ['68 lbs', '10 lbs', '1,050 lbs', null]);
+    await go(ap, 'settings');
+    check('Settings offers pounds or kilograms, on pounds',
+      await ap.$$eval(el('select[data-act="set-weight-unit"] option'), (n) => n.map((o) => [o.value, o.selected])),
+      [['lb', true], ['kg', false]]);
+    check('and says pounds the way people write it',
+      await ap.$$eval(el('select[data-act="set-weight-unit"] option'), (n) => n.map((o) => o.textContent)),
+      ['Pounds (lbs)', 'Kilograms (kg)']);
+    await ap.selectOption(el('select[data-act="set-weight-unit"]'), 'kg');
+    await ap.waitForFunction(() => window.__snapshot().settings.weightUnit === 'kg');
+    check('in kilograms every animal is converted',
+      [await weightOf('a1'), await weightOf('a2'), await weightOf('a3')], ['30.8 kg', '4.5 kg', '476 kg']);
+    check('and nothing stored changed', await stored('a1'), [68, 'lb']);
+    await go(ap, 'animals', { kind: 'animal', id: 'a1' });
+    await ap.click(el('.btn[data-act="edit-animal"]'));
+    await ap.waitForSelector(el('.sheet #f-weight'));
+    check('the form asks in kilograms, with the weight converted',
+      [await ap.$eval(el('.sheet label[for="f-weight"]'), (n) => n.textContent), await ap.$eval(el('.sheet #f-weight'), (n) => n.value)],
+      ['Weight (kg)', '30.8']);
+    await ap.fill(el('.sheet #f-breed'), 'Golden Retriever ');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+    check('saving without touching the weight keeps it exactly, not rounded through kilograms',
+      await stored('a1'), [68, 'lb']);
+    await ap.click(el('.btn[data-act="edit-animal"]'));
+    await ap.waitForSelector(el('.sheet #f-weight'));
+    await ap.fill(el('.sheet #f-weight'), '32');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.find((e) => e.id === 'a1').weight === 32);
+    check('a weight typed in is kept in the unit it was typed in', await stored('a1'), [32, 'kg']);
+    await go(ap, 'settings');
+    await ap.selectOption(el('select[data-act="set-weight-unit"]'), 'lb');
+    await ap.waitForFunction(() => window.__snapshot().settings.weightUnit === 'lb');
+    check('and shown in pounds once the setting goes back', await weightOf('a1'), '71 lbs');
+    await go(ap, 'animals', { kind: 'animal', id: 'a1' });
+    await ap.click(el('.btn[data-act="edit-animal"]'));
+    await ap.waitForSelector(el('.sheet #f-weight'));
+    await ap.fill(el('.sheet #f-weight'), '15 kg');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.find((e) => e.id === 'a1').weight === 15);
+    check('a unit typed with the number is the one believed', await stored('a1'), [15, 'kg']);
+    await ap.click(el('.btn[data-act="edit-animal"]'));
+    await ap.waitForSelector(el('.sheet #f-weight'));
+    await ap.fill(el('.sheet #f-weight'), 'about 70');
+    await ap.click(el('.sheet [data-act="save-animal"]'));
+    await ap.waitForFunction(() => window.__snapshot().equipment.find((e) => e.id === 'a1').weight === 'about 70');
+    check('words that are not a number are kept as words', [await stored('a1'), await weightOf('a1')],
+      [['about 70', null], 'about 70']);
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply', ops: [{ kind: 'equipment.put', payload: { id: 'a1', weight: 68, weightUnit: 'lb' } }],
+    }));
+    // Not chosen yet means Home Assistant's own unit system.
+    await ap.evaluate(() => { window.__panel._hass.config = { unit_system: { mass: 'kg' } }; });
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply', ops: [{ kind: 'settings.put', payload: { weightUnit: null } }],
+    }));
+    await ap.waitForFunction(() => window.__snapshot().settings.weightUnit === null);
+    check('until chosen, a metric Home Assistant means kilograms', await weightOf('a3'), '476 kg');
+    await ap.evaluate(() => { delete window.__panel._hass.config; });
+    check('and otherwise pounds', await weightOf('a3'), '1,050 lbs');
+
+    // --- delete, like equipment: its routines go, its history stays named
+    await go(ap, 'animals', { kind: 'animal', id: 'a2' });
+    await ap.click(el('.btn[data-act="delete-equipment"]'));
+    await ap.waitForFunction(() => !window.__snapshot().equipment.some((e) => e.id === 'a2'));
+    const afterDelete = await ap.evaluate(() => ({
+      tasks: window.__snapshot().tasks.filter((t) => t.equipmentId === 'a2').length,
+      history: window.__snapshot().log.filter((l) => l.equipmentId === 'a2').map((l) => l.equipmentName),
+      detail: document.querySelector('elmer-panel').detail,
+    }));
+    check('deleting an animal takes its routines', afterDelete.tasks, 0);
+    check('and keeps its history, with its name', afterDelete.history, ['Mochi']);
+    check('and goes back to the list', afterDelete.detail, null);
+    await go(ap, 'history');
+    ok('history still says whose it was', (await panelText(ap, '.scroll')).includes('Change Litter Mochi')
+      || (await panelText(ap, '.scroll')).includes('Mochi'));
+
+    // --- turning Animals off asks, then deletes
+    await go(ap, 'settings');
+    await ap.selectOption(el('select[data-act="set-animals"]'), '0');
+    await ap.waitForSelector(el('.sheet [data-act="confirm-animals-off"]'));
+    const warning = await panelText(ap, '.sheet');
+    ok('the warning names every animal', ['Biscuit', 'Juniper', 'Backyard Hens', 'Clover'].every((n) => warning.includes(n)), warning);
+    ok('and how many routines go with them', warning.includes('and their 8 routines'), warning);
+    check('nothing has changed yet, and the menu still says On',
+      [await ap.evaluate(() => window.__snapshot().settings.showAnimals), await ap.$eval(el('select[data-act="set-animals"]'), (n) => n.value)],
+      [true, '1']);
+    check('the warning\'s buttons are Cancel and Delete',
+      await ap.$eval(el('.sheet [data-act="confirm-animals-off"]'), (b) => [...b.parentElement.querySelectorAll('.btn')].map((x) => x.textContent.trim())),
+      ['Cancel', 'Delete']);
+    await shot(ap, 'desktop-animals-off-dark.png');
+    await ap.click(el('.sheet [data-act="close"]'));
+    await ap.waitForTimeout(120);
+    check('Cancel keeps them', await ap.evaluate(() => window.__snapshot().equipment.filter((e) => e.type === 'animal').length), 4);
+
+    const equipmentBefore = await ap.evaluate(() => window.__snapshot().equipment.filter((e) => e.type !== 'animal').length);
+    const historyBefore = await ap.evaluate(() => window.__snapshot().log.length);
+    await ap.selectOption(el('select[data-act="set-animals"]'), '0');
+    await ap.waitForSelector(el('.sheet [data-act="confirm-animals-off"]'));
+    await ap.click(el('.sheet [data-act="confirm-animals-off"]'));
+    await ap.waitForFunction(() => window.__snapshot().settings.showAnimals === false);
+    await ap.waitForTimeout(80);
+    const gone = await ap.evaluate(() => ({
+      animals: window.__snapshot().equipment.filter((e) => e.type === 'animal').length,
+      equipment: window.__snapshot().equipment.length,
+      orphans: window.__snapshot().tasks.filter((t) => t.equipmentId && !window.__snapshot().equipment.some((e) => e.id === t.equipmentId)).length,
+      history: window.__snapshot().log.length,
+    }));
+    check('turning off deletes every animal, and leaves the equipment', [gone.animals, gone.equipment], [0, equipmentBefore]);
+    check('no routine is left pointing at one', gone.orphans, 0);
+    check('the history is all still there', gone.history, historyBefore);
+    check('and the tab has gone', (await tabKeys(ap)).includes('animals'), false);
+    await on.ctx.close();
+
+    // --- switched off elsewhere while somebody is looking at the tab
+    const two = await open({ viewport: DESK, animals: true });
+    await go(two.page, 'animals', { kind: 'animal', id: 'a1' });
+    await two.page.evaluate(() => window.__panel._hass.connection.sendMessagePromise({
+      type: 'elmer/apply',
+      ops: [...window.__snapshot().equipment.filter((e) => e.type === 'animal').map((a) => ({ kind: 'equipment.delete', payload: { id: a.id } })),
+        { kind: 'settings.put', payload: { showAnimals: false } }],
+    }));
+    await two.page.waitForTimeout(120);
+    check('whoever was on the tab lands on Routines',
+      await two.page.evaluate(() => [document.querySelector('elmer-panel').tab, document.querySelector('elmer-panel').detail]),
+      ['routines', null]);
+
+    // --- an import carrying animals turns the tab on, and says so
+    fs.mkdirSync(TMP, { recursive: true });
+    const zoo = path.join(TMP, 'animals.json');
+    fs.writeFileSync(zoo, JSON.stringify({
+      version: 1,
+      equipment: [{ id: 'z1', type: 'animal', name: 'Pip', species: 'rabbit' }, { id: 'z2', name: 'Kettle' }],
+      tasks: [{ id: 'zt1', equipmentId: 'z1', name: 'Trim Nails', lastDone: '2026-09-01', intervalCount: 2, intervalUnit: 'months' }],
+      supplies: [],
+      log: [],
+    }));
+    await go(two.page, 'settings');
+    const [chooser] = await Promise.all([two.page.waitForEvent('filechooser'), two.page.click(el('[data-act="import"]'))]);
+    await chooser.setFiles(zoo);
+    await two.page.waitForSelector(el('.sheet [data-act="confirm-import"]'));
+    ok('the import preview counts the animal apart from the equipment',
+      (await panelText(two.page, '.sheet .note')).includes('1 piece of equipment · 1 animal ·'), await panelText(two.page, '.sheet .note'));
+    await two.page.click(el('.sheet [data-act="confirm-import"]'));
+    await two.page.waitForFunction(() => window.__snapshot().settings.showAnimals === true);
+    await two.page.waitForSelector(el('.toast'));
+    ok('and the toast says Animals came on', (await panelText(two.page, '.toast')).includes('Animals has been turned on'),
+      await panelText(two.page, '.toast'));
+    check('the tab is back', (await tabKeys(two.page)).includes('animals'), true);
+    await two.ctx.close();
+
+    // --- on a phone
+    const phone = await open({ animals: true, narrow: true });
+    await go(phone.page, 'animals');
+    ok('a phone row keeps the birthday whole',
+      await phone.page.$eval(el('.row[data-id="a1"] .sub .txt'), (n) => n.scrollWidth <= n.clientWidth + 1));
+    await shot(phone.page, 'phone-animals.png');
+    await phone.ctx.close();
+  }
+
+  /* -------------------------------- the app for Mac: Elmer's calendar -- */
+  // The Home Assistant app for Mac is the iPad app on macOS, and a date field
+  // there opens UIKit's iPad picker, which no stylesheet reaches. There, and
+  // only there, the field opens Elmer's own calendar instead. The engine here
+  // is Chromium, so what is checked is the decision and the behaviour; the
+  // part that is UIKit's — that cancelling the press and making the field
+  // read-only keeps its picker away — can only be seen on a Mac.
+  {
+    const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
+      + '(KHTML, like Gecko) Home Assistant/2026.11.0 (io.robbie.HomeAssistant; build:2026.1101; '
+      + 'macOS 15.1.0) Mobile/HomeAssistant, like Safari';
+    const IPHONE_UA = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_1 like Mac OS X) AppleWebKit/605.1.15 '
+      + '(KHTML, like Gecko) Home Assistant/2026.11.0 (io.robbie.HomeAssistant; build:2026.1101; '
+      + 'iOS 18.1.0) Mobile/HomeAssistant, like Safari';
+    const DESK = { width: 1000, height: 820 };
+    const calState = (p) => p.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const cal = root.querySelector('.cal');
+      if (!cal) return null;
+      const days = [...cal.querySelectorAll('[data-day]')];
+      return {
+        title: cal.querySelector('.cal-title').textContent.trim(),
+        heads: [...cal.querySelectorAll('.cal-dow span')].map((n) => n.textContent),
+        days: days.length,
+        selected: days.filter((d) => d.getAttribute('aria-selected') === 'true').map((d) => d.dataset.day),
+        today: days.filter((d) => d.getAttribute('aria-current') === 'date').map((d) => d.dataset.day),
+        links: [...cal.querySelectorAll('.cal-link')].map((b) => b.textContent.trim()),
+        focused: root.activeElement && root.activeElement.dataset ? root.activeElement.dataset.day || null : null,
+        side: cal.dataset.side,
+      };
+    });
+
+    // --- the decision ---------------------------------------------------
+    for (const [label, ua] of [['a desktop browser', undefined], ['the app on an iPhone', IPHONE_UA]]) {
+      const o = await open({ viewport: DESK, userAgent: ua });
+      check(`${label} keeps the platform's own picker`,
+        await o.page.evaluate(() => document.querySelector('elmer-panel').hasAttribute('data-own-calendar')), false);
+      await o.page.click(el('.card .row >> nth=0'));
+      await o.page.waitForSelector(el('.sheet input[name="doneOn"]'));
+      await o.page.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+      check(`${label}: a click in the field opens nothing of Elmer's`, await calState(o.page), null);
+      check(`${label}: the field stays typeable`,
+        await o.page.evaluate(() => document.querySelector('elmer-panel').shadowRoot
+          .querySelector('.sheet input[name="doneOn"]').readOnly), false);
+      await o.ctx.close();
+    }
+
+    const mac = await open({ viewport: DESK, dark: true, userAgent: MAC_UA });
+    const mp = mac.page;
+    check('the app for Mac draws its own calendar',
+      await mp.evaluate(() => document.querySelector('elmer-panel').hasAttribute('data-own-calendar')), true);
+    const today = await mp.evaluate(() => window.__snapshot().computed.today);
+    const shiftIso = (iso, days) => {
+      const [y, m, d] = iso.split('-').map(Number);
+      const t = new Date(y, m - 1, d + days);
+      return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+    };
+    const MONTHS_LONG = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+      'August', 'September', 'October', 'November', 'December'];
+    const monthTitle = (iso, ahead = 0) => {
+      const [y, m] = iso.split('-').map(Number);
+      const t = new Date(y, m - 1 + ahead, 1);
+      return `${MONTHS_LONG[t.getMonth()]} ${t.getFullYear()}`;
+    };
+
+    await mp.click(el('.card .row >> nth=0'));
+    await mp.waitForSelector(el('.sheet input[name="doneOn"]'));
+    await mp.waitForTimeout(300);
+    const opened = await mp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const i = root.querySelector('.sheet input[name="doneOn"]');
+      return {
+        readOnly: i.readOnly,
+        popup: i.getAttribute('aria-haspopup'),
+        autofocus: root.activeElement ? root.activeElement.getAttribute('name') || root.activeElement.className : null,
+      };
+    });
+    check('the date fields are read-only there, so focus alone cannot open the iPad picker',
+      [opened.readOnly, opened.popup], [true, 'dialog']);
+    ok('and the sheet does not land focus on a date field',
+      opened.autofocus !== 'doneOn', `focus went to ${opened.autofocus}`);
+
+    // --- a click opens it, under the field -------------------------------
+    await mp.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    await mp.waitForSelector(el('.cal'));
+    // It slides the last few pixels into place; measure where it comes to rest.
+    await mp.evaluate(() => Promise.all(document.querySelector('elmer-panel').shadowRoot
+      .querySelector('.cal').getAnimations().map((a) => a.finished)));
+    const first = await calState(mp);
+    check('it opens on this month', first.title, monthTitle(today));
+    check('six whole weeks, every month', first.days, 42);
+    check('the field\'s day is the one filled', first.selected, [today]);
+    check('today is marked', first.today, [today]);
+    check('the weeks start on Sunday by default', first.heads, ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa']);
+    check('a field that needs a date offers Today but no Clear', first.links, ['Today']);
+    check('the keyboard lands on the field\'s day', first.focused, today);
+    const where = await mp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const f = root.querySelector('.sheet input[name="doneOn"]').getBoundingClientRect();
+      const c = root.querySelector('.cal').getBoundingClientRect();
+      return {
+        gap: Math.round(c.top - f.bottom),
+        left: Math.round(c.left - f.left),
+        inside: c.left >= 0 && c.top >= 0 && c.right <= innerWidth && c.bottom <= innerHeight,
+        focusedField: root.activeElement === root.querySelector('.sheet input[name="doneOn"]'),
+        onTop: root.elementFromPoint(c.left + c.width / 2, c.top + c.height / 2).closest('.cal') !== null,
+      };
+    });
+    check('it hangs just under the field, from where its text starts', [where.gap, where.left], [6, 0]);
+    ok('inside the window', where.inside);
+    ok('above the sheet, not under it', where.onTop);
+    check('the press never gave the field focus', where.focusedField, false);
+    await shot(mp, 'calendar-mac-dark.png');
+
+    // --- choosing --------------------------------------------------------
+    await mp.evaluate(() => {
+      window.__dateEvents = [];
+      const i = document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet input[name="doneOn"]');
+      for (const t of ['input', 'change']) i.addEventListener(t, () => window.__dateEvents.push(t));
+    });
+    await mp.click(el('.cal [data-cal="prev"]'));
+    check('the arrows turn the month', (await calState(mp)).title, monthTitle(today, -1));
+    await mp.click(el('.cal [data-cal="next"]'));
+    await mp.click(el('.cal [data-cal="next"]'));
+    check('both ways', (await calState(mp)).title, monthTitle(today, 1));
+    const target = await mp.evaluate(() => document.querySelector('elmer-panel').shadowRoot
+      .querySelector('.cal [data-day]:not([data-outside])').dataset.day);
+    await mp.click(el(`.cal [data-day="${target}"]`));
+    const picked = await mp.evaluate(() => ({
+      value: document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet input[name="doneOn"]').value,
+      events: window.__dateEvents,
+    }));
+    check('a day goes into the field', picked.value, target);
+    check('with the events typing would have fired', picked.events, ['input', 'change']);
+    check('and the calendar closes', await calState(mp), null);
+
+    await mp.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    check('it reopens on the field\'s month', (await calState(mp)).title, monthTitle(today, 1));
+    await mp.click(el('.cal [data-cal="today"]'));
+    check('Today puts today back', await mp.evaluate(() => document.querySelector('elmer-panel')
+      .shadowRoot.querySelector('.sheet input[name="doneOn"]').value), today);
+
+    // --- and letting go --------------------------------------------------
+    await mp.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    await mp.keyboard.press('Escape');
+    check('Escape closes the calendar', await calState(mp), null);
+    check('without closing the form under it', await mp.$$eval(el('.sheet'), (n) => n.length), 1);
+
+    await mp.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    await mp.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    check('a second press on the field closes it', await calState(mp), null);
+
+    await mp.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    await mp.click(el('.sheet > header h2'));
+    check('a press anywhere else closes it', await calState(mp), null);
+
+    // --- from the keyboard -----------------------------------------------
+    await mp.evaluate(() => document.querySelector('elmer-panel').shadowRoot
+      .querySelector('.sheet input[name="doneOn"]').focus());
+    await mp.keyboard.press('Enter');
+    check('Enter on the field opens it', (await calState(mp) || {}).focused, today);
+    await mp.keyboard.press('ArrowRight');
+    check('the arrows walk the days', (await calState(mp)).focused, shiftIso(today, 1));
+    await mp.keyboard.press('ArrowUp');
+    check('a week at a time up and down', (await calState(mp)).focused, shiftIso(today, -6));
+    await mp.keyboard.press('PageDown');
+    check('Page Down turns the month', (await calState(mp)).title, monthTitle(shiftIso(today, -6), 1));
+    await mp.keyboard.press('PageUp');
+    await mp.keyboard.press('Enter');
+    const byKeys = await mp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const i = root.querySelector('.sheet input[name="doneOn"]');
+      return { value: i.value, back: root.activeElement === i };
+    });
+    check('Enter takes the day', byKeys.value, shiftIso(today, -6));
+    check('and focus goes back to the field it came from', byKeys.back, true);
+    await mp.keyboard.press('ArrowDown');
+    ok('Arrow Down on the field opens it too', (await calState(mp)) !== null);
+    await mp.keyboard.press('Escape');
+    check('Escape from the keyboard hands focus back as well',
+      await mp.evaluate(() => {
+        const root = document.querySelector('elmer-panel').shadowRoot;
+        return root.activeElement && root.activeElement.getAttribute('name');
+      }), 'doneOn');
+    await mp.keyboard.press('Escape');
+    check('and the next Escape is the form\'s', await mp.$$eval(el('.sheet'), (n) => n.length), 0);
+
+    // --- an optional field can be emptied --------------------------------
+    await mp.click(el('.card .row >> nth=0'));
+    await mp.waitForSelector(el('.sheet'));
+    await mp.click(el('.sheet [data-act="edit-routine"], .sheet [data-act="edit"]'))
+      .catch(() => {});
+    const formOpen = await mp.$(el('.sheet input[name="lastDone"]'));
+    if (!formOpen) {
+      // Reach the form the way the rest of the suite does if there is no edit
+      // button on this sheet.
+      await mp.evaluate(() => {
+        const p = document.querySelector('elmer-panel');
+        const task = window.__snapshot().tasks.find((t) => t.lastDone);
+        p.sheet = { kind: 'routine-form', id: task.id };
+        p._render();
+      });
+    }
+    await mp.waitForSelector(el('.sheet input[name="lastDone"]'));
+    await mp.waitForTimeout(300);
+    const lastBefore = await mp.$eval(el('.sheet input[name="lastDone"]'), (i) => i.value);
+    await mp.click(el('.sheet input[name="lastDone"]'), { position: { x: 30, y: 10 } });
+    const optional = await calState(mp);
+    check('an optional field offers Clear as well', optional.links, ['Today', 'Clear']);
+    check('and opens on the date it holds', optional.selected, [lastBefore]);
+    await mp.click(el('.cal [data-cal="clear"]'));
+    check('Clear empties it', await mp.$eval(el('.sheet input[name="lastDone"]'), (i) => i.value), '');
+    await shot(mp, 'calendar-mac-form-dark.png');
+
+    // A field low in a short window: the calendar goes above rather than off
+    // the bottom of the screen.
+    await mp.setViewportSize({ width: 1000, height: 640 });
+    await mp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const i = root.querySelector('.sheet input[name="lastDone"]');
+      i.scrollIntoView({ block: 'end' });
+    });
+    await mp.waitForTimeout(100);
+    await mp.click(el('.sheet input[name="lastDone"]'), { position: { x: 30, y: 10 } });
+    const low = await mp.evaluate(() => {
+      const c = document.querySelector('elmer-panel').shadowRoot.querySelector('.cal').getBoundingClientRect();
+      return { inside: c.top >= 0 && c.bottom <= innerHeight };
+    });
+    ok('near the bottom of a short window it still fits', low.inside);
+    check('by opening upwards', (await calState(mp)).side, 'above');
+    await mp.keyboard.press('Escape');
+
+    // Home Assistant's own week setting is honoured.
+    await mp.evaluate(() => {
+      const p = document.querySelector('elmer-panel');
+      p._hass.locale = { ...(p._hass.locale || {}), first_weekday: 'monday' };
+    });
+    await mp.click(el('.sheet input[name="lastDone"]'), { position: { x: 30, y: 10 } });
+    check('a Monday week when Home Assistant says so', (await calState(mp)).heads,
+      ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']);
+    await mp.keyboard.press('Escape');
+    await mac.ctx.close();
+
+    const lightMac = await open({ viewport: DESK, userAgent: MAC_UA });
+    await lightMac.page.click(el('.card .row >> nth=0'));
+    await lightMac.page.waitForSelector(el('.sheet input[name="doneOn"]'));
+    await lightMac.page.waitForTimeout(300);
+    await lightMac.page.click(el('.sheet input[name="doneOn"]'), { position: { x: 30, y: 10 } });
+    await lightMac.page.waitForSelector(el('.cal'));
+    const ink = await lightMac.page.evaluate(() => {
+      const c = document.querySelector('elmer-panel').shadowRoot.querySelector('.cal');
+      const sel = c.querySelector('[aria-selected="true"]');
+      const cs = getComputedStyle(sel);
+      return { fg: cs.color, bg: cs.backgroundColor, panel: getComputedStyle(c).backgroundColor };
+    });
+    ok('the chosen day is legible in light', contrastRatio(ink.fg, ink.bg) >= 4.5,
+      `${ink.fg} on ${ink.bg}`);
+    await shot(lightMac.page, 'calendar-mac-light.png');
+    await lightMac.ctx.close();
+  }
+
+  /* ---------------------------- the Mac calendar, for a birthdate -------- */
+  // A birthdate is years back, which month arrows alone made a hundred-odd
+  // presses away. The title steps out to months and then years; and a
+  // birthdate has a latest day, today, past which nothing can be picked.
+  {
+    const MAC_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 '
+      + '(KHTML, like Gecko) Home Assistant/2026.11.0 (io.robbie.HomeAssistant; build:2026.1101; '
+      + 'macOS 15.1.0) Mobile/HomeAssistant, like Safari';
+    const mac = await open({ viewport: { width: 1000, height: 900 }, dark: true, userAgent: MAC_UA, animals: true });
+    const mp = mac.page;
+    const today = await mp.evaluate(() => window.__snapshot().computed.today);
+    const thisYear = Number(today.slice(0, 4));
+    const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July',
+      'August', 'September', 'October', 'November', 'December'];
+    const cal = () => mp.evaluate(() => {
+      const c = document.querySelector('elmer-panel').shadowRoot.querySelector('.cal');
+      if (!c) return null;
+      return {
+        mode: c.dataset.mode,
+        title: c.querySelector('.cal-title').textContent.trim(),
+        disabledDays: [...c.querySelectorAll('[data-day]:disabled')].map((d) => d.dataset.day),
+        nextOff: c.querySelector('[data-cal="next"]').disabled,
+        years: [...c.querySelectorAll('[data-year]')].map((y) => [Number(y.dataset.year), y.disabled]),
+        links: [...c.querySelectorAll('.cal-link')].map((b) => b.textContent.trim()),
+      };
+    });
+    await mp.evaluate(() => {
+      const p = document.querySelector('elmer-panel');
+      p.tab = 'animals'; p.detail = { kind: 'animal', id: 'a3' }; p._render();
+      p._openSheet({ kind: 'animal-form', id: 'a3' });
+    });
+    await mp.waitForSelector(el('.sheet input[name="birthDate"]'));
+    await mp.waitForTimeout(300);
+    check('the animal form\'s dates are read-only in the app for Mac too',
+      await mp.$$eval(el('.sheet input[type="date"]'), (n) => n.map((i) => i.readOnly)), [true, true, true, true, true]);
+    await mp.click(el('.sheet [data-act="add-pair"][data-kind="vax"]'));
+    check('and so is a vaccination date added after it opened',
+      await mp.$eval(el('.sheet .pairs[data-kind="vax"] .pairrow:last-child input[type="date"]'), (i) => [i.readOnly, i.getAttribute('aria-haspopup')]),
+      [true, 'dialog']);
+    await mp.click(el('.sheet .pairs[data-kind="vax"] .pairrow:last-child [data-act="unpair"]'));
+
+    await mp.click(el('.sheet input[name="birthDate"]'), { position: { x: 30, y: 10 } });
+    await mp.waitForSelector(el('.cal'));
+    let c = await cal();
+    check('it opens on the birthdate it has', c.title, `${MONTHS[Number(await mp.$eval(el('.sheet input[name="birthDate"]'), (n) => n.value.slice(5, 7))) - 1]} ${await mp.$eval(el('.sheet input[name="birthDate"]'), (n) => n.value.slice(0, 4))}`);
+    check('with Clear, since a birthdate can be left empty', c.links, ['Today', 'Clear']);
+
+    await mp.click(el('.cal .cal-title'));
+    c = await cal();
+    check('the title steps out to the months', c.mode, 'months');
+    await mp.click(el('.cal .cal-title'));
+    c = await cal();
+    check('and again to the years', c.mode, 'years');
+    ok('no year after this one can be chosen', c.years.every(([y, off]) => off === (y > thisYear)), JSON.stringify(c.years));
+    await shot(mp, 'calendar-mac-years-dark.png');
+
+    // Back far enough, and pick 2015, then April, then the 22nd.
+    while (!(await cal()).years.some(([y]) => y === 2015)) await mp.click(el('.cal [data-cal="prev"]'));
+    await mp.click(el('.cal [data-year="2015"]'));
+    c = await cal();
+    check('a year opens its months', [c.mode, c.title], ['months', '2015']);
+    await mp.click(el('.cal [data-month="3"]'));
+    c = await cal();
+    check('a month opens its days', [c.mode, c.title], ['days', 'April 2015']);
+    await mp.click(el('.cal [data-day="2015-04-22"]'));
+    check('three presses and a day to reach a birthdate eleven years back',
+      await mp.$eval(el('.sheet input[name="birthDate"]'), (n) => n.value), '2015-04-22');
+
+    // At today's month, tomorrow and the next month are out of reach.
+    await mp.click(el('.sheet input[name="birthDate"]'), { position: { x: 30, y: 10 } });
+    await mp.waitForSelector(el('.cal'));
+    await mp.click(el('.cal [data-cal="today"]'));
+    check('Today is a birthdate it will take', await mp.$eval(el('.sheet input[name="birthDate"]'), (n) => n.value), today);
+    await mp.click(el('.sheet input[name="birthDate"]'), { position: { x: 30, y: 10 } });
+    await mp.waitForSelector(el('.cal'));
+    c = await cal();
+    const tomorrow = await mp.evaluate((t) => {
+      const [y, m, d] = t.split('-').map(Number);
+      const n = new Date(y, m - 1, d + 1);
+      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+    }, today);
+    ok('days after today cannot be picked', c.disabledDays.includes(tomorrow) && !c.disabledDays.includes(today),
+      c.disabledDays.slice(0, 3).join(','));
+    check('and the arrow to next month is off', c.nextOff, true);
+    await mp.click(el(`.cal [data-day="${tomorrow}"]`), { force: true }).catch(() => {});
+    check('pressing one anyway does nothing', await mp.$eval(el('.sheet input[name="birthDate"]'), (n) => n.value), today);
+    await mp.keyboard.press('Escape');
+    await mac.ctx.close();
+  }
 
   await ctx.close();
   await browser.close();

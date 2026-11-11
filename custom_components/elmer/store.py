@@ -56,6 +56,20 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "viewRoutines": "list",
     "viewEquipment": "list",
     "viewParts": "list",
+    "viewAnimals": "list",
+    # Off. Animals are a second kind of thing to look after, alongside the
+    # equipment, and most houses have no use for the tab. Turning it off is
+    # not a way of hiding them: the panel asks first, then deletes every
+    # animal and its routines, so "off" always means "there are none".
+    # store.py holds that the other way round too — any animal at all turns
+    # it on, which is what an import carrying animals needs.
+    "showAnimals": False,
+    # Pounds or kilograms for animals' weights. None until somebody chooses,
+    # and the panel reads None as Home Assistant's own unit system — a metric
+    # house gets kilograms without having to find the setting. Weights are
+    # stored with the unit they were typed in, so this only changes what is
+    # shown; flipping it converts every animal rather than mislabelling them.
+    "weightUnit": None,
     # How many cards sit in a row of the card view. Two of them for the same
     # reason the text sizes split: a fixed count applies at every width unless
     # told otherwise, and a phone has nothing like the room a monitor has. The
@@ -154,6 +168,44 @@ def empty_data() -> dict[str, Any]:
     }
 
 
+# Elmer's own species, by key — the panel's SPECIES, kept in step by
+# verify-store.py rather than by memory. Only these are tidied to their key;
+# a species somebody typed in is theirs, and keeps the case they gave it.
+BUILTIN_SPECIES = frozenset({
+    "dog", "cat", "bird", "fish", "rabbit", "smallpet", "reptile", "horse", "donkey",
+    "cattle", "goat", "sheep", "pig", "chicken", "duck", "alpaca", "other",
+})
+
+
+def is_animal(record: Any) -> bool:
+    """An animal is a record marked as one. Everything else is equipment.
+
+    Equipment carries no type at all, so a record from any earlier version is
+    equipment without anything being written to it.
+    """
+    return isinstance(record, dict) and record.get("type") == "animal"
+
+
+def _owner_names(raw: Any) -> dict[str, str]:
+    """Each piece of equipment's or animal's name, by id."""
+    if not isinstance(raw, dict):
+        return {}
+    return {
+        e["id"]: e.get("name") or ""
+        for e in raw.get("equipment") or []
+        if isinstance(e, dict) and e.get("id")
+    }
+
+
+def _unnamed_history(raw: Any) -> bool:
+    """Whether any history entry could be given its owner's name and has not."""
+    names = _owner_names(raw)
+    return any(
+        isinstance(l, dict) and not l.get("equipmentName") and names.get(l.get("equipmentId"))
+        for l in (raw.get("log") or [] if isinstance(raw, dict) else [])
+    )
+
+
 def _unstamped(raw: Any) -> bool:
     """Whether anything on disk is still missing its added-on date."""
     if not isinstance(raw, dict):
@@ -162,6 +214,68 @@ def _unstamped(raw: Any) -> bool:
         isinstance(t, dict) and not schedule.parse_day(t.get("addedOn"))
         for t in (raw.get("tasks") or [])
     )
+
+
+_WEIGHT = re.compile(
+    r"^(\d+(?:\.\d+)?|\.\d+)\s*(lbs?|pounds?|kgs?|kilos?|kilograms?)?\.?$", re.IGNORECASE
+)
+
+
+def _weight(value: Any, unit: Any) -> tuple[Any, str | None]:
+    """An animal's weight as (number, "lb" | "kg"), the panel's parseWeight.
+
+    A number keeps the unit it came with, or the file's setting, or pounds.
+    Text that names a number — "68 lb", "1,050", "31kg" — becomes one. Text
+    that does not ("about 60") is kept as written, with no unit, since
+    guessing would be worse than showing what somebody typed.
+    """
+    fallback = unit if unit in ("lb", "kg") else "lb"
+    if isinstance(value, bool) or value is None:
+        return None, None
+    if isinstance(value, (int, float)):
+        return (value, fallback) if value == value and value >= 0 else (None, None)
+    text = str(value).strip()
+    if not text:
+        return None, None
+    m = _WEIGHT.match(text.replace(",", ""))
+    if not m:
+        return text, None
+    number = float(m.group(1))
+    said = (m.group(2) or "").lower()
+    return (
+        int(number) if number.is_integer() else number,
+        ("kg" if said.startswith("k") else "lb") if said else fallback,
+    )
+
+
+def _medications(value: Any) -> list[dict[str, str]]:
+    """An animal's medications as rows of name and dosage.
+
+    They were one box of text before they were rows; each line of that
+    becomes a row of its own, with the line as the name, so nothing written
+    there is lost. A row with neither is dropped.
+    """
+    if isinstance(value, str):
+        return [{"name": line.strip(), "dosage": ""} for line in value.splitlines() if line.strip()]
+    rows = []
+    for m in value if isinstance(value, list) else []:
+        if not isinstance(m, dict):
+            continue
+        name, dosage = str(m.get("name") or "").strip(), str(m.get("dosage") or "").strip()
+        if name or dosage:
+            rows.append({"name": name, "dosage": dosage})
+    return rows
+
+
+def _vaccinations(value: Any) -> list[dict[str, Any]]:
+    """An animal's vaccinations as rows of name and the day given, if known."""
+    rows = []
+    for v in value if isinstance(value, list) else []:
+        if not isinstance(v, dict) or not str(v.get("name") or "").strip():
+            continue
+        date = v.get("date")
+        rows.append({"name": str(v["name"]).strip(), "date": date if schedule.parse_day(date) else None})
+    return rows
 
 
 def normalize(raw: Any) -> dict[str, Any]:
@@ -179,6 +293,8 @@ def normalize(raw: Any) -> dict[str, Any]:
     raw_tasks = raw.get("tasks") if isinstance(raw.get("tasks"), list) else []
 
     equipment = []
+    # The unit a bare number in this file was typed in, if it says.
+    file_unit = (raw.get("settings") or {}).get("weightUnit") if isinstance(raw.get("settings"), dict) else None
     for e in raw.get("equipment") or []:
         if not isinstance(e, dict):
             continue
@@ -203,6 +319,24 @@ def normalize(raw: Any) -> dict[str, Any]:
         item["partNumber"] = e.get("partNumber") or inherited or ""
         item.pop("links", None)
         item.pop("contact", None)
+        if is_animal(e):
+            # One of Elmer's own is tidied to its key, so " Dog " in a hand-
+            # edited file is still a dog. Anything else is a species somebody
+            # added — or one a newer Elmer knows — and is kept as written.
+            species = str(e.get("species") or "").strip()
+            item["species"] = (
+                species.lower() if species.lower() in BUILTIN_SPECIES else species
+            ) or "other"
+            for key in ("birthDate", "adoptedOn"):
+                item[key] = e.get(key) if schedule.parse_day(e.get(key)) else None
+            item["birthApprox"] = bool(e.get("birthApprox"))
+            head = _int(e.get("headCount"), 0)
+            item["headCount"] = head if head >= 1 else None
+            item["weight"], item["weightUnit"] = _weight(
+                e.get("weight"), e.get("weightUnit") or file_unit
+            )
+            item["medications"] = _medications(e.get("medications"))
+            item["vaccinations"] = _vaccinations(e.get("vaccinations"))
         equipment.append(item)
 
     tasks = []
@@ -249,6 +383,23 @@ def normalize(raw: Any) -> dict[str, Any]:
         ]
         tasks.append(item)
 
+    # What each history entry belonged to, by name. The entry has always kept
+    # the id, which is enough while the thing exists — but deleting it left a
+    # history of "Annual Vet Exam" twice with nothing to say whose. The name
+    # is written when the service is logged; an older entry gets it here, from
+    # whatever is still around to give it one. The panel shows the live name
+    # while there is one, so a rename still reads through, and falls back on
+    # this only once the thing is gone.
+    names = {e.get("id"): e.get("name") or "" for e in equipment if e.get("id")}
+    log = []
+    for l in raw.get("log") if isinstance(raw.get("log"), list) else []:
+        if not isinstance(l, dict):
+            continue
+        entry = dict(l)
+        if not entry.get("equipmentName") and names.get(entry.get("equipmentId")):
+            entry["equipmentName"] = names[entry["equipmentId"]]
+        log.append(entry)
+
     supplies = []
     for p in raw.get("supplies") or []:
         if not isinstance(p, dict):
@@ -264,10 +415,12 @@ def normalize(raw: Any) -> dict[str, Any]:
     settings["dueSoonDays"] = max(0, _int(settings.get("dueSoonDays"), DEFAULT_DUE_SOON_DAYS))
     # Only two shapes exist; anything else in a hand-edited file or an older
     # export falls back to the list rather than rendering nothing.
-    for key in ("viewRoutines", "viewEquipment", "viewParts"):
+    for key in ("viewRoutines", "viewEquipment", "viewParts", "viewAnimals"):
         if settings.get(key) not in ("list", "cards"):
             settings[key] = "list"
     settings["badgeOverdue"] = bool(settings.get("badgeOverdue"))
+    if settings.get("weightUnit") not in ("lb", "kg"):
+        settings["weightUnit"] = None
     # A sort field naming a column that does not exist would silently order by
     # nothing, so anything unrecognised goes back to the default rather than
     # through. The allowed sets are the panel's SORT_FIELDS, kept in step by
@@ -277,6 +430,13 @@ def normalize(raw: Any) -> dict[str, Any]:
     settings["cardsWide"] = min(4, max(2, _int(settings.get("cardsWide"), 3)))
     settings["cardsNarrow"] = min(3, max(1, _int(settings.get("cardsNarrow"), 2)))
     settings["showHistoryCost"] = bool(settings.get("showHistoryCost", True))
+    # Any animal turns the tab on, whatever the file said. Off means there are
+    # none (the panel deletes them on the way), so animals with the setting
+    # off can only be a file from somewhere else — and hiding what it brought
+    # would look like the import had lost it.
+    settings["showAnimals"] = bool(settings.get("showAnimals")) or any(
+        is_animal(e) for e in equipment
+    )
     if settings.get("contentWidth") not in ("default", "wide", "widest"):
         settings["contentWidth"] = "default"
     if settings.get("sortEquipment") not in ("name", "date"):
@@ -295,7 +455,7 @@ def normalize(raw: Any) -> dict[str, Any]:
         "equipment": equipment,
         "tasks": tasks,
         "supplies": supplies,
-        "log": raw.get("log") if isinstance(raw.get("log"), list) else [],
+        "log": log,
         "settings": settings,
     }
 
@@ -331,12 +491,13 @@ class ElmerStore:
         self.data = normalize(raw)
         if raw is None:
             _LOGGER.debug("no stored data; starting empty")
-        elif _unstamped(raw):
+        elif _unstamped(raw) or _unnamed_history(raw):
             # normalize() gives every routine an added-on date, but normalize
             # runs on each load and today moves. Written back the first time
             # so the anchor is a fact about the routine rather than about
-            # when Home Assistant last started.
-            _LOGGER.debug("stamping routines with an added-on date")
+            # when Home Assistant last started. History names go back at the
+            # same time, while the things they name are still here to ask.
+            _LOGGER.debug("stamping routines and naming history")
             await self.async_save()
 
     async def async_save(self) -> None:
@@ -456,7 +617,8 @@ class ElmerStore:
                 1 for s in self.data["supplies"] if schedule.stock_status(s) != "ok"
             ),
             "partsShort": len(self.parts_short()),
-            "equipment": len(self.data["equipment"]),
+            "equipment": sum(1 for e in self.data["equipment"] if not is_animal(e)),
+            "animals": sum(1 for e in self.data["equipment"] if is_animal(e)),
         }
 
     def find_task_by_name(self, name: str) -> dict | None:
@@ -505,6 +667,13 @@ class ElmerStore:
         if kind == "equipment.put":
             d["equipment"] = _upsert(d["equipment"], p)
         elif kind == "equipment.delete":
+            gone = self.equipment(p.get("id"))
+            if gone:
+                # Its history stays, so it keeps the name it was logged under
+                # — the last moment there is one to give it.
+                for l in d["log"]:
+                    if l.get("equipmentId") == gone.get("id") and not l.get("equipmentName"):
+                        l["equipmentName"] = gone.get("name") or ""
             d["equipment"] = [e for e in d["equipment"] if e.get("id") != p.get("id")]
             d["tasks"] = [t for t in d["tasks"] if t.get("equipmentId") != p.get("id")]
 
@@ -565,6 +734,13 @@ class ElmerStore:
         at = int(time.time() * 1000)
         for kind, payload in ops:
             self.apply_op(kind, payload, at)
+        settings = self.data["settings"]
+        if not settings.get("showAnimals") and any(is_animal(e) for e in self.data["equipment"]):
+            # The same rule normalize() holds: animals mean the tab is on. A
+            # merge import of a file that predates the setting would otherwise
+            # switch it off under animals that are still here.
+            settings["showAnimals"] = True
+            self._dirty = True
         if self._dirty:
             await self.async_save()
             self._notify()
@@ -606,6 +782,7 @@ class ElmerStore:
             "id": uid("log"),
             "taskId": task_id,
             "equipmentId": task.get("equipmentId"),
+            "equipmentName": (self.equipment(task.get("equipmentId")) or {}).get("name") or None,
             "taskName": task.get("name"),
             "doneOn": done_on,
             "notes": notes or "",
@@ -645,6 +822,7 @@ class ElmerStore:
         it, the import replaces everything.
         """
         incoming = normalize(raw)
+        was_on = bool(self.data["settings"].get("showAnimals"))
         if not merge:
             self.data = incoming
             self._dirty = True
@@ -659,8 +837,14 @@ class ElmerStore:
             ops += [("log.append", l) for l in reversed(incoming["log"])]
             await self.async_apply(ops)
 
+        animals = sum(1 for e in incoming["equipment"] if is_animal(e))
         return {
-            "equipment": len(incoming["equipment"]),
+            "equipment": len(incoming["equipment"]) - animals,
+            "animals": animals,
+            # So the panel can say so: the tab appearing out of nowhere after
+            # an import should not have to be worked out.
+            "animalsTurnedOn": bool(animals) and not was_on
+            and bool(self.data["settings"].get("showAnimals")),
             "routines": len(incoming["tasks"]),
             "parts": len(incoming["supplies"]),
             "history": len(incoming["log"]),

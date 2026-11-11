@@ -2,9 +2,166 @@
 
 Notable changes, newest first. Versions follow [semantic versioning][semver].
 
-HACS does not read this file — the changelog it shows when an update is
-available is the body of the GitHub release. This is here for anyone reading
-the repository, and the release bodies are written from it.
+The store does not read this file — the changelog shown when an update is
+available is the body of the GitHub release, in the Marketplace as it was in
+HACS. This is here for anyone reading the repository, and the release bodies
+are written from it.
+
+## 1.10.0
+
+### Added
+
+- **Animals.** A new tab for pets and livestock, off by default — Settings ▸
+  Animals turns it on, between Equipment and Parts. Each animal has its own
+  page: species and breed, sex, birthdate (exact, or only the year for a
+  rescue), color, weight, height, microchip, license, where it came from, its vet's
+  number and email, insurance, diet and notes. Medications and vaccinations
+  are lists: Add medication gives a row for the medication and its dosage,
+  Add vaccination one for the vaccine and the date it was given, and the
+  animal's page lists them, its latest vaccination first. Its age is worked
+  out for you, and its next birthday is on its page; in the month before, the
+  list says so — "Dog · Turns 5 in 4 days".
+
+  Horses and farm animals get How many, for a flock kept as one record. Sex
+  uses each animal's own words —
+  mare, stallion and gelding; cow, heifer, bull and steer; and so on.
+
+  Their routines are ordinary routines — heartworm every month, the farrier
+  every seven weeks — with the same overdue badge, sensors, history and parts
+  as everything else, and a device per animal in Home Assistant. A routine's
+  form says "For" while there are animals, with Equipment and Animals grouped.
+
+  Species is a list you build, the way Categories is: the menu offers the
+  species your animals use — the same list as Settings ▸ Species, where you
+  rename or remove them — and New Species… for another. Type one of Elmer's
+  own, "horse" or "Dog", and you get the built-in, with its icon, its words
+  for sex and, for farm animals, the livestock fields; the form changes as
+  you type. Each animal has an icon picker as equipment does — dog, cat,
+  rabbit, small pet, bird, fish, turtle, horse, cow, goat, sheep, pig, alpaca,
+  chicken, duck and the paw — and its species chooses one until you pick
+  another.
+
+  Weights are in pounds or kilograms, set in Settings beside Animals; until
+  you choose, Elmer follows Home Assistant's unit system. Each weight keeps
+  the unit it was typed in, so changing the setting converts every animal —
+  Juniper's 1,050 lbs reads 476 kg — rather than relabelling them, and
+  switching back gives exactly what you typed.
+
+  Locations stay one list for everything with a place: equipment, animals,
+  and where supplies are kept. The barn holds the tractor, the horse and the
+  hay, and renaming it in Settings takes all three with it; each location
+  there says what it holds, of every kind.
+
+  Deleting an animal works as deleting equipment does: it goes, with its
+  routines, and its history stays. Turning Animals off asks first, naming every
+  animal and how many routines go with them, then deletes them, keeping their
+  history. Importing a file that has animals in it turns the tab on, and says
+  so. Equipment is unchanged throughout: its tab, form and pages are exactly
+  as they were.
+
+- **History remembers what it was for.** Each entry now keeps the name of the
+  equipment or animal it belonged to, so deleting something no longer leaves a
+  history of "Annual Vet Exam" twice with nothing to say whose. Entries
+  already in your history are named on the first start, from whatever still
+  exists; anything deleted before this version had no name kept, and stays
+  without one. While the thing exists its current name is shown, so a rename
+  still reads through.
+
+- **The calendar in the Home Assistant app for Mac steps out to months and
+  years.** Press the month and year at the top for the twelve months, again
+  for a page of years — a birthdate eleven years back is three presses rather
+  than a hundred and thirty. It also respects a field's latest date, so a
+  birthdate cannot be in the future.
+
+### Changed
+
+- **Parts is now Supplies.** Once animals are in, the shelf holds heartworm
+  chews, litter and hay as well as filters — and it already held softener salt
+  and batteries, which were never parts. The tab, its button, the routine form
+  ("Supplies this uses"), history ("Supplies used") and the counts in Settings
+  all say Supplies. Part number keeps its name; a supply can still have one.
+  Nothing an automation uses has changed: `sensor.elmer_parts_to_reorder`,
+  `sensor.elmer_parts_short` and the `adjust_stock` action's `part` field keep
+  their names, and backups were already stored as `supplies`.
+
+- **The Category menu matches Settings.** It offers the categories your
+  equipment uses — the list Settings ▸ Categories shows — and New Category…
+  for another, instead of every built-in whether used or not. Typing the name
+  of one of Elmer's own ("Water", "Heating and Cooling") brings it back with
+  its icon and suggestions.
+
+- **Every search box just says Search.** Which list it searches is the tab
+  you are on. A screen reader still hears the full "Search routines".
+
+- **A one-time routine leaves the list once it is done.** It used to stay
+  under a Finished heading at the bottom of Routines, and on its equipment's
+  page, with nothing left to do. Now marking it done moves it to the history
+  and nowhere else. It no longer counts toward All, the routine count on its
+  equipment, or a supply's "used by". Its history entry has an Edit routine
+  button, so you can still change its date or make it yearly after all.
+  Saving one in the routine form with a Last done date records it in the
+  history on that day, the way ticking it off would, so it never vanishes
+  without a trace.
+
+- **A snoozed routine says how long until it is due.** Snoozing now moves
+  the due date to the day it wakes — or leaves it, if the real date is later
+  still — and the row counts down to it: "in 3 days · Snoozed". When that day
+  is inside your warning window the routine is under Due soon, coloured and
+  counted like everything else there; further off, it is under Snoozed. The
+  routine's sheet says when it was really due, and Wake up puts it back on
+  that date.
+
+  For automations: a snoozed routine's own sensor now reports the days until
+  it wakes instead of `unknown`, and it counts toward `sensor.elmer_due_soon`
+  and `sensor.elmer_next_due` while inside the window. It is never negative
+  while snoozed, so an automation on an overdue routine still stays quiet
+  until the snooze ends.
+
+### Fixed
+
+- **One calendar icon in date fields on Firefox.** Firefox draws its own
+  calendar button inside a date field and gives no way to hide it, so Elmer's
+  icon appeared beside it and the year was cut off. On Firefox, Elmer's icon
+  now stands down and the field keeps its full width; every other browser and
+  the Home Assistant apps are unchanged.
+
+- **No more "blocking call" warning at startup.** Elmer read its own version
+  by opening its manifest file during setup. That is file access on Home
+  Assistant's event loop, which Home Assistant logs as a bug in the
+  integration, asking you to report it, every time it starts. The version now
+  comes from Home Assistant's own record of the integration.
+
+### Note
+
+- A file exported from 1.10.0 with animals in it, imported into an older
+  Elmer, shows the animals on the Equipment tab. Nothing is lost, and
+  updating again puts them back on their own.
+
+## 1.9.3
+
+### Fixed
+
+- **The calendar in the Home Assistant app for Mac.** A date field there
+  opened the iPad's date picker — a tinted popover with Reset and a check
+  mark that looked like nothing else in Elmer and nothing like the calendar
+  a browser on the same Mac shows. The Mac app is the iPad app running on
+  macOS, so the system draws an iPad control, outside the page where no
+  styling can reach it. Elmer now draws its own calendar there instead: the
+  month with arrows either side, six weeks so it never changes height, today
+  ringed and the chosen day filled in the accent colour, and Today — plus
+  Clear on the fields you can leave empty — along the bottom. It follows
+  light and dark, works from the keyboard (arrows by day and week, Page
+  Up/Down by month, Enter to choose, Escape to close without losing the form
+  underneath), and starts the week on the day set in your Home Assistant
+  profile.
+
+  Only the Mac app gets it. In a browser and on an iPhone or iPad the
+  system's own picker is left as it was: it already looks right there, and on
+  a phone it is the better control.
+
+- **The hint under Last done** still said a never-done interval "has nothing
+  to count from". Since 1.9.2 it counts from the day the routine was added,
+  and the hint now says so.
 
 ## 1.9.2
 
@@ -33,6 +190,15 @@ the repository, and the release bodies are written from it.
   date and insists the answer goes due, then overdue, and stays there. The
   bug survived because every single day of it looked right on its own; only
   the sequence was wrong.
+
+### Changed
+
+- **Installing is written for the Marketplace**, which replaced HACS in Home
+  Assistant 2026.11: Settings ▸ Marketplace ▸ Add from link, and a note that
+  it asks to connect a GitHub account the first time, since it reads custom
+  repositories straight from GitHub. The HACS instructions are kept below for
+  2026.10 and older, with a line saying there is nothing to redo on upgrading
+  — HACS hands what it installed over to the Marketplace.
 
 ## 1.9.1
 

@@ -8,8 +8,13 @@ const P = {
   mark: '<g stroke-width="1.95"><path d="M9.4 6.4V5.4a1.5 1.5 0 0 1 1.5-1.5h2.2a1.5 1.5 0 0 1 1.5 1.5v1"/><path d="M2.6 12.1h7.6M13.8 12.1h7.6"/><rect x="2.6" y="6.4" width="18.8" height="13.2" rx="2.2"/><rect x="9.8" y="10.2" width="4.4" height="3.8" rx="1.2"/></g>',
 
   today: '<path d="M8 2v4M16 2v4M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/><path d="m9 16 2 2 4-4"/>',
-  equipment: '<path d="M3 9h18M9 9v12"/><rect x="3" y="3" width="18" height="18" rx="2"/>',
-  supplies: '<path d="M12 3 3 7.5 12 12l9-4.5z"/><path d="m3 12 9 4.5 9-4.5"/><path d="m3 16.5 9 4.5 9-4.5"/>',
+  // The front of a machine with a round door: the thing in the house that
+  // needs looking after, whether that is a furnace, a fridge or a softener.
+  // It replaced a ruled rectangle that read as a table or a page layout.
+  equipment: '<rect x="4" y="2.5" width="16" height="19" rx="2.5"/><path d="M4 7.5h16"/><circle cx="12" cy="14.6" r="4.3"/><path d="M7.4 5h.01M10 5h.01"/>',
+  // A carton with its flaps up: stock on the shelf. Clearer at tab size
+  // than the stack of layers it replaced, which could have meant anything.
+  supplies: '<path d="M3.5 9.5 6 4h12l2.5 5.5"/><rect x="3.5" y="9.5" width="17" height="11" rx="1.5"/><path d="M12 4v5.5M9.5 13.5h5"/>',
   history: '<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>',
   settings: '<path d="M4 6h16M4 12h16M4 18h16"/><circle cx="9" cy="6" r="2"/><circle cx="15" cy="12" r="2"/><circle cx="8" cy="18" r="2"/>',
 
@@ -82,10 +87,43 @@ const P = {
   suv: '<path d="M3.2 15.6v-3.1l1.5-4A2 2 0 0 1 6.6 7.2h10.8a2 2 0 0 1 1.9 1.3l1.5 4v3.1"/><path d="M3.2 15.6h1.8M9.9 15.6h4.2M19 15.6h1.8"/><circle cx="7.4" cy="15.6" r="1.8"/><circle cx="16.6" cy="15.6" r="1.8"/><path d="M4.7 12.5h14.6M12 7.2v5.3"/>',
   truck: '<path d="M2.4 15.2V8.6a1.6 1.6 0 0 1 1.6-1.6h5.2a1.6 1.6 0 0 1 1.6 1.6v2.6h10.8v4"/><path d="M2.4 15.2h1.7M7.9 15.2h8M19.7 15.2h1.9"/><circle cx="6" cy="15.2" r="1.8"/><circle cx="17.8" cy="15.2" r="1.8"/><rect x="4.4" y="9.1" width="4.4" height="2.1" rx=".5"/>',
   other: '<path d="M12 2 3 7v10l9 5 9-5V7z"/><path d="m3 7 9 5 9-5M12 12v10"/>',
+
+  // Animals. Drawn on the same grid and weight as the rest, faces and
+  // profiles rather than whole bodies, which stop reading at 19px. Species
+  // without a drawing of their own use the paw.
+  paw: '<path d="M12 12.6c-2.7 0-5.2 2.9-5.2 5.3 0 1.5 1.1 2.4 2.5 2.4 1.1 0 1.7-.6 2.7-.6s1.6.6 2.7.6c1.4 0 2.5-.9 2.5-2.4 0-2.4-2.5-5.3-5.2-5.3z"/><ellipse cx="5.6" cy="10.2" rx="1.7" ry="2.2"/><ellipse cx="9.3" cy="5.9" rx="1.8" ry="2.4"/><ellipse cx="14.7" cy="5.9" rx="1.8" ry="2.4"/><ellipse cx="18.4" cy="10.2" rx="1.7" ry="2.2"/>',
+  dog: '<path d="M7.2 5.2C5 5.4 3.2 7.3 3 10.4c-.1 1.6.6 2.6 1.7 2.6.8 0 1.5-.5 1.9-1.3"/><path d="M16.8 5.2c2.2.2 4 2.1 4.2 5.2.1 1.6-.6 2.6-1.7 2.6-.8 0-1.5-.5-1.9-1.3"/><path d="M6.6 9.5c0-3 2.3-5 5.4-5s5.4 2 5.4 5v5.2c0 3.4-2.4 5.8-5.4 5.8s-5.4-2.4-5.4-5.8z"/><path d="M10 11.2v.4M14 11.2v.4"/><path d="M10.6 15.2h2.8L12 16.8z"/>',
+  cat: '<path d="M4.2 10.2V3.6l4.6 3.5a8.6 8.6 0 0 1 6.4 0l4.6-3.5v6.6c.5 1 .8 2.2.8 3.4 0 4.2-3.9 7.2-8.6 7.2s-8.6-3-8.6-7.2c0-1.2.3-2.4.8-3.4z"/><path d="M9 12.6v.5M15 12.6v.5"/><path d="M10.9 16h2.2L12 17.2z"/>',
+  // Face on, like the cow, goat and dog beside it: pricked ears, a forelock,
+  // the long face narrowing to a soft muzzle with its nostrils.
+  horse: '<path d="M8.4 6.4 7.2 2.4l3 2.2M15.6 6.4l1.2-4-3 2.2"/><path d="M7.6 8.2c0-2.2 2-3.6 4.4-3.6s4.4 1.4 4.4 3.6c0 2-.6 3.8-1.4 5.4-.3.7-.2 1.4.2 2.1.4.7.6 1.4.6 2.2 0 2-1.7 3.3-3.8 3.3s-3.8-1.3-3.8-3.3c0-.8.2-1.5.6-2.2.4-.7.5-1.4.2-2.1-.8-1.6-1.4-3.4-1.4-5.4z"/><path d="M12 4.6c-.9 1-1.1 2.4-.4 3.6.7-1 .9-2.4.4-3.6z"/><path d="M9.8 10v.4M14.2 10v.4"/><path d="M10.4 18.2c.3.4.3.8 0 1.2M13.6 18.2c-.3.4-.3.8 0 1.2"/>',
+  // A pet bird, perched. The hen it used to be is chicken below.
+  bird: '<path d="M6.2 9.2c0-2.6 1.6-4.6 3.8-4.6 2.4 0 4 1.8 4.2 4.2 3 .8 5.4 3.2 6.2 6.4l2 1-2.4.4c-1.4 1.4-3.4 2.2-5.6 2.2-4.6 0-8.2-3.2-8.2-7.4z"/><path d="M6.4 7.6 3.8 8.6l2.4.8"/><circle cx="9.4" cy="7.4" r=".75" fill="currentColor" stroke="none"/><path d="M10.6 12.6c1.4 2 3.8 3 6.4 2.6"/><path d="M4 21h12M10.4 18.6V21M13.2 18.6V21"/>',
+  chicken: '<path d="M9.4 5.2c-.2-1.1.6-2 1.6-1.8.4-1 1.8-1 2.2 0 .9-.1 1.5.7 1.2 1.6"/><path d="M8.6 10V8.4a3.2 3.2 0 0 1 6.4 0v1.9c3 .4 5.2 2.8 5.2 5.6 0 2.6-2.3 4.6-5.3 4.6h-4.2C7.4 20.5 5 18 5 14.8V13"/><path d="M8.6 8.6 6 9.8l2.6.9"/><circle cx="11.4" cy="8.2" r=".8" fill="currentColor" stroke="none"/><path d="M10.6 20.5V22.5M14.4 20.5V22.5"/><path d="M12 15.2c1.3 1.4 3.4 1.6 5 .6"/>',
+  rabbit: '<path d="M9.2 9.6C7.6 7.3 7 4.6 8 3.3c1.1-1.3 3 .3 3.6 3.4M14.8 9.6c1.6-2.3 2.2-5 1.2-6.3-1.1-1.3-3 .3-3.6 3.4"/><path d="M6 15.2c0-3.6 2.7-6.2 6-6.2s6 2.6 6 6.2c0 3.3-2.7 5.8-6 5.8s-6-2.5-6-5.8z"/><path d="M10 14.4v.5M14 14.4v.5"/><path d="M11 17.4h2L12 18.4z"/>',
+  cow: '<path d="M7.3 7.6 3.6 6.4c-.6 1.6.2 3.3 2 3.8l1.6.3M16.7 7.6l3.7-1.2c.6 1.6-.2 3.3-2 3.8l-1.6.3"/><path d="M8.2 6.8 7.4 3.6M15.8 6.8l.8-3.2"/><path d="M7 9.2c0-2.2 2.2-3.6 5-3.6s5 1.4 5 3.6v4.3H7z"/><rect x="7" y="13.5" width="10" height="7" rx="3.5"/><path d="M10 16.9v.3M14 16.9v.3"/><path d="M9.8 10.4v.4M14.2 10.4v.4"/>',
+  pig: '<path d="M6.8 7.2 5.4 3.8l3.8 1.6M17.2 7.2l1.4-3.4-3.8 1.6"/><circle cx="12" cy="12.6" r="7.6"/><rect x="9" y="13.4" width="6" height="4.4" rx="2.2"/><path d="M11 15.6v.1M13 15.6v.1"/><path d="M9.2 10.6v.4M14.8 10.6v.4"/>',
+  turtle: '<path d="M3.5 16a8.5 7.5 0 0 1 17 0z"/><path d="M9.2 9.2 10.6 12h2.8l1.4-2.8M10.6 12 9 16M13.4 12l1.6 4"/><path d="M20.5 16c1.3 0 2-.8 2-1.9 0-1-.7-1.7-1.6-1.7"/><path d="M7 16v2.5M17 16v2.5"/>',
+  fish: '<path d="M2.8 12c2.6-3.6 6-5.4 9.4-5.4 2.9 0 5.1 1.5 6.4 3.3L21.4 7v10l-2.8-2.9c-1.3 1.8-3.5 3.3-6.4 3.3-3.4 0-6.8-1.8-9.4-5.4z"/><circle cx="7.4" cy="11.2" r=".7" fill="currentColor" stroke="none"/>',
+  goat: '<path d="M8.6 8.6C8.6 7.1 10.1 6 12 6s3.4 1.1 3.4 2.6v6.2c0 1.9-1.5 3.4-3.4 3.4s-3.4-1.5-3.4-3.4z"/><path d="M9.6 6.4C9 4.2 7.2 3 5 3.4M14.4 6.4c.6-2.2 2.4-3.4 4.6-3"/><path d="M8.6 9.2 4.4 10.4c.6 1.3 2.3 1.6 4.2.9M15.4 9.2l4.2 1.2c-.6 1.3-2.3 1.6-4.2.9"/><path d="M10.9 18 12 21.2l1.1-3.2"/><path d="M10.4 10.6v.4M13.6 10.6v.4"/>',
+  sheep: '<path d="M6.6 10.8a2.2 2.2 0 0 1-.2-4.2 2.4 2.4 0 0 1 3.4-2.6 2.6 2.6 0 0 1 4.4 0 2.4 2.4 0 0 1 3.4 2.6 2.2 2.2 0 0 1-.2 4.2"/><path d="M6.6 10.8c.8.6 1.6.6 2.4 0 1 .6 2 .6 3 0 1 .6 2 .6 3 0 .8.6 1.6.6 2.4 0"/><path d="M9.2 11.2V15.4c0 2 1.2 3.6 2.8 3.6s2.8-1.6 2.8-3.6v-4.2"/><path d="M6.8 12.2 3.6 12.8c.4 1.1 1.8 1.5 3.4.9M17.2 12.2l3.2.6c-.4 1.1-1.8 1.5-3.4.9"/><path d="M10.8 13.4v.4M13.2 13.4v.4"/><path d="M11.3 16.6h1.4l-.7.8z"/>',
+  duck: '<circle cx="8.8" cy="7" r="3.2"/><path d="M5.7 7.8 2.8 8.4c.2.9 1 1.4 2 1.2l1.4-.4"/><path d="M7.4 10C5.2 10.8 3.8 12.4 3.8 14.2c0 2.6 2.6 4.4 6.2 4.4h4.4c3.8 0 6.2-2.4 6.2-6l-.6-3.4c-1 1.2-2.4 2-4.2 2.2-1.6.2-3.2-.2-4.2-1.6"/><path d="M10 14.2c1.6 1.4 4 1.6 5.6.4"/><circle cx="9.6" cy="6.4" r=".7" fill="currentColor" stroke="none"/>',
+  // A small pet in profile — hamster, guinea pig, mouse or rat all read as
+  // this at 20px, where any one of them drawn exactly would not.
+  mouse: '<path d="M3.2 15.4c1.4-4 5-6.6 9.2-6.6 4 0 6.8 2.6 6.8 5.8 0 1.6-1.2 2.6-2.8 2.6H5.2c-1.6 0-2.4-.8-2-1.8z"/><path d="M8.6 9.8a2.5 2.5 0 1 1 4.6-1"/><path d="M19.2 15.8c1.8.2 2.6 1.4 2.2 2.8-.4 1.4-2 2-3.6 1.4"/><circle cx="7.2" cy="12.8" r=".75" fill="currentColor" stroke="none"/><path d="M9 17v1.8M14 17v1.8"/>',
+  alpaca: '<path d="M9.6 21v-8c0-.6-.4-1-1-1H6.4C5 12 4 11 4 9.8c0-1.2 1-2 2.2-2.2L8.8 7"/><path d="M8.8 7 8.4 3.2l2 3.2M12.2 6.4l1-3.2.8 3.6"/><path d="M8.8 7c.2-1 1.4-1.6 2.4-1 1-.6 2.4 0 2.6 1"/><path d="M13.8 7c1 .8 1.6 2 1.6 3.4V21"/><circle cx="8.6" cy="9.2" r=".75" fill="currentColor" stroke="none"/><path d="M4.4 10.6h1"/>',
 };
 
 /* The picker, grouped the way a house is: indoors, then the mechanicals, then
    the yard, the pool, what is parked outside, and the catch-alls last. */
+/* The animal form's picker. Each species has one of these by default; the
+   picker is for the animal that is better drawn as something else — a
+   rescue of no particular species, or a goat that the paw undersells. */
+export const ANIMAL_ICONS = [
+  'dog', 'cat', 'rabbit', 'mouse', 'bird', 'fish', 'turtle',
+  'horse', 'cow', 'goat', 'sheep', 'pig', 'alpaca', 'chicken', 'duck', 'paw',
+];
+
 export const EQUIPMENT_ICONS = [
   'refrigerator', 'dishwasher', 'washer', 'dryer', 'oven', 'microwave',
   'furnace', 'hvac', 'waterheater', 'water', 'filterfunnel', 'sumppump', 'alarm',

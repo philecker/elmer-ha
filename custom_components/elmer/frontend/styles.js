@@ -1432,6 +1432,210 @@ a.btn { text-decoration: none; }
   -webkit-appearance: none;
 }
 .field select::-ms-expand { display: none; }
+/* Firefox draws a calendar button inside every date field and offers no way
+   to hide it — appearance does not reach it, and it has no pseudo-element —
+   so there it is the one icon and ours stands down, with the room kept for
+   ours given back so the year is not cut off. @supports on the -moz- name
+   is true only in Firefox. */
+@supports (-moz-appearance: none) {
+  .field input[type="date"] {
+    background-image: none;
+    padding-right: calc(12px * var(--ui-scale));
+  }
+}
+
+/* ---------- animals ----------
+   A coming birthday is the one thing on an animal's row in the accent: it is
+   news, where everything else there is a standing fact. On a card it takes a
+   line of its own under the age. */
+.bday { color: var(--accent); font-weight: 600; }
+.tile .meta .bday { display: block; }
+/* A paragraph in a sheet, for the ones that explain rather than ask. */
+.sheetp { margin: 0; line-height: 1.5; }
+.sheetp.quiet { color: var(--ink-2); }
+
+/* ---------- Elmer's own calendar ----------
+
+   Used only in the Home Assistant app for Mac, where a date field would
+   otherwise open the iPad's picker (calendar.js says why). It is drawn to sit
+   with the rest of the panel rather than to copy any one browser's: the
+   surface, border and shadow of a menu, the uppercase small labels the forms
+   use, and the accent for the day you have, so it reads as part of Elmer in
+   light and dark alike.
+
+   It lives in the overlay layer, above the sheet, and is placed in window
+   coordinates by script; nothing here positions it. Six weeks are always
+   drawn so it is one height in every month and the buttons under it do not
+   move while you page through. */
+:host([data-own-calendar]) .field input[type="date"] { cursor: pointer; }
+
+.cal {
+  position: fixed;
+  z-index: 2;
+  width: calc(296px * var(--ui-scale));
+  box-sizing: border-box;
+  padding: calc(12px * var(--ui-scale)) calc(12px * var(--ui-scale)) calc(8px * var(--ui-scale));
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--modal-border);
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28), 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-family: var(--body);
+  animation: cal-below 0.14s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.cal[data-side="above"] { animation-name: cal-above; }
+@keyframes cal-below { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes cal-above { from { opacity: 0; transform: translateY(4px); } }
+
+.cal-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 0 calc(6px * var(--ui-scale)) calc(6px * var(--ui-scale));
+}
+/* The month and year is a button: it steps out to months, then years. The
+   small chevron turned downward is the only sign, the way a phone's own
+   calendar marks it, so it still reads first as the title it is. */
+.cal-title {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  justify-content: flex-start;
+  margin-left: calc(-6px * var(--ui-scale));
+  padding: calc(4px * var(--ui-scale)) calc(6px * var(--ui-scale));
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(15px * var(--ui-scale));
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.cal-title svg { transform: rotate(90deg); color: var(--ink-3); flex: none; }
+.cal[data-mode="months"] .cal-title svg,
+.cal[data-mode="years"] .cal-title svg { transform: rotate(-90deg); }
+.cal-title:hover { background: var(--surface-3); }
+.cal-nav {
+  flex: none;
+  width: calc(32px * var(--ui-scale));
+  height: calc(32px * var(--ui-scale));
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.cal-nav:hover:not(:disabled) { background: var(--surface-3); color: var(--ink); }
+.cal-nav:disabled { opacity: 0.3; cursor: default; }
+
+.cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  justify-items: center;
+}
+.cal-dow span {
+  font-size: calc(10.5px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding: calc(4px * var(--ui-scale)) 0 calc(6px * var(--ui-scale));
+}
+.cal-day {
+  width: calc(36px * var(--ui-scale));
+  height: calc(36px * var(--ui-scale));
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(13.5px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cal-day[data-outside] { color: var(--ink-3); opacity: 0.6; }
+.cal-day:hover:not(:disabled) { background: var(--surface-3); }
+/* Past the field's latest date (no birthdate in the future), or before its
+   earliest: still drawn, so the month keeps its shape, but out of reach. */
+.cal-day:disabled { opacity: 0.25; cursor: default; }
+
+/* Months and years: twelve to a page, three across, the same height as the
+   six weeks of days so the calendar does not change size between views. */
+.cal-cells {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 1fr;
+  gap: calc(6px * var(--ui-scale));
+  height: calc((36px * 6 + 24px) * var(--ui-scale));
+  padding: calc(4px * var(--ui-scale)) 0;
+  box-sizing: border-box;
+}
+.cal-cell {
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: calc(14px * var(--ui-scale));
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+.cal-cell:hover:not(:disabled) { background: var(--surface-3); }
+.cal-cell[aria-current="date"] { color: var(--accent); font-weight: 700; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.cal-cell[aria-selected="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; box-shadow: none; }
+.cal-cell:disabled { opacity: 0.25; cursor: default; }
+.cal-cell:focus, .cal-title:focus { outline: none; }
+.cal-cell:focus-visible, .cal-title:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Today is ringed, the day you have is filled. When they are the same day
+   the fill wins: it is the one you are choosing. */
+.cal-day[aria-current="date"] {
+  color: var(--accent);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 1.5px var(--accent);
+}
+.cal-day[aria-selected="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  opacity: 1;
+  box-shadow: none;
+}
+.cal-day:focus, .cal-nav:focus, .cal-link:focus { outline: none; }
+.cal-day:focus-visible, .cal-nav:focus-visible, .cal-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.cal-foot {
+  display: flex;
+  justify-content: space-between;
+  margin-top: calc(6px * var(--ui-scale));
+  padding-top: calc(6px * var(--ui-scale));
+  border-top: 1px solid var(--line);
+}
+.cal-link {
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  padding: calc(7px * var(--ui-scale)) calc(10px * var(--ui-scale));
+  font: inherit;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--accent);
+  cursor: pointer;
+}
+.cal-link:hover:not(:disabled) { background: var(--accent-soft); }
+.cal-link:disabled { opacity: 0.35; cursor: default; }
+.cal-link[data-cal="clear"] { color: var(--ink-2); }
+.cal-link[data-cal="clear"]:hover { background: var(--surface-3); color: var(--ink); }
 
 .field input:focus, .field select:focus, .field textarea:focus {
   outline: 2px solid var(--accent);
@@ -1529,6 +1733,62 @@ a.btn { text-decoration: none; }
   border-color: var(--accent);
 }
 .linkfields .linkurl { font-family: var(--mono); font-size: calc(13px * var(--ui-scale)); }
+
+/* Medications and vaccinations on the animal form: the link rows' look, with
+   the two boxes side by side like a little table, and the column names over
+   them once there is a row to name. */
+.pairlist { display: flex; flex-direction: column; gap: 8px; }
+.pairlist:empty { display: none; }
+.pairs .pairhead { display: none; }
+.pairs:has(.pairrow) .pairhead {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 2px calc(8px + 8px + 32px * var(--ui-scale)) 6px 11px;
+  font-size: calc(11px * var(--ui-scale));
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.pairs .addpair { margin-top: 10px; align-self: flex-start; }
+.pairs:has(.pairrow) .addpair { margin-top: 10px; }
+.row.pairrow {
+  align-items: center;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 8px 8px 8px 10px;
+  gap: 8px;
+  min-height: 0;
+  cursor: default;
+}
+.row.pairrow:hover, .row.pairrow:active { background: var(--surface); }
+.pairfields { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.pairfields input {
+  width: 100%;
+  min-width: 0;
+  height: calc(34px * var(--ui-scale));
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background-color: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  /* 15px or more, or iOS Safari zooms the page when it takes focus. */
+  font-size: calc(15px * var(--ui-scale));
+}
+.pairfields input[type="date"] { padding-right: calc(32px * var(--ui-scale)); background-position: right calc(9px * var(--ui-scale)) center; }
+@supports (-moz-appearance: none) {
+  .pairfields input[type="date"] { padding-right: 9px; }
+}
+.pairfields input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+  border-color: var(--accent);
+}
+/* A row on a detail page that is read, not opened. */
+.row.static, .row.static:hover, .row.static:active { cursor: default; background: transparent; }
 
 /* The parts a routine uses sit under the picker that adds them, so a part
    appears where you are looking after you choose it. Each one is its own card
@@ -1789,6 +2049,13 @@ a.btn { text-decoration: none; }
      pairs containing one are stacked; the rest stay side by side so the form
      does not become a very long column. */
   .two:has(input[type="date"]) { grid-template-columns: 1fr; }
+
+  /* A medication or vaccination row the same way: half a phone is too narrow
+     for a drug's name or a date, so the two boxes stack inside the row, the
+     name over its dosage or date, and the column names that only made sense
+     over two columns stand down. */
+  .pairfields { grid-template-columns: 1fr; }
+  .pairs:has(.pairrow) .pairhead { display: none; }
 
   /* A shade more weight in the small secondary text. A phone holds more CSS
      pixels per line than a monitor but is read further away, in worse light

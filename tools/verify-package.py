@@ -149,6 +149,11 @@ def main() -> int:
         with open(init, encoding="utf-8") as fh:
             src = fh.read()
         check("the panel URL carries the manifest version", "?v=" in src)
+        # Setup runs on the event loop. Opening a file there is blocking I/O,
+        # which Home Assistant logs as a bug in the integration on every start;
+        # the version comes from Home Assistant's loader instead.
+        code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
+        check("setup opens no file on the event loop", "open(" not in code)
 
     # The harness prints a version in the panel's About section. If it drifts
     # from the manifest, the preview advertises a version that does not exist.
