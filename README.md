@@ -64,6 +64,13 @@ three know their own dates, so a routine you have never done still says when it
 is next due rather than reading as unscheduled — and an interval you have never
 done is due the day you add it, and overdue from the day after.
 
+**Supplies that count themselves down.** Tell a routine what it uses — a
+filter, a bag of salt, two AA batteries — and marking it done takes them off
+the shelf, with a sensor for anything at its reorder point. A supply you do not
+have yet can be added from the routine form itself: **New supply…** at the
+bottom of its supplies menu gives a small card for the name, how many are on
+hand and when to reorder, and it is created with the routine when you save.
+
 **A history that reads like one.** Every service you mark done is kept, grouped
 by year and then by month, with what it cost in a column of its own and a total
 on any month that had more than one. Each entry remembers what it was for, so
@@ -280,9 +287,12 @@ the browser rather than on the server — there is nothing to copy into the conf
 folder first.
 
 The same thing is available as the `elmer.export_json` and `elmer.import_json`
-actions if you would rather drive it from a script. `elmer.export_json` with a
-`path` writes a file into your config folder; with no path it returns the data in
-the action response.
+actions if you would rather drive it from a script; both are for admins, and
+automations can run them. `elmer.export_json` with a `path` writes a `.json`
+file into your config folder — for example `backups/elmer.json` — and with no
+path it returns the data in the action response. It will not write into
+`www`, because anything there can be downloaded by anyone without signing in,
+nor into `.storage` or `custom_components`.
 
 Every route produces the same JSON, so a copy taken one way imports the other.
 
@@ -377,9 +387,11 @@ with no extra configuration, and nothing new is exposed to your network.
   sees the same house.
 - **No notifications of its own.** Home Assistant does that better; the sensors
   are there for it.
-- **Admin-only import.** Anyone who can open the panel can tick routines off and
-  edit equipment, but replacing the whole data set is held to the same bar as a
-  configuration change.
+- **Everyone in the house edits the same data.** Anyone who can open the panel
+  can tick routines off and add, change or delete equipment, animals and
+  supplies — Home Assistant has no finer permissions for a custom panel.
+  Importing, and the import and export actions, are for admins only, since
+  they replace everything or write files on the server.
 - **The icon needs 2026.3, and the store listing may not show it at all.**
   Elmer ships its own brand images in `custom_components/elmer/brand/`, which
   Home Assistant serves from 2026.3 onwards — before that, a custom

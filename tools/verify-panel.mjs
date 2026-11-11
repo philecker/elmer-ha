@@ -1074,7 +1074,7 @@ async function main() {
   check('only the parts the routine uses are listed', partsAtOpen, ['s1']);
   const offered = await page.$$eval(el('.sheet select[data-act="pick-part"] option'),
     (n) => n.map((o) => o.value).filter(Boolean));
-  ok('the picker offers the rest', offered.length === 3 && !offered.includes('s1'),
+  ok('the picker offers the rest, then a new one', offered.length === 4 && !offered.includes('s1') && offered[3] === '__new__',
     JSON.stringify(offered));
 
   // What you added belongs under the control that added it, with room around it
@@ -1154,6 +1154,77 @@ async function main() {
   check('the saved routine uses exactly what was listed',
     await page.evaluate(() => window.__snapshot().tasks.find((t) => t.id === 't1').partsUsed),
     [{ supplyId: 's4', quantity: 2 }]);
+
+  // --- a new supply, from the routine form --------------------------------
+  // Chosen from the same menu, typed into a card, created with the routine
+  // when it is saved and not suppliesBefore.
+  const supplyCount = () => page.evaluate(() => window.__snapshot().supplies.length);
+  const suppliesBefore = await supplyCount();
+  const s1Name = await page.evaluate(() => window.__snapshot().supplies.find((x) => x.id === 's1').name);
+  await page.click(el('.row[data-id="t1"]'));
+  await page.waitForSelector(el('.sheet [data-act="edit-routine"]'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet select[data-act="pick-part"]'));
+  await page.selectOption(el('.sheet select[data-act="pick-part"]'), '__new__');
+  check('New supply… opens a card, ready to name, and the menu resets',
+    [await page.$$eval(el('.sheet .newpart'), (n) => n.length),
+      await page.evaluate(() => document.querySelector('elmer-panel').shadowRoot.activeElement?.className),
+      await page.inputValue(el('.sheet select[data-act="pick-part"]'))],
+    [1, 'np-name', '']);
+  await page.fill(el('.sheet .newpart .np-name'), 'pleated filter 16x25x1');
+  await page.fill(el('.sheet .newpart .np-reorder'), '1');
+  await page.fill(el('.sheet .newpart .np-uses'), '2');
+  await page.selectOption(el('.sheet select[data-act="pick-part"]'), '__new__');   // left empty: ignored
+  await page.selectOption(el('.sheet select[data-act="pick-part"]'), '__new__');   // numbers, no name
+  await page.fill(el('.sheet .newpart:last-child .np-qty'), '4');
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForTimeout(200);
+  check('a card with numbers but no name stops the save, and nothing is created',
+    [await page.$$eval(el('.sheet'), (n) => n.length), await supplyCount(),
+      await page.evaluate(() => document.querySelector('elmer-panel').shadowRoot.activeElement?.className)],
+    [1, suppliesBefore, 'np-name']);
+  await page.click(el('.sheet .newpart:last-child [data-act="unnew-part"]'));
+  check('the × takes a card away', await page.$$eval(el('.sheet .newpart'), (n) => n.length), 2);
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+  const made = await page.evaluate(() => {
+    const s = window.__snapshot();
+    const sup = s.supplies.find((x) => x.name === 'Pleated Filter 16x25x1');
+    const t1 = s.tasks.find((t) => t.id === 't1');
+    const eq = s.equipment.find((e) => e.id === t1.equipmentId);
+    return sup && { qty: sup.quantity, reorderAt: sup.reorderAt, where: sup.location === ((eq && eq.location) || ''), used: t1.partsUsed.find((u) => u.supplyId === sup.id), count: s.supplies.length };
+  });
+  check('saved: one new supply, at 0 on hand, where its equipment is', made && [made.count, made.qty, made.reorderAt, made.where], [suppliesBefore + 1, 0, 1, true]);
+  check('and the routine uses two of it, beside what it already used', made && made.used && made.used.quantity, 2);
+
+  // A name already on the shelf is that supply — no twin, count untouched.
+  await page.click(el('.row[data-id="t1"]'));
+  await page.waitForSelector(el('.sheet [data-act="edit-routine"]'));
+  await page.click(el('.sheet [data-act="edit-routine"]'));
+  await page.waitForSelector(el('.sheet select[data-act="pick-part"]'));
+  await page.selectOption(el('.sheet select[data-act="pick-part"]'), '__new__');
+  await page.fill(el('.sheet .newpart .np-name'), ` ${s1Name.toLowerCase()} `);
+  await page.fill(el('.sheet .newpart .np-qty'), '50');
+  await page.click(el('.sheet [data-act="save-routine"]'));
+  await page.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+  check('a name already on the shelf uses that supply, and leaves its count alone',
+    await page.evaluate((n) => {
+      const s = window.__snapshot();
+      return [s.supplies.length, s.supplies.filter((x) => x.name.toLowerCase() === n.toLowerCase()).length,
+        s.supplies.find((x) => x.id === 's1').quantity === 3 || s.supplies.find((x) => x.id === 's1').quantity,
+        s.tasks.find((t) => t.id === 't1').partsUsed.some((u) => u.supplyId === 's1')];
+    }, s1Name),
+    [suppliesBefore + 1, 1, true, true]);
+
+  // Cancel, and nothing was made.
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.click(el('.addbtn'));
+  await page.waitForSelector(el('.sheet select[data-act="pick-part"]'));
+  await page.selectOption(el('.sheet select[data-act="pick-part"]'), '__new__');
+  await page.fill(el('.sheet .newpart .np-name'), 'never saved');
+  await page.click(el('.sheet .btnrow [data-act="close"]'));
+  await page.waitForTimeout(200);
+  check('cancelling the routine creates no supply', await supplyCount(), suppliesBefore + 1);
 
   // --- seasonal routines --------------------------------------------------
   // An interval walks forward from whenever you did it; months do not. The
@@ -3623,6 +3694,28 @@ async function main() {
   await page.evaluate(() => window.__setData('empty'));
   await page.waitForTimeout(200);
 
+  // With nothing on the shelf, a routine can still start the list: the
+  // supplies section shows, offers New supply…, and says why it is empty.
+  await page.click(el('.tab[data-value="routines"]'));
+  await page.click(el('.addbtn'));
+  await page.waitForSelector(el('.sheet select[data-act="pick-part"]'));
+  check('with no supplies yet, the routine form still offers a new one',
+    [await page.$$eval(el('.sheet select[data-act="pick-part"] option'), (n) => n.map((o) => o.value)),
+      (await page.$eval(el('.sheet select[data-act="pick-part"]'), (n) => n.closest('.field').querySelector('.hint').textContent)).startsWith('Nothing on the shelf yet')],
+    [['', '__new__'], true]);
+  await page.selectOption(el('.sheet select[data-act="pick-part"]'), '__new__');
+  await page.fill(el('.sheet .newpart .np-name'), 'water softener salt');
+  await page.$eval(el('.sheet .newpart'), (n) => n.scrollIntoView({ block: 'center' }));
+  const npFit = await page.$eval(el('.sheet .newpart'), (n) => {
+    const r = n.getBoundingClientRect();
+    const sheet = n.closest('.sheet').getBoundingClientRect();
+    return r.left >= sheet.left && r.right <= sheet.right + 0.5 && [...n.querySelectorAll('input')].every((i) => i.getBoundingClientRect().right <= r.right + 0.5);
+  });
+  ok('the new supply card fits a phone', npFit);
+  await shot(page, 'phone-routine-new-supply.png');
+  await page.click(el('.sheet .btnrow [data-act="close"]'));
+  await page.waitForTimeout(150);
+
   const emptyScreens = {};
   for (const tab of ['routines', 'equipment', 'parts', 'history', 'settings']) {
     await page.click(el(`.tab[data-value="${tab}"]`));
@@ -4986,6 +5079,51 @@ async function main() {
     check('pressing one anyway does nothing', await mp.$eval(el('.sheet input[name="birthDate"]'), (n) => n.value), today);
     await mp.keyboard.press('Escape');
     await mac.ctx.close();
+  }
+
+  // --- security: stored text never runs as script ---------------------------
+  // Anyone who can open the panel can save a record. The template helper
+  // escapes every value but joins a list as markup, so a name saved as a list
+  // was drawn as HTML for whoever opened the panel next — an admin included.
+  // The harness's server saves whatever it is sent, as an older or broken
+  // server might, so this checks the panel's own half of the defence.
+  {
+    const x = await open({ viewport: DESKTOP, animals: true });
+    const xp = x.page;
+    const go = (p, tab, detail = null) => p.evaluate(([t, d]) => {
+      const panel = document.querySelector('elmer-panel');
+      panel.tab = t; panel.detail = d; panel._render();
+    }, [tab, detail]);
+    const panelText = (p, sel) => p.evaluate((q) => {
+      const n = document.querySelector('elmer-panel').shadowRoot.querySelector(q);
+      return n ? n.textContent.replace(/\s+/g, ' ').trim() : '';
+    }, sel);
+    await xp.waitForFunction('window.__ready === true');
+    const bomb = (tag) => `<img src=x onerror="window.__pwned=(window.__pwned||[]).concat('${tag}')">`;
+    await xp.evaluate((ops) => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops }), [
+      { kind: 'equipment.put', payload: { id: 'eq1', name: [bomb('equipment')], brand: [bomb('brand')], parts: [{ label: [bomb('link')], url: 'example.com' }] } },
+      { kind: 'equipment.put', payload: { id: 'a1', name: [bomb('animal')], breed: [bomb('breed')], medications: [{ name: [bomb('med')], dosage: [bomb('dose')] }], vaccinations: [{ name: [bomb('vax')], date: [bomb('vaxdate')] }] } },
+      { kind: 'part.put', payload: { id: 'p1', name: [bomb('supply')], partNumber: [bomb('partno')] } },
+      { kind: 'routine.put', payload: { id: 't1', name: [bomb('routine')], snoozedUntil: [bomb('snooze')] } },
+      { kind: 'log.append', payload: { id: 'lx', taskId: 't1', equipmentId: 'eq1', taskName: [bomb('history')], notes: [bomb('notes')], doneOn: [bomb('doneon')], usedParts: [] } },
+      { kind: 'settings.put', payload: { cardsWide: [bomb('setting')] } },
+    ]);
+    const visit = [
+      ['routines'], ['equipment'], ['animals'], ['parts'], ['history'], ['settings'],
+      ['equipment', { kind: 'equipment', id: 'eq1' }], ['animals', { kind: 'animal', id: 'a1' }], ['parts', { kind: 'part', id: 'p1' }],
+    ];
+    for (const [tab, detail] of visit) await go(xp, tab, detail);
+    for (const sheet of [{ kind: 'equipment-form', id: 'eq1' }, { kind: 'animal-form', id: 'a1' }, { kind: 'routine-form', id: 't1' }, { kind: 'part-form', id: 'p1' }, { kind: 'log', id: 'lx' }]) {
+      await xp.evaluate((sh) => { const pnl = document.querySelector('elmer-panel'); pnl._openSheet(sh); }, sheet).catch(() => {});
+      await xp.waitForTimeout(250);
+      await xp.evaluate(() => { const pnl = document.querySelector('elmer-panel'); pnl._closeSheet && pnl._closeSheet(); });
+      await xp.waitForTimeout(150);
+    }
+    check('a list saved where text belongs never runs as script, anywhere in the panel',
+      await xp.evaluate(() => [...new Set(window.__pwned || [])]), []);
+    await go(xp, 'equipment', { kind: 'equipment', id: 'eq1' });
+    ok('it shows as the text it is', (await panelText(xp, '.crumb')).includes('<img src=x'), await panelText(xp, '.crumb'));
+    await x.ctx.close();
   }
 
   await ctx.close();

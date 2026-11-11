@@ -1090,6 +1090,74 @@ async def main() -> int:
     await s.async_apply([("equipment.delete", {"id": "e1"})])
     check("deleting equipment names the history it leaves", s.data["log"][0]["equipmentName"], "Mower")
 
+    # --- security: text stays text ------------------------------------------
+    # The panel's template joins a list as markup, so a name stored as a list
+    # would be drawn as HTML for whoever opens the panel next. Anyone who can
+    # open the panel can save a record; nothing they save may arrive in that
+    # shape, on a save or on a load.
+    evil = ["<img src=x onerror=alert(1)>"]
+    await s.async_replace({}, merge=False)
+    await s.async_apply([
+        ("equipment.put", {"id": "x1", "name": evil, "brand": {"a": evil}, "parts": [{"label": evil, "url": evil}, evil],
+                           "medications": [{"name": evil, "dosage": 1}], "vaccinations": "not a list"}),
+        ("routine.put", {"id": "x2", "name": evil, "months": [1, evil], "partsUsed": [{"supplyId": evil, "quantity": 1}]}),
+        ("part.put", {"id": "x3", "name": evil, "partNumber": {"x": 1}}),
+        ("log.append", {"id": "x4", "taskName": evil, "notes": evil, "usedParts": [{"supplyId": "x3", "quantity": evil}]}),
+        ("settings.put", {"dueSoonDays": 14, "theme": evil, "cardsWide": {"x": 1}}),
+    ])
+    def shapes(value, path="", found=None):
+        """Every place a list or object sits where a plain value belongs."""
+        found = [] if found is None else found
+        if isinstance(value, dict):
+            if path.count(".") >= 2:   # an object as a record's field
+                found.append(path)
+            for k, v in value.items():
+                shapes(v, f"{path}.{k}", found)
+        elif isinstance(value, list):
+            last = path.rsplit(".", 1)[-1]
+            if last in ("equipment", "tasks", "supplies", "log"):
+                for i, v in enumerate(value):
+                    shapes(v, f"{path}[{i}]", found)
+                return found
+            if last not in store_mod.LIST_FIELDS:
+                found.append(path)
+            for i, v in enumerate(value):
+                if isinstance(v, list):
+                    found.append(f"{path}[{i}]")
+                elif isinstance(v, dict):
+                    for k, w in v.items():
+                        if isinstance(w, (list, dict)):
+                            found.append(f"{path}[{i}].{k}")
+        return found
+    check("a list saved where text belongs is stored as text", shapes(s.data), [])
+    check("so the name is the list's text, escaped when drawn",
+          next(e for e in s.data["equipment"] if e["id"] == "x1")["name"], str(evil))
+    check("lists that are lists stay lists of plain values",
+          [next(e for e in s.data["equipment"] if e["id"] == "x1")["parts"][0]["label"],
+           next(t for t in s.data["tasks"] if t["id"] == "x2")["months"]],
+          [str(evil), [1, str(evil)]])
+    check("settings hold only plain values", [s.data["settings"]["theme"], s.data["settings"]["cardsWide"]],
+          [str(evil), "{'x': 1}"])
+    loaded = store_mod.normalize({"equipment": [{"id": "y", "name": evil, "medications": [{"name": evil}]}],
+                                  "tasks": [{"id": "z", "name": {"a": 1}}], "log": [{"id": "l", "taskName": evil}],
+                                  "supplies": [{"id": "s", "name": evil}], "settings": {"theme": evil}})
+    check("and a file loaded or imported is held to the same", shapes(loaded), [])
+    with open(os.path.join(PKG, "frontend", "util.js"), encoding="utf-8") as fh:
+        util_js = fh.read()
+    js_list = set(re.findall(r"'(\w+)'", re.search(r"const LIST_FIELDS = new Set\(\[(.*?)\]\)", util_js).group(1)))
+    check("the panel cleans the same list fields the store does", sorted(js_list), sorted(store_mod.LIST_FIELDS))
+
+    # The overdue notification is Markdown, seen by every account; a name in
+    # it is text, never a link or a tag.
+    rows = [{"task": {"name": "[Sign in again](https://example.invalid) <b>x</b>"},
+             "equipment": {"name": "Furnace_*1*"}, "state": {"status": "overdue", "daysLeft": -3}}]
+    _, body = schedule.overdue_notice(rows)
+    check("a name in the notification cannot be a link or a tag",
+          ["](" in body, "<b>" in body, "\\[Sign in again\\]" in body, "Furnace\\_\\*1\\*" in body], [False, False, True, True])
+    _, body = schedule.overdue_notice([dict(rows[0], task={"name": "Renew at https://example.invalid or www.example.invalid"})])
+    check("nor a bare web address, which Home Assistant would make a link",
+          ["https://" in body, "www." in body, "example\\.invalid" in body], [False, False, True])
+
     # --- everything we store survives JSON --------------------------------
     check("every save round-tripped through JSON", len(saved) > 0, True)
 

@@ -19,6 +19,7 @@ import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.service import async_register_admin_service
 
 from .const import (
     DOMAIN,
@@ -77,13 +78,26 @@ def _resolve_task(store: ElmerStore, name: str) -> dict:
     return task
 
 
-def _safe_path(hass: HomeAssistant, path: str) -> str:
-    """Keep file access inside the config directory.
+# Folders inside config that an export must never write into. www is served
+# to anyone at /local/ with no sign-in, so a backup there is public — and a
+# file there with a name ending .html is a page on Home Assistant's own
+# address, able to read the signed-in person's session. .storage is Home
+# Assistant's own data, accounts and tokens included, and custom_components
+# is code that runs at the next start.
+_NO_WRITE = ("www", ".storage", "custom_components")
+
+
+def _safe_path(hass: HomeAssistant, path: str, *, writing: bool = False) -> str:
+    """Keep file access inside the config directory, and writes to backups.
 
     A service call is reachable from a script, a dashboard button and the voice
     assistant, so the path it is handed is not necessarily one the owner typed.
     Resolving it and refusing anything outside the config directory means this
     cannot be turned into a way to read or write arbitrary files on the host.
+
+    A write is held to more than that. It has to be a .json file, so an export
+    cannot replace configuration.yaml or secrets.yaml, and it cannot go where
+    Home Assistant serves files to the world or keeps its own state.
     """
     base = os.path.realpath(hass.config.path())
     target = os.path.realpath(
@@ -92,8 +106,23 @@ def _safe_path(hass: HomeAssistant, path: str) -> str:
     if target != base and not target.startswith(base + os.sep):
         raise ServiceValidationError(
             "The path has to be inside your Home Assistant config folder, "
-            "for example 'elmer.json' or 'www/elmer.json'."
+            "for example 'elmer.json' or 'backups/elmer.json'."
         )
+    if writing:
+        first = os.path.relpath(target, base).split(os.sep)[0]
+        if not target.lower().endswith(".json"):
+            raise ServiceValidationError(
+                "An export is a .json file, for example 'elmer.json'."
+            )
+        if first in _NO_WRITE:
+            raise ServiceValidationError(
+                f"Elmer does not write into '{first}': "
+                + (
+                    "anything there can be downloaded by anyone, without signing in."
+                    if first == "www"
+                    else "that folder belongs to Home Assistant."
+                )
+            )
     return target
 
 
@@ -171,7 +200,7 @@ async def async_setup_services(hass: HomeAssistant) -> None:
         if not (raw_path := call.data.get("path")):
             return {"data": payload}
 
-        path = _safe_path(hass, raw_path)
+        path = _safe_path(hass, raw_path, writing=True)
 
         def write() -> None:
             os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -193,14 +222,22 @@ async def async_setup_services(hass: HomeAssistant) -> None:
     hass.services.async_register(
         DOMAIN, SERVICE_ADJUST_STOCK, adjust_stock, schema=ADJUST_SCHEMA
     )
-    hass.services.async_register(
+    # Import and export are for admins, as importing from the panel already
+    # was. Import replaces the whole data set; export writes a file on the
+    # server and hands back everything Elmer holds. An ordinary household
+    # account can still tick routines off and adjust stock, which is the same
+    # bar the panel sets. An automation or script runs with no user and is
+    # allowed, so an export on a schedule keeps working.
+    async_register_admin_service(
+        hass,
         DOMAIN,
         SERVICE_IMPORT,
         import_json,
         schema=IMPORT_SCHEMA,
         supports_response=SupportsResponse.OPTIONAL,
     )
-    hass.services.async_register(
+    async_register_admin_service(
+        hass,
         DOMAIN,
         SERVICE_EXPORT,
         export_json,

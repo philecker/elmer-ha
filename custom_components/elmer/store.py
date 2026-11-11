@@ -248,6 +248,57 @@ def _weight(value: Any, unit: Any) -> tuple[Any, str | None]:
     )
 
 
+# The fields of a record that hold a list. Everything else on a record is one
+# plain value: text, a number, true or false, or nothing. "links" is the name
+# an older file gave the replacement-parts list, kept so it can be migrated.
+LIST_FIELDS = frozenset(
+    {"parts", "medications", "vaccinations", "partsUsed", "usedParts", "months", "clocks", "links"}
+)
+
+
+def _plain(value: Any) -> Any:
+    """One plain value. A list or an object where one belongs becomes text."""
+    if value is None or isinstance(value, (str, bool, int, float)):
+        return value
+    return str(value)
+
+
+def _clean_record(record: dict) -> dict:
+    """A record with the shape the panel expects, and nothing else.
+
+    This is a security boundary, not tidying. The panel escapes every value it
+    puts on the page, but its template helper treats a list as markup it built
+    itself — that is how rows are nested — so a name stored as a list would be
+    drawn as HTML. Anyone who can open the panel can save a record, and an
+    admin who opened the panel afterwards would run whatever was in it. Text
+    fields are therefore always text by the time anything reads them: on
+    every save from the panel and every file loaded or imported.
+    """
+    out: dict[str, Any] = {}
+    for key, value in record.items():
+        if not isinstance(key, str):
+            continue
+        if key in LIST_FIELDS and isinstance(value, str):
+            # Text where a list now goes is an older file — medications were
+            # one box of text — and text is safe as it is; normalize turns it
+            # into the list.
+            out[key] = value
+        elif key in LIST_FIELDS:
+            items = value if isinstance(value, list) else []
+            out[key] = [
+                {str(k): _plain(v) for k, v in item.items()} if isinstance(item, dict) else _plain(item)
+                for item in items
+            ]
+        else:
+            out[key] = _plain(value)
+    return out
+
+
+def _clean_settings(settings: dict) -> dict:
+    """Settings are all plain values; see _clean_record for why it matters."""
+    return {k: _plain(v) for k, v in settings.items() if isinstance(k, str)}
+
+
 def _medications(value: Any) -> list[dict[str, str]]:
     """An animal's medications as rows of name and dosage.
 
@@ -289,6 +340,18 @@ def normalize(raw: Any) -> dict[str, Any]:
     base = empty_data()
     if not isinstance(raw, dict):
         return base
+    # Shape before meaning: every record has its text as text and its lists
+    # as lists of plain values, whatever the file or the old store held.
+    raw = {
+        **raw,
+        **{
+            key: [_clean_record(r) for r in raw[key] if isinstance(r, dict)]
+            for key in ("equipment", "tasks", "supplies", "log")
+            if isinstance(raw.get(key), list)
+        },
+    }
+    if isinstance(raw.get("settings"), dict):
+        raw["settings"] = _clean_settings(raw["settings"])
 
     raw_tasks = raw.get("tasks") if isinstance(raw.get("tasks"), list) else []
 
@@ -661,7 +724,14 @@ class ElmerStore:
         degrades instead of erroring.
         """
         at = at if at is not None else int(time.time() * 1000)
-        p = payload or {}
+        p = payload if isinstance(payload, dict) else {}
+        # Every record and setting written from outside is reduced to plain
+        # values first. See _clean_record: this is what keeps a record saved
+        # by one person from running as script in another person's panel.
+        if kind in ("equipment.put", "routine.put", "part.put", "log.append"):
+            p = _clean_record(p)
+        elif kind == "settings.put":
+            p = _clean_settings(p)
         d = self.data
 
         if kind == "equipment.put":

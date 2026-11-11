@@ -21,6 +21,7 @@ implementations and fails on any divergence.
 from __future__ import annotations
 
 import calendar
+import re
 from datetime import date, timedelta
 from typing import Any
 
@@ -441,6 +442,26 @@ def task_state(task: dict, due_soon_days: int = DUE_SOON_DAYS) -> dict:
     }
 
 
+def _md(value: Any) -> str:
+    """A name as plain text inside the notification's Markdown.
+
+    The notification is Markdown and every account on the house sees it, while
+    any account that can open the panel can name a routine. Unescaped, a name
+    like "[Sign in again](https://…)" is a working link in everybody's
+    notifications, so every character Markdown gives a meaning to is escaped,
+    angle brackets are spelled out so no tag survives either, and a bare web
+    address is broken so it is not made into a link.
+    """
+    text = " ".join(str(value or "").split())
+    # Home Assistant's Markdown also turns a bare address into a link, which
+    # escaping cannot stop; a zero-width space after the scheme or "www" does,
+    # and reads the same.
+    text = re.sub(r"(?i)(\w)(://)", "\\1\u200b\\2", text)
+    text = re.sub(r"(?i)\b(www)\.", "\\1\u200b.", text)
+    text = re.sub(r"([\\`*_{}\[\]()#+\-.!|~>])", r"\\\1", text)
+    return text.replace("<", "&lt;")
+
+
 def overdue_notice(rows: list[dict], limit: int = 5) -> tuple[str, str] | None:
     """The title and body of the overdue notification, or None for nothing.
 
@@ -457,9 +478,9 @@ def overdue_notice(rows: list[dict], limit: int = 5) -> tuple[str, str] | None:
         return None
 
     def line(row: dict) -> str:
-        name = (row["task"].get("name") or "").strip() or "Something"
+        name = _md(row["task"].get("name")) or "Something"
         eq = row.get("equipment") or {}
-        where = (eq.get("name") or "").strip()
+        where = _md(eq.get("name"))
         days = row["state"]["daysLeft"]
         ago = "today" if days == 0 else f"{abs(days)} day{'' if abs(days) == 1 else 's'} ago"
         return f"- {name}{f' ({where})' if where else ''} — due {ago}"

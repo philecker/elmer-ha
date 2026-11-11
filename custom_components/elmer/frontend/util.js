@@ -28,6 +28,56 @@ export function html(strings, ...values) {
   return out;
 }
 
+/* What the panel draws from: records with their text as text.
+
+   The html tag above escapes every value except a list, which it joins as
+   markup because that is how rendered rows are nested. That makes a list
+   arriving where a name belongs a way to put markup on the page: anyone who
+   can open the panel can save a record, so a name saved as a list could run
+   as script for the next person to open it, admins included. The server
+   reduces every record to this shape on save and on load; the panel does it
+   again on arrival, so neither half has to trust the other. Kept in step
+   with LIST_FIELDS and _clean_record in store.py. */
+const LIST_FIELDS = new Set(['parts', 'medications', 'vaccinations', 'partsUsed', 'usedParts', 'months', 'clocks', 'links']);
+
+function plain(value) {
+  if (value === null || value === undefined) return value;
+  const t = typeof value;
+  if (t === 'string' || t === 'number' || t === 'boolean') return value;
+  return String(value);
+}
+
+export function cleanRecord(record) {
+  const out = {};
+  for (const [key, value] of Object.entries(record || {})) {
+    if (LIST_FIELDS.has(key) && typeof value === 'string') {
+      out[key] = value;   // an older file's text, made into a list where it is read
+    } else if (LIST_FIELDS.has(key)) {
+      out[key] = (Array.isArray(value) ? value : []).map((item) => (item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.entries(item).map(([k, v]) => [k, plain(v)]))
+        : plain(item)));
+    } else {
+      out[key] = plain(value);
+    }
+  }
+  return out;
+}
+
+/** A snapshot from the server, with every record and setting in that shape. */
+export function cleanData(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot;
+  const list = (v) => (Array.isArray(v) ? v.filter((r) => r && typeof r === 'object' && !Array.isArray(r)).map(cleanRecord) : []);
+  const settings = snapshot.settings && typeof snapshot.settings === 'object' ? snapshot.settings : {};
+  return {
+    ...snapshot,
+    equipment: list(snapshot.equipment),
+    tasks: list(snapshot.tasks),
+    supplies: list(snapshot.supplies),
+    log: list(snapshot.log),
+    settings: Object.fromEntries(Object.entries(settings).map(([k, v]) => [k, plain(v)])),
+  };
+}
+
 /** Marks a string as already-safe markup, for nesting rendered fragments. */
 export function raw(markup) {
   return [markup === null || markup === undefined ? '' : String(markup)];

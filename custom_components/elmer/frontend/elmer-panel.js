@@ -15,14 +15,14 @@ import { CSS } from './styles.js';
 import { icon } from './icons.js';
 import { Calendar, wantsOwnCalendar, firstWeekday } from './calendar.js';
 import {
-  esc, html, raw, titleCase, uid, todayIso, intervalText, addDays, formatDay, CATEGORIES,
+  esc, html, raw, titleCase, uid, todayIso, intervalText, addDays, formatDay, CATEGORIES, cleanData,
 } from './util.js';
 import {
   routinesView, equipmentView, equipmentDetail, partsView, partDetail, historyView, settingsView,
   equipmentForm, routineForm, partForm, logForm, logDetail, importForm,
   animalsView, animalDetail, animalForm, animalsOffSheet, isAnimal, sexOptions, LIVESTOCK,
   LISTS, SPECIES, builtInFor, animalIcon, weightUnitOf, weightField, parseWeight,
-  partRow, partOptions, linkRow, pairRow, groupForm, routineActions,
+  partRow, partOptions, newPartCard, linkRow, pairRow, groupForm, routineActions,
 } from './views.js';
 
 const TABS = [
@@ -454,7 +454,8 @@ class ElmerPanel extends HTMLElement {
     this._unsub = this._hass.connection.subscribeMessage(
       (snapshot) => {
         this.error = null;
-        this.data = snapshot;
+        // Text as text before anything draws it: see cleanData.
+        this.data = cleanData(snapshot);
         this._render();
       },
       { type: 'elmer/subscribe' },
@@ -1230,6 +1231,10 @@ class ElmerPanel extends HTMLElement {
       case 'unpick-part':
         this._unpickPart(el);
         return;
+      case 'unnew-part':
+        // Out of the DOM: it was never saved, so there is nothing to undo.
+        el.closest('.newpart')?.remove();
+        return;
       case 'close':
         this._closeSheet();
         return;
@@ -1499,11 +1504,42 @@ class ElmerPanel extends HTMLElement {
   _pickPart(select) {
     const id = select.value;
     if (!id) return;
+    if (id === '__new__') {
+      const list = this.shadowRoot.querySelector('.sheet .partlist');
+      if (list) {
+        list.insertAdjacentHTML('beforeend', newPartCard());
+        list.lastElementChild.querySelector('.np-name')?.focus();
+      }
+      select.value = '';
+      return;
+    }
     const supply = this.data.supplies.find((p) => p.id === id);
     const list = this.shadowRoot.querySelector('.sheet .partlist');
     if (!supply || !list) return;
     list.insertAdjacentHTML('beforeend', partRow(supply, 1));
     this._refreshPartOptions();
+  }
+
+  /** The New supply cards as typed: { cards } or { error: the box to fix }. */
+  _newParts() {
+    const cards = [];
+    for (const card of this.shadowRoot.querySelectorAll('.sheet .newpart')) {
+      const val = (sel) => (card.querySelector(sel)?.value || '').trim();
+      const name = val('.np-name');
+      const qty = val('.np-qty');
+      const reorder = val('.np-reorder');
+      if (!name) {
+        if (qty || reorder) return { error: card.querySelector('.np-name') };
+        continue;
+      }
+      cards.push({
+        name: titleCase(name),
+        quantity: Math.max(0, parseInt(qty, 10) || 0),
+        reorderAt: Math.max(0, parseInt(reorder, 10) || 0),
+        uses: Math.max(1, parseInt(val('.np-uses'), 10) || 1),
+      });
+    }
+    return { cards };
   }
 
   _unpickPart(button) {
@@ -1768,6 +1804,47 @@ class ElmerPanel extends HTMLElement {
       if (qty > 0) partsUsed.push({ supplyId: key.slice(5), quantity: qty });
     }
 
+    // New supplies typed into the form. Checked before anything is written,
+    // so a card with numbers and no name stops the save rather than being
+    // dropped without a word; a card left entirely empty is just ignored.
+    const fresh = this._newParts();
+    if (fresh.error) {
+      fresh.error.focus();
+      return this._flash('Give the new supply a name, or remove it.', 'error');
+    }
+    const supplyOps = [];
+    const owner = f.equipmentId ? this.data.equipment.find((e) => e.id === f.equipmentId) : null;
+    const made = new Map();
+    for (const n of fresh.cards) {
+      const key = n.name.toLowerCase();
+      // A name already on the shelf is that supply, not a second one — its
+      // count is left alone, since what is on the shelf is the Supplies
+      // tab's to say. Two cards with one name are one supply.
+      const existing = this.data.supplies.find((p) => (p.name || '').trim().toLowerCase() === key);
+      let supplyId = existing ? existing.id : made.get(key);
+      if (!supplyId) {
+        supplyId = uid('sup');
+        made.set(key, supplyId);
+        supplyOps.push({
+          kind: 'part.put',
+          payload: {
+            id: supplyId,
+            name: n.name,
+            quantity: n.quantity,
+            reorderAt: n.reorderAt,
+            partNumber: '',
+            purchasedFrom: '',
+            location: (owner && owner.location) || '',
+            notes: '',
+            updatedAt: Date.now(),
+          },
+        });
+      }
+      const already = partsUsed.find((u) => u.supplyId === supplyId);
+      if (already) already.quantity = n.uses;
+      else partsUsed.push({ supplyId, quantity: n.uses });
+    }
+
     const record = {
       id: id || uid('task'),
       name: titleCase(name),
@@ -1792,7 +1869,8 @@ class ElmerPanel extends HTMLElement {
       // quietly starting it counting again. There is a test on that, because
       // it is a property of the store rather than of this form.
     };
-    const ops = [{ kind: 'routine.put', payload: record }];
+    // The supplies first, so the routine never names one that is not there.
+    const ops = [...supplyOps, { kind: 'routine.put', payload: record }];
 
     // A one-time routine with a Last done is finished, and a finished one
     // lives in the history and nowhere else. Typed into this form, the date

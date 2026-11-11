@@ -155,6 +155,18 @@ def main() -> int:
         code = "\n".join(l for l in src.splitlines() if not l.lstrip().startswith("#"))
         check("setup opens no file on the event loop", "open(" not in code)
 
+    # Import replaces everything and export writes files on the server, so
+    # both are registered as admin actions; and an export cannot land where
+    # Home Assistant serves files publicly or keeps its own state.
+    svc_path = os.path.join(PKG, "services.py")
+    if os.path.exists(svc_path):
+        with open(svc_path, encoding="utf-8") as fh:
+            svc = fh.read()
+        admin = re.findall(r"async_register_admin_service\(\s*hass,\s*DOMAIN,\s*(SERVICE_\w+)", svc)
+        check("import and export are admin-only actions", sorted(admin), ["SERVICE_EXPORT", "SERVICE_IMPORT"])
+        check("an export never writes into www, .storage or custom_components",
+              all(f'"{d}"' in svc for d in ("www", ".storage", "custom_components")) and "writing=True" in svc)
+
     # The harness prints a version in the panel's About section. If it drifts
     # from the manifest, the preview advertises a version that does not exist.
     harness = os.path.join(ROOT, "tools", "harness", "fake-hass.js")

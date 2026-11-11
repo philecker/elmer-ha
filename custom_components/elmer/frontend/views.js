@@ -1454,12 +1454,47 @@ export function partRow(supply, quantity) {
   </div>`;
 }
 
-/** The picker's options: everything not already on the routine. */
+/** The picker's options: everything not already on the routine, then a new one. */
 export function partOptions(state, used) {
   const taken = new Set((used || []).map((u) => u.supplyId));
   const free = state.supplies.filter((p) => !taken.has(p.id));
-  return html`<option value="">${raw(free.length ? 'Add a supply…' : 'All supplies added')}</option>
-    ${free.map((p) => html`<option value="${p.id}">${p.name}</option>`)}`;
+  return html`<option value="">${raw(free.length || !state.supplies.length ? 'Add a supply…' : 'All supplies added')}</option>
+    ${free.map((p) => html`<option value="${p.id}">${p.name}</option>`)}
+    <option value="__new__">New supply…</option>`;
+}
+
+/**
+ * A supply that does not exist yet, typed into the routine form. Nothing is
+ * created until the routine is saved, and then both go together — cancel the
+ * form and there is no stray supply. Only what the shelf needs to start
+ * counting; the part number and where to buy it are the Supplies tab's.
+ */
+export function newPartCard() {
+  return `<div class="row newpart">
+    <div class="newpart-head">
+      <span class="tag" data-tone="new">New supply</span>
+      <button class="iconbtn" data-act="unnew-part" type="button" aria-label="Don't add this supply">${icon('x', 16)}</button>
+    </div>
+    <div class="field">
+      <label>Name</label>
+      <input class="np-name" placeholder="20x25x1 MERV 11" data-titlecase autocomplete="off" aria-label="New supply name">
+    </div>
+    <div class="two">
+      <div class="field">
+        <label>On hand</label>
+        <input class="np-qty" type="number" inputmode="numeric" min="0" max="9999" placeholder="0" aria-label="How many on hand">
+      </div>
+      <div class="field">
+        <label>Reorder at</label>
+        <input class="np-reorder" type="number" inputmode="numeric" min="0" max="9999" placeholder="Optional" aria-label="Reorder when down to">
+      </div>
+    </div>
+    <div class="field">
+      <label>This routine uses</label>
+      <input class="np-uses" type="number" inputmode="numeric" min="1" max="99" value="1" aria-label="How many this routine uses">
+    </div>
+    <div class="hint">Added to Supplies when you save the routine, in the same location as what the routine is for. The part number and where to buy it can wait for the Supplies tab.</div>
+  </div>`;
 }
 
 export function routineForm(state, task, equipmentId) {
@@ -1564,17 +1599,19 @@ export function routineForm(state, task, equipmentId) {
       <input id="f-lastDone" name="lastDone" type="date" data-optional value="${t.lastDone || ''}">
       <div class="hint">Leave this empty if you have never done it. Elmer then counts from the day the routine was added: one on an interval is due that day, and one on months, a clock change or a date comes due at the next one.</div>
     </div>
-    ${raw(state.supplies.length ? html`<div class="field">
+    <div class="field">
       <label for="f-pickpart">Supplies this uses</label>
       <select id="f-pickpart" data-act="pick-part" aria-label="Add a supply this routine uses">
         ${raw(partOptions(state, used))}
       </select>
-      <div class="hint">Only the supplies this routine actually uses — marking it done takes them off the shelf.</div>
+      <div class="hint">${raw(state.supplies.length
+        ? 'Only the supplies this routine actually uses — marking it done takes them off the shelf.'
+        : 'Nothing on the shelf yet. Add the filter, salt or batteries this uses and Elmer starts counting them.')}</div>
       <div class="partlist">${used.map((u) => {
         const p = state.supplies.find((x) => x.id === u.supplyId);
         return p ? partRow(p, u.quantity) : '';
       })}</div>
-    </div>` : '')}
+    </div>
     <div class="btnrow">
       <button class="btn" data-act="close">Cancel</button>
       ${raw(t.id ? `<button class="btn" data-variant="danger" data-act="delete-routine" data-id="${esc(t.id)}">${icon('trash', 16)}</button>` : '')}

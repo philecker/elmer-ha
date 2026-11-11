@@ -7,12 +7,39 @@ available is the body of the GitHub release, in the Marketplace as it was in
 HACS. This is here for anyone reading the repository, and the release bodies
 are written from it.
 
+## 1.11.0
+
+### Added
+
+- **Add a new supply while making a routine.** The routine form's supplies
+  menu ends with New supply…, which opens a small card for its name, how many
+  are on hand (0 if you leave it), when to reorder and how many the routine
+  uses. It is created with the routine when you save — cancel and nothing is
+  made — in the same location as the equipment or animal the routine is for;
+  the part number and where to buy it can wait for the Supplies tab. A name
+  already on the shelf uses that supply rather than making a second one.
+  Editing a routine works the same way, and with no supplies at all the
+  section now shows anyway, so a routine can start the list.
+
+### Security
+
+These need a signed-in Home Assistant account to exploit, and matter most in a
+house where some accounts are not admins. Please update.
+
+- A record saved by one account can no longer run as script in someone else's
+  panel. All text is stored and shown as plain text.
+- The import and export actions are admin-only, and an export must be a
+  `.json` file outside `www`, `.storage` and `custom_components`. If you ever
+  exported a backup into `www`, delete it — anyone could download it.
+- Names in the overdue notification are plain text, so a routine can no longer
+  put a link in everyone's notifications.
+
 ## 1.10.0
 
 ### Added
 
 - **Animals.** A new tab for pets and livestock, off by default — Settings ▸
-  Animals turns it on, between Equipment and Parts. Each animal has its own
+  Animals turns it on, between Equipment and Supplies. Each animal has its own
   page: species and breed, sex, birthdate (exact, or only the year for a
   rescue), color, weight, height, microchip, license, where it came from, its vet's
   number and email, insurance, diet and notes. Medications and vaccinations
@@ -23,11 +50,11 @@ are written from it.
   list says so — "Dog · Turns 5 in 4 days".
 
   Horses and farm animals get How many, for a flock kept as one record. Sex
-  uses each animal's own words —
-  mare, stallion and gelding; cow, heifer, bull and steer; and so on.
+  uses each animal's own words — mare, stallion and gelding; cow, heifer, bull
+  and steer; and so on.
 
   Their routines are ordinary routines — heartworm every month, the farrier
-  every seven weeks — with the same overdue badge, sensors, history and parts
+  every seven weeks — with the same overdue badge, sensors, history and supplies
   as everything else, and a device per animal in Home Assistant. A routine's
   form says "For" while there are animals, with Equipment and Animals grouped.
 
@@ -35,8 +62,7 @@ are written from it.
   species your animals use — the same list as Settings ▸ Species, where you
   rename or remove them — and New Species… for another. Type one of Elmer's
   own, "horse" or "Dog", and you get the built-in, with its icon, its words
-  for sex and, for farm animals, the livestock fields; the form changes as
-  you type. Each animal has an icon picker as equipment does — dog, cat,
+  for sex and, for farm animals, How many; the form changes as you type. Each animal has an icon picker as equipment does — dog, cat,
   rabbit, small pet, bird, fish, turtle, horse, cow, goat, sheep, pig, alpaca,
   chicken, duck and the paw — and its species chooses one until you pick
   another.
@@ -44,7 +70,7 @@ are written from it.
   Weights are in pounds or kilograms, set in Settings beside Animals; until
   you choose, Elmer follows Home Assistant's unit system. Each weight keeps
   the unit it was typed in, so changing the setting converts every animal —
-  Juniper's 1,050 lbs reads 476 kg — rather than relabelling them, and
+  a 1,050 lbs horse reads 476 kg — rather than relabeling them, and
   switching back gives exactly what you typed.
 
   Locations stay one list for everything with a place: equipment, animals,
@@ -106,7 +132,7 @@ are written from it.
 - **A snoozed routine says how long until it is due.** Snoozing now moves
   the due date to the day it wakes — or leaves it, if the real date is later
   still — and the row counts down to it: "in 3 days · Snoozed". When that day
-  is inside your warning window the routine is under Due soon, coloured and
+  is inside your warning window the routine is under Due soon, colored and
   counted like everything else there; further off, it is under Snoozed. The
   routine's sheet says when it was really due, and Wake up puts it back on
   that date.

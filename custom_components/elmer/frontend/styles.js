@@ -1734,6 +1734,24 @@ a.btn { text-decoration: none; }
 }
 .linkfields .linkurl { font-family: var(--mono); font-size: calc(13px * var(--ui-scale)); }
 
+/* A supply typed into the routine form, before it exists. The part rows'
+   card, holding a small form of its own. */
+.row.newpart {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  padding: 10px 10px 12px 14px;
+  cursor: default;
+  min-height: 0;
+}
+.row.newpart:hover, .row.newpart:active { background: var(--surface); }
+.newpart .newpart-head { display: flex; align-items: center; justify-content: space-between; }
+.newpart .field, .newpart .two, .newpart .hint { margin: 0; }
+.newpart .np-uses { max-width: calc(120px * var(--ui-scale)); }
+
 /* Medications and vaccinations on the animal form: the link rows' look, with
    the two boxes side by side like a little table, and the column names over
    them once there is a row to name. */
