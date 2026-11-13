@@ -5173,8 +5173,20 @@ async function main() {
     check('three and the add tile sit on one row on a desktop', rows, 1);
     await shot(ap, 'attachments-desktop.png');
 
-    // Adding: the file's own name, unless it is a camera's.
-    await addFiles('eq1', [{ name: 'Water Heater Label.png', mimeType: 'image/png', buffer: PNG }]);
+    // Adding: the way a person does it — a click on the tile opens the
+    // browser's file picker. (setInputFiles below skips the click, which is
+    // how a panel that cancelled it went unnoticed.)
+    const [chooser] = await Promise.all([
+      ap.waitForEvent('filechooser', { timeout: 3000 }).catch(() => null),
+      ap.click('.attgrid label.att-add'),
+    ]);
+    ok('clicking Add opens the file picker', chooser !== null);
+    ok('one that takes several files', chooser !== null && chooser.isMultiple());
+    if (chooser) {
+      await chooser.setFiles([{ name: 'Water Heater Label.png', mimeType: 'image/png', buffer: PNG }]);
+      await ap.waitForFunction(() => !Object.values(window.__panel._uploading).some(Boolean));
+      await ap.waitForFunction(() => window.__panel.data.equipment.find((e) => e.id === 'eq1').attachments.length === 4);
+    }
     let list = await atts('eq1');
     check('a photo is added to the record', list.length, 4);
     check('named after its file', list[3] && [list[3].name, list[3].type, list[3].size], ['Water Heater Label', 'image/png', PNG.length]);

@@ -7,6 +7,13 @@ available is the body of the GitHub release, in the Marketplace as it was in
 HACS. This is here for anyone reading the repository, and the release bodies
 are written from it.
 
+## 1.12.1
+
+### Fixed
+
+- **Adding an attachment did nothing.** Pressing Add on the Attachments
+  section now opens the file picker.
+
 ## 1.12.0
 
 ### Added

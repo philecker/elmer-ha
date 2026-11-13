@@ -1002,6 +1002,11 @@ class ElmerPanel extends HTMLElement {
     // preventDefault. Links are checked first so the nearest one wins.
     if (ev.target.closest && ev.target.closest('a[href]')) return;
 
+    // A file box opens the browser's picker on its own click, which the
+    // preventDefault below would cancel — the Add tile on attachments would
+    // do nothing at all. What was picked arrives as a change event instead.
+    if (ev.target.closest && ev.target.closest('input[type="file"]')) return;
+
     // The calendar glyph on a date field is painted by the stylesheet rather
     // than supplied by the engine, so it has to be wired up as well as drawn.
     // Only the glyph opens the picker: a click anywhere else in the field is
