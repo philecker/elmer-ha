@@ -163,9 +163,30 @@ def main() -> int:
         with open(svc_path, encoding="utf-8") as fh:
             svc = fh.read()
         admin = re.findall(r"async_register_admin_service\(\s*hass,\s*DOMAIN,\s*(SERVICE_\w+)", svc)
-        check("import and export are admin-only actions", sorted(admin), ["SERVICE_EXPORT", "SERVICE_IMPORT"])
+        check("import and export are admin-only actions", sorted(admin) == ["SERVICE_EXPORT", "SERVICE_IMPORT"], str(admin))
         check("an export never writes into www, .storage or custom_components",
               all(f'"{d}"' in svc for d in ("www", ".storage", "custom_components")) and "writing=True" in svc)
+
+    # Attachments are the one thing Elmer serves over HTTP. Every view asks
+    # for a signed-in user (a signed link counts), and the files live in a
+    # folder of their own that Home Assistant does not serve to anyone.
+    att_path = os.path.join(PKG, "attachments.py")
+    check("attachments.py is in the package", os.path.exists(att_path))
+    if os.path.exists(att_path):
+        with open(att_path, encoding="utf-8") as fh:
+            att = fh.read()
+        views = re.findall(r"class (\w+)\(HomeAssistantView\):(.*?)(?=\nclass |\ndef |\Z)", att, re.S)
+        check("there are two attachment views", len(views) == 2, str([v[0] for v in views]))
+        check("every attachment view requires a signed-in user",
+              all("requires_auth = True" in body for _, body in views) and "requires_auth = False" not in att)
+        check("the files live in config/elmer/attachments", 'hass.config.path("elmer", "attachments")' in att)
+        code = "\n".join(l for l in att.splitlines() if not l.lstrip().startswith("#"))
+        check("and nowhere near www", '"www"' not in code and "/local/" not in code)
+        check("a file is kept by its bytes, not its name or claimed type", "sniff(bytes(data[:32]))" in att and "content_type" not in code)
+        check("a served file is never sniffed into a page", "nosniff" in att and "sandbox" in att)
+        init_path = os.path.join(PKG, "__init__.py")
+        with open(init_path, encoding="utf-8") as fh:
+            check("setup registers them, and lets go on unload", "entry.async_on_unload(async_setup_attachments(hass, store))" in fh.read())
 
     # The harness prints a version in the panel's About section. If it drifts
     # from the manifest, the preview advertises a version that does not exist.

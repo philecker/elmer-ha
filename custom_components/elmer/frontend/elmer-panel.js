@@ -23,6 +23,7 @@ import {
   animalsView, animalDetail, animalForm, animalsOffSheet, isAnimal, sexOptions, LIVESTOCK,
   LISTS, SPECIES, builtInFor, animalIcon, weightUnitOf, weightField, parseWeight,
   partRow, partOptions, newPartCard, linkRow, pairRow, groupForm, routineActions,
+  attachmentSheet, attachmentPath, ATTACH_MAX,
 } from './views.js';
 
 const TABS = [
@@ -303,6 +304,14 @@ class ElmerPanel extends HTMLElement {
     // otherwise open the iPad's picker; calendar.js says why.
     this._ownCalendar = wantsOwnCalendar();
     this._calendar = null;
+
+    this._signed = {};
+    this._signedUntil = {};
+    this._uploading = {};
+    this._onImageError = (ev) => {
+      const img = ev.target;
+      if (img && img.classList && img.classList.contains('att-img')) img.classList.add('failed');
+    };
   }
 
   /* ---------------------------------------------------------- lifecycle -- */
@@ -352,6 +361,10 @@ class ElmerPanel extends HTMLElement {
     this.toggleAttribute('data-own-calendar', this._ownCalendar);
     root.addEventListener('click', this._onClick);
     root.addEventListener('change', this._onChange);
+    // An image event does not bubble, so a failed thumbnail — a HEIC photo
+    // in a browser that cannot draw one, or a file missing after a restore —
+    // is caught on the way down instead.
+    root.addEventListener('error', this._onImageError, true);
     root.addEventListener('input', this._onInput);
     // Capture, so a press on a date field is seen before the field acts on it.
     root.addEventListener('pointerdown', this._onPress, true);
@@ -579,6 +592,10 @@ class ElmerPanel extends HTMLElement {
       // stored: nothing has been decided until a duration is picked.
       snoozing: this.snoozing || null,
       busy: this.busy,
+      // Signed links for attachment files, by path, and which records have
+      // an upload going. Neither is stored: both are this page's business.
+      signed: this._signed,
+      uploading: this._uploading,
       version: (this._panel && this._panel.config && this._panel.config.version) || '—',
     };
   }
@@ -634,6 +651,7 @@ class ElmerPanel extends HTMLElement {
       + `<div class="main">${body}</div>`;
 
     this._syncOverlays(state);
+    this._fillAttachments();
 
     const next = this.shadowRoot.querySelector('.scroll');
     if (next) next.scrollTop = this._scrollTops[this._scrollKey()] || 0;
@@ -875,6 +893,11 @@ class ElmerPanel extends HTMLElement {
       }
       case 'log':
         return { title: 'History entry', body: logDetail(state, s.id) };
+      case 'attachment': {
+        const rec = this.data.equipment.find((e) => e.id === s.equipmentId);
+        const att = rec && (rec.attachments || []).find((x) => x.id === s.id);
+        return { title: att ? att.name : 'Attachment', body: attachmentSheet(state, s.equipmentId, s.id) };
+      }
       case 'templates':
         return { title: 'Suggested routines', body: this._templateBody(state, s.id) };
       case 'group-form':
@@ -1035,6 +1058,11 @@ class ElmerPanel extends HTMLElement {
     const el = ev.target.closest && ev.target.closest('[data-act]');
     if (!el) return;
     const act = el.dataset.act;
+
+    if (act === 'upload-attachment') {
+      this._uploadAttachments(el);
+      return;
+    }
 
     if (act === 'set-animals') {
       if (el.value === '1') {
@@ -1209,6 +1237,25 @@ class ElmerPanel extends HTMLElement {
         return;
       case 'log':
         this._openSheet({ kind: 'log', id });
+        return;
+      case 'open-attachment':
+        this._openSheet({ kind: 'attachment', id, equipmentId: el.dataset.record });
+        return;
+      case 'open-attachment-file':
+        this._openAttachmentFile(el.dataset.record, id);
+        return;
+      case 'save-attachment':
+        this._renameAttachment(el.dataset.record, id);
+        return;
+      case 'delete-attachment':
+        // Two presses, the second on a button that now says what it will do.
+        // There is no undo for a file, so the confirmation is the safeguard.
+        if (el.dataset.armed !== '1') {
+          el.dataset.armed = '1';
+          el.lastChild.textContent = 'Delete for good?';
+          return;
+        }
+        this._deleteAttachment(el.dataset.record, id);
         return;
       case 'add-equipment':
         this._openSheet({ kind: 'equipment-form' });
@@ -2073,6 +2120,120 @@ class ElmerPanel extends HTMLElement {
     if (!err) return fallback;
     if (err.code === 'not_loaded') return 'Elmer is not set up in Home Assistant.';
     return err.message || fallback;
+  }
+
+  /* ------------------------------------------------------- attachments -- */
+
+  /**
+   * Put a signed link on every attachment image that has none yet. The files
+   * need a signed-in user, which an <img> cannot be, so Home Assistant signs
+   * each path for an hour; the link is kept for most of that and reused, so
+   * scrolling a page back and forth does not ask again.
+   */
+  async _fillAttachments() {
+    const imgs = [...this.shadowRoot.querySelectorAll('img[data-att]:not([src])')];
+    if (!imgs.length || !this._hass) return;
+    const paths = [...new Set(imgs.map((i) => i.dataset.att))];
+    await Promise.all(paths.map((path) => this._signedPath(path).catch(() => null)));
+    for (const img of this.shadowRoot.querySelectorAll('img[data-att]:not([src])')) {
+      const url = this._signed[img.dataset.att];
+      if (url) img.src = url;
+    }
+  }
+
+  async _signedPath(path) {
+    const now = Date.now();
+    if (this._signed[path] && (this._signedUntil[path] || 0) > now) return this._signed[path];
+    const res = await this._hass.connection.sendMessagePromise({ type: 'auth/sign_path', path, expires: 3600 });
+    this._signed[path] = res.path;
+    this._signedUntil[path] = now + 50 * 60 * 1000;
+    return res.path;
+  }
+
+  async _openAttachmentFile(recordId, attId) {
+    // Opened before the link is known, so a phone's pop-up blocker sees the
+    // tap that asked for it; the address follows a moment later.
+    // ("noopener" would make window.open hand back nothing to point at, so
+    // the opener is cut off by hand instead.)
+    const win = window.open('', '_blank');
+    if (win) {
+      try { win.opener = null; } catch { /* some browsers will not allow it */ }
+    }
+    try {
+      const url = new URL(await this._signedPath(attachmentPath(recordId, attId)), window.location.href).href;
+      if (win) win.location.href = url;
+      else window.location.assign(url);
+    } catch (err) {
+      if (win) win.close();
+      this._flash(`Could not open it: ${(err && err.message) || err}`, 'error');
+    }
+  }
+
+  /** A name nobody chose, the kind a camera gives, is left for Elmer to fill. */
+  _attachmentName(file) {
+    const base = String(file.name || '').replace(/\.[A-Za-z0-9]{1,5}$/, '').trim();
+    return /^(image|img[_ -]?\d*|photo|pxl[_ ].*|dsc[_ ]?\d+|\d+|scan)$/i.test(base) ? '' : base;
+  }
+
+  async _uploadAttachments(input) {
+    const recordId = input.dataset.record;
+    const files = [...(input.files || [])];
+    input.value = '';
+    if (!files.length || !recordId) return;
+    this._uploading[recordId] = true;
+    this._render();
+    let added = 0;
+    try {
+      for (const file of files) {
+        if (file.size > ATTACH_MAX) {
+          this._flash(`${file.name} is over 20 MB, so it was not added.`, 'error');
+          continue;
+        }
+        const form = new FormData();
+        form.append('record', recordId);
+        form.append('name', this._attachmentName(file));
+        form.append('file', file, file.name);
+        const res = await this._hass.fetchWithAuth('/api/elmer/attachments', { method: 'POST', body: form });
+        if (!res.ok) {
+          let message = `Could not add ${file.name}.`;
+          try { message = (await res.json()).message || message; } catch { /* not JSON */ }
+          this._flash(message, 'error');
+          continue;
+        }
+        added += 1;
+      }
+    } catch (err) {
+      this._flash(`Could not add it: ${(err && err.message) || err}`, 'error');
+    } finally {
+      delete this._uploading[recordId];
+      this._render();
+    }
+    if (added) this._flash(added === 1 ? 'Added. Tap it to give it a name.' : `Added ${added}.`);
+  }
+
+  async _renameAttachment(recordId, attId) {
+    const rec = this.data.equipment.find((e) => e.id === recordId);
+    const box = this.shadowRoot.querySelector('.sheet input[name="attName"]');
+    if (!rec || !box) return;
+    const name = box.value.split(/\s+/).join(' ').trim().slice(0, 120);
+    if (!name) {
+      box.focus();
+      return this._flash('Give it a name.', 'error');
+    }
+    const attachments = (rec.attachments || []).map((a) => (a.id === attId ? { ...a, name } : a));
+    await this._apply([{ kind: 'equipment.put', payload: { id: recordId, attachments } }]);
+    this._closeSheet();
+  }
+
+  async _deleteAttachment(recordId, attId) {
+    const rec = this.data.equipment.find((e) => e.id === recordId);
+    if (!rec) return;
+    // The record lets go of it here; the server clears the file away once
+    // nothing points at it.
+    const attachments = (rec.attachments || []).filter((a) => a.id !== attId);
+    await this._apply([{ kind: 'equipment.put', payload: { id: recordId, attachments } }]);
+    this._closeSheet();
+    this._flash('Deleted.');
   }
 
   _flash(text, tone = null, undoId = null) {

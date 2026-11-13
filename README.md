@@ -119,6 +119,28 @@ follows Home Assistant's unit system until you choose. Each weight keeps the
 unit it was typed in, so switching converts every animal rather than
 relabelling it.
 
+**Attachments.** The manual, the receipt, a photo of the rating plate, the
+rabies certificate: every piece of equipment and every animal has an
+**Attachments** section at the bottom of its page. Press **Add** to pick photos
+or PDFs — several at once, or straight from the camera on a phone — up to
+20 MB each and 50 on one record. Each one is a small tile — a photo or
+document icon with its format (JPG, PNG, PDF…) and its name — so a page with
+a dozen of them stays short, and nothing is downloaded until you open one.
+Tapping a tile opens a sheet with the photo itself, where you can rename it,
+open it full size, or delete it; a PDF downloads. A file keeps its own name unless it is one a camera made up
+(`IMG_4821.jpg`), in which case it is just "Photo" until you name it.
+
+Elmer keeps JPEG, PNG, WebP and HEIC photos and PDFs, and checks the file
+itself rather than its name, so nothing else gets in by being renamed. HEIC is
+what an iPhone takes; it is kept as it is, and shows in the sheet in Safari,
+but browsers that cannot draw it show a photo icon there instead — Open
+downloads it to view.
+
+<p>
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/attachments.png" alt="Attachments on a piece of equipment: an icon tile for each photo and PDF, and an Add tile" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/attachment.png" alt="A photo of a rating plate, opened to rename, open or delete" width="250">
+</p>
+
 Their routines are ordinary Elmer routines: heartworm every month, the farrier
 every seven weeks, the coop every month — on the same list, with the same
 overdue badge, sensors and history as the furnace filter. Deleting an animal
@@ -296,6 +318,18 @@ nor into `.storage` or `custom_components`.
 
 Every route produces the same JSON, so a copy taken one way imports the other.
 
+**Attachments** live beside it, in `elmer/attachments` in your config folder —
+also in your Home Assistant backups. They are served only to someone signed
+in to Home Assistant: the panel asks Home Assistant to sign each link, and the
+signature runs out after an hour, so a link copied out of the panel stops
+working. Nothing goes in `www`. The JSON export lists each attachment but does
+not carry the file, so importing it into a different Home Assistant brings the
+names across with a placeholder where the photo was; restore a Home Assistant
+backup to bring the files too. Files nothing refers to any more — deleted, or
+replaced by an import — are cleared from the folder on their own. Only ones
+Elmer has seen in use, though: if it ever starts without its data, it leaves
+the files where they are, and importing an export puts them back.
+
 ---
 
 ## Automations
@@ -388,8 +422,9 @@ with no extra configuration, and nothing new is exposed to your network.
 - **No notifications of its own.** Home Assistant does that better; the sensors
   are there for it.
 - **Everyone in the house edits the same data.** Anyone who can open the panel
-  can tick routines off and add, change or delete equipment, animals and
-  supplies — Home Assistant has no finer permissions for a custom panel.
+  can tick routines off, add, change or delete equipment, animals and
+  supplies, and add or delete attachments — Home Assistant has no finer
+  permissions for a custom panel.
   Importing, and the import and export actions, are for admins only, since
   they replace everything or write files on the server.
 - **The icon needs 2026.3, and the store listing may not show it at all.**

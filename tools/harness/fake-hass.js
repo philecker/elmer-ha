@@ -221,7 +221,12 @@ const SEED = {
       notes: 'Furnace filter is behind the lower panel. The condensate line runs to the floor drain.',
       icon: 'furnace',
       parts: [{ label: 'Filter, online', url: 'example.com/parts/af-2025' },
-        { label: 'Manual', url: 'example.com/manuals/hx-400' }] },
+        { label: 'Manual', url: 'example.com/manuals/hx-400' }],
+      attachments: [
+        { id: 'a0a0a0a0a0a0a0a0a0a1', name: 'Rating Plate', type: 'image/png', size: 2_412_544, addedAt: Date.parse('2024-10-02T15:00:00Z') },
+        { id: 'a0a0a0a0a0a0a0a0a0a2', name: 'Installation Manual', type: 'application/pdf', size: 4_718_592, addedAt: Date.parse('2024-10-02T15:01:00Z') },
+        { id: 'a0a0a0a0a0a0a0a0a0a3', name: 'Install Receipt', type: 'image/png', size: 1_310_720, addedAt: Date.parse('2024-10-02T15:02:00Z') },
+      ] },
     { id: 'eq2', name: 'Kitchen Refrigerator', location: 'Kitchen', category: 'appliance',
       brand: 'LG', model: 'RF-900X', partNumber: 'WF-100', icon: 'refrigerator',
       purchasedOn: '2022-05-14', installedOn: '2022-05-16', parts: [] },
@@ -338,6 +343,10 @@ const ANIMALS = {
       vet: 'Elm Street Animal Clinic', phone: '(555) 010-2030', email: 'front@elmstreetvet.example',
       insurer: 'Hearthside Pet Insurance', policy: 'POL-000000',
       diet: 'Two cups of kibble, morning and evening. No chicken — it makes him itch.',
+      attachments: [
+        { id: 'b0b0b0b0b0b0b0b0b0b1', name: 'Rabies Certificate', type: 'application/pdf', size: 262_144, addedAt: Date.parse('2025-06-10T15:00:00Z') },
+        { id: 'b0b0b0b0b0b0b0b0b0b2', name: 'Biscuit', type: 'image/png', size: 3_145_728, addedAt: Date.parse('2025-06-10T15:01:00Z') },
+      ],
       medications: [{ name: 'Heartworm Chew', dosage: '1 chew, on the 1st' }, { name: 'Flea And Tick Tablet', dosage: '1 tablet every 3 months' }],
       vaccinations: [{ name: 'Rabies', date: ago(210) }, { name: 'DHPP', date: ago(210) }, { name: 'Bordetella', date: ago(45) }],
       parts: [] },
@@ -480,9 +489,103 @@ function notify() {
 // Visible to the test so it can assert on what the panel actually sent.
 window.__sent = [];
 
+/* Attachment files. The real server keeps them on disk behind a signed-in
+   view; here they are blobs, and a signed path is a blob: URL. The sample
+   files are drawn on a canvas — every number on them invented — and a PDF
+   is a few honest bytes of one. */
+window.__files = new Map();
+function drawSample(kind) {
+  const c = document.createElement('canvas');
+  c.width = 480; c.height = 480;
+  const g = c.getContext('2d');
+  if (kind === 'plate') {
+    g.fillStyle = '#9aa3a8'; g.fillRect(0, 0, 480, 480);
+    g.fillStyle = '#e9ecee'; g.fillRect(40, 70, 400, 340);
+    g.strokeStyle = '#4d565b'; g.lineWidth = 4; g.strokeRect(40, 70, 400, 340);
+    g.fillStyle = '#20282c'; g.font = 'bold 30px sans-serif'; g.fillText('TRANE', 70, 120);
+    g.font = '19px monospace';
+    ['MODEL  HX-400', 'SERIAL SN-0000-A', 'VOLTS  115  60HZ', 'INPUT  60,000 BTU', 'MFD    2019-02'].forEach((t, i) => g.fillText(t, 70, 170 + i * 42));
+  } else if (kind === 'receipt') {
+    g.fillStyle = '#d8d2c4'; g.fillRect(0, 0, 480, 480);
+    g.fillStyle = '#fbfaf6'; g.save(); g.translate(240, 240); g.rotate(-0.06); g.fillRect(-140, -210, 280, 420);
+    g.fillStyle = '#333'; g.font = 'bold 18px sans-serif'; g.fillText('MIDWEST HEATING', -110, -165);
+    g.font = '15px monospace';
+    ['ORDER MHA-00000', 'Furnace install', 'AC install', '', 'TOTAL   $0,000.00'].forEach((t, i) => g.fillText(t, -110, -120 + i * 30));
+    g.restore();
+  } else {
+    const grad = g.createLinearGradient(0, 0, 480, 480);
+    grad.addColorStop(0, '#f4c27a'); grad.addColorStop(1, '#c9853a');
+    g.fillStyle = grad; g.fillRect(0, 0, 480, 480);
+    g.fillStyle = 'rgba(255,255,255,.85)';
+    for (const [x, y, r] of [[240, 300, 70], [160, 200, 34], [215, 160, 34], [265, 160, 34], [320, 200, 34]]) { g.beginPath(); g.arc(x, y, r, 0, 7); g.fill(); }
+  }
+  return new Promise((resolve) => c.toBlob(resolve, 'image/png'));
+}
+const PDF_BYTES = '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[]/Count 0>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n';
+const filesReady = Promise.all([
+  drawSample('plate').then((b) => window.__files.set('a0a0a0a0a0a0a0a0a0a1', b)),
+  drawSample('receipt').then((b) => window.__files.set('a0a0a0a0a0a0a0a0a0a3', b)),
+  drawSample('dog').then((b) => window.__files.set('b0b0b0b0b0b0b0b0b0b2', b)),
+]).then(() => {
+  window.__files.set('a0a0a0a0a0a0a0a0a0a2', new Blob([PDF_BYTES], { type: 'application/pdf' }));
+  window.__files.set('b0b0b0b0b0b0b0b0b0b1', new Blob([PDF_BYTES], { type: 'application/pdf' }));
+});
+const blobUrls = new Map();
+
+// The server's rules, mirrored: attachments.py and store.clean_attachments.
+const ATTACH_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/heic': 'heic', 'application/pdf': 'pdf' };
+function sniffBytes(b) {
+  const at = (i, ...xs) => xs.every((x, k) => b[i + k] === x);
+  const ascii = (i, n) => String.fromCharCode(...b.slice(i, i + n));
+  if (at(0, 0xff, 0xd8, 0xff)) return 'image/jpeg';
+  if (at(0, 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)) return 'image/png';
+  if (ascii(0, 4) === 'RIFF' && ascii(8, 4) === 'WEBP') return 'image/webp';
+  if (ascii(4, 4) === 'ftyp' && ['heic', 'heix', 'heim', 'heis', 'mif1', 'msf1', 'hevc'].includes(ascii(8, 4))) return 'image/heic';
+  if (ascii(0, 5) === '%PDF-') return 'application/pdf';
+  return null;
+}
+window.__uploads = [];
+async function fetchWithAuth(path, init = {}) {
+  const reply = (status, body) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+  if (path !== '/api/elmer/attachments' || (init.method || 'GET') !== 'POST') return reply(404, { message: 'Not found.' });
+  await new Promise((r) => setTimeout(r, 30));
+  const form = init.body;
+  const recordId = String(form.get('record') || '');
+  const file = form.get('file');
+  window.__uploads.push({ recordId, name: form.get('name'), size: file && file.size });
+  if (!file || !file.size) return reply(400, { message: 'There was no file in the upload.' });
+  if (file.size > 20 * 1024 * 1024) return reply(413, { message: 'That file is over 20 MB.' });
+  const kind = sniffBytes(new Uint8Array(await file.slice(0, 32).arrayBuffer()));
+  if (!kind) return reply(415, { message: 'Elmer keeps photos (JPEG, PNG, WebP, HEIC) and PDFs.' });
+  const rec = data.equipment.find((e) => e.id === recordId);
+  if (!rec) return reply(404, { message: 'That equipment or animal no longer exists.' });
+  const list = rec.attachments || [];
+  if (list.length >= 50) return reply(409, { message: 'There are already 50 attachments here.' });
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(10)), (x) => x.toString(16).padStart(2, '0')).join('');
+  window.__files.set(id, file);
+  const name = String(form.get('name') || '').split(/\s+/).join(' ').trim().slice(0, 120) || (kind === 'application/pdf' ? 'Document' : 'Photo');
+  const meta = { id, name, type: kind, size: file.size, addedAt: Date.now() };
+  applyOp('equipment.put', { id: recordId, attachments: [...list, meta] });
+  notify();
+  return reply(200, meta);
+}
+
 const connection = {
   async sendMessagePromise(msg) {
     window.__sent.push(msg);
+    if (msg.type === 'auth/sign_path') {
+      const m = /^\/api\/elmer\/attachments\/([^/]+)\/([^/]+)$/.exec(msg.path || '');
+      if (!m) return { path: msg.path };
+      await filesReady;
+      const id = decodeURIComponent(m[2]);
+      const blob = window.__files.get(id);
+      // A file the record names but the folder does not have — restored from a
+      // backup made elsewhere. An image that will not decode stands in for
+      // Home Assistant's 404 without a network error in the console.
+      if (!blob) return { path: 'data:image/png;base64,AAAA' };
+      if (!blobUrls.has(id)) blobUrls.set(id, URL.createObjectURL(blob));
+      return { path: blobUrls.get(id) };
+    }
     // A real connection is never instant; a tick here is what surfaces a
     // double-tap or a missing busy guard.
     await new Promise((r) => setTimeout(r, 12));
@@ -614,12 +717,13 @@ window.__setHaTheme(params.get('dark') === '1' ? 'dark' : 'light');
 const panel = document.createElement('elmer-panel');
 panel.hass = {
   connection,
+  fetchWithAuth,
   themes: { darkMode: params.get('dark') === '1' },
   language: 'en',
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.11.0' } };
+panel.panel = { config: { version: '1.12.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

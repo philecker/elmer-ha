@@ -529,11 +529,98 @@ export function equipmentDetail(state, id) {
 
     ${raw(linkRows.length ? `<div class="label">Links</div><div class="card">${linkRows.join('')}</div>` : '')}
 
+    ${raw(attachmentsSection(state, eq))}
+
     <div class="btnrow">
       <button class="btn" data-act="edit-equipment" data-id="${eq.id}">${raw(icon('edit', 16))}Edit</button>
       <button class="btn" data-variant="danger" data-act="delete-equipment" data-id="${eq.id}">${raw(icon('trash', 16))}Delete</button>
     </div>
   </div></div>`;
+}
+
+/* ------------------------------------------------------------ attachments -- */
+
+/* Photos and PDFs on a piece of equipment or an animal. The files are served
+   by Home Assistant only to someone signed in, so an <img> cannot point at
+   one directly: each tile carries the path in data-att, and the panel swaps
+   in a link Home Assistant has signed (see _fillAttachments). */
+export const ATTACH_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif,application/pdf';
+export const ATTACH_MAX = 20 * 1024 * 1024;
+const ATTACH_IMAGES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
+
+export function attachmentPath(recordId, attId) {
+  return `/api/elmer/attachments/${encodeURIComponent(recordId)}/${encodeURIComponent(attId)}`;
+}
+
+export function sizeText(bytes) {
+  const n = Number(bytes) || 0;
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(n >= 10 * 1024 * 1024 ? 0 : 1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} bytes`;
+}
+
+const ATTACH_LABEL = {
+  'image/jpeg': 'JPG', 'image/png': 'PNG', 'image/webp': 'WEBP', 'image/heic': 'HEIC', 'application/pdf': 'PDF',
+};
+
+/** One attachment in the section: an icon for its kind, the format, its name.
+    The file itself only loads once it is opened. */
+function attachmentTile(rec, a) {
+  const isImage = ATTACH_IMAGES.has(a.type);
+  return `<button class="att ${isImage ? 'att-photo' : 'att-pdf'}" data-act="open-attachment" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" type="button" aria-label="${esc(a.name)}">
+    <span class="att-face">${icon(isImage ? 'image' : 'document', 22)}<b>${ATTACH_LABEL[a.type] || ''}</b></span>
+    <span class="att-name">${esc(a.name)}</span>
+  </button>`;
+}
+
+/** The section on an equipment or animal page: tiles, then a tile to add one. */
+export function attachmentsSection(state, rec) {
+  const list = Array.isArray(rec.attachments) ? rec.attachments : [];
+  const busy = state.uploading && state.uploading[rec.id];
+  return `<div class="label">Attachments</div>
+    <div class="card attcard">
+      <div class="attgrid">
+        ${list.map((a) => attachmentTile(rec, a)).join('')}
+        <label class="att att-add${busy ? ' busy' : ''}">
+          <input type="file" accept="${ATTACH_ACCEPT}" multiple data-act="upload-attachment" data-record="${esc(rec.id)}" aria-label="Add a photo or PDF"${busy ? ' disabled' : ''}>
+          <span class="att-face">${icon(busy ? 'upload' : 'plus', 22)}</span>
+          <span class="att-name">${busy ? 'Adding…' : 'Add'}</span>
+        </label>
+      </div>
+      ${list.length ? '' : `<div class="hint att-hint">${isAnimal(rec)
+    ? 'A vaccination record, adoption papers, a photo'
+    : 'The manual, a receipt, a photo of the rating plate'} — photos and PDFs up to 20 MB.</div>`}
+    </div>`;
+}
+
+/** One attachment, opened: a bigger look, its name to change, and the way out. */
+export function attachmentSheet(state, recordId, attId) {
+  const rec = state.equipment.concat(state.animals || []).find((e) => e.id === recordId);
+  const a = rec && (rec.attachments || []).find((x) => x.id === attId);
+  if (!a) return '<div class="note">That attachment is gone.</div>';
+  const path = attachmentPath(rec.id, a.id);
+  const isImage = ATTACH_IMAGES.has(a.type);
+  const src = (state.signed || {})[path] || '';
+  const added = a.addedAt ? formatDay(new Date(a.addedAt).toISOString().slice(0, 10), state.computed.today) : '';
+  return `<div class="attview">
+      ${isImage
+    ? `<img class="att-img att-big" data-att="${esc(path)}"${src ? ` src="${esc(src)}"` : ''} alt="${esc(a.name)}">
+           <span class="att-fallback big">${icon('image', 40)}<span>This photo can't be shown here. Open it to view it.</span></span>`
+    : `<span class="att-doc big">${icon('document', 48)}<b>PDF</b></span>`}
+    </div>
+    <div class="hint">${esc([isImage ? 'Photo' : 'PDF', sizeText(a.size), added && `added ${added}`].filter(Boolean).join(' · '))}</div>
+    <div class="field">
+      <label for="f-attname">Name</label>
+      <input id="f-attname" name="attName" value="${esc(a.name)}" maxlength="120" autocomplete="off">
+    </div>
+    <div class="btnrow">
+      <button class="btn" data-act="open-attachment-file" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" type="button">${icon(isImage ? 'link' : 'download', 16)}${isImage ? 'Open' : 'Download'}</button>
+      <button class="btn" data-act="delete-attachment" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" data-variant="danger" type="button">${icon('trash', 16)}Delete</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn" data-act="close" type="button">Close</button>
+      <button class="btn" data-variant="primary" data-act="save-attachment" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" type="button">Save</button>
+    </div>`;
 }
 
 /* ------------------------------------------------------------------ parts -- */
@@ -2192,6 +2279,8 @@ export function animalDetail(state, id) {
     <div class="btnrow">
       <button class="btn" data-act="add-routine" data-id="${a.id}">${raw(icon('plus', 16))}Add routine</button>
     </div>
+
+    ${raw(attachmentsSection(state, a))}
 
     <div class="btnrow">
       <button class="btn" data-act="edit-animal" data-id="${a.id}">${raw(icon('edit', 16))}Edit</button>

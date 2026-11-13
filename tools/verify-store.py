@@ -1158,6 +1158,127 @@ async def main() -> int:
     check("nor a bare web address, which Home Assistant would make a link",
           ["https://" in body, "www." in body, "example\\.invalid" in body], [False, False, True])
 
+    # --- attachments: what a record may say about its files ------------------
+    # The file view builds a path from these, so only an id Elmer made and a
+    # type it serves may ever be kept, whoever wrote the record.
+    good = {"id": "a" * 20, "name": "  Rating   plate ", "type": "image/png", "size": "2048", "addedAt": 5}
+    cleaned = store_mod.clean_attachments([
+        good,
+        dict(good),                                                   # the same one twice
+        {"id": "../../secrets", "name": "x", "type": "image/png"},    # a path
+        {"id": "A" * 20, "name": "x", "type": "image/png"},           # not Elmer's alphabet
+        {"id": "b" * 20 + "\n", "name": "x", "type": "image/png"},   # a newline on the end
+        {"id": "c" * 20, "name": "x", "type": "text/html"},           # a type Elmer would not serve
+        {"id": "d" * 20, "name": "x", "type": "image/svg+xml"},
+        "e" * 20, None, 7,                                            # not an entry at all
+        {"id": "f" * 20, "name": "", "type": "application/pdf", "size": "lots", "addedAt": None},
+        {"id": "9" * 20, "name": "<b>x</b>" * 40, "type": "image/heic", "size": -5, "addedAt": 1, "url": "https://example.invalid", "path": "/etc/passwd"},
+    ])
+    check("only entries Elmer could have written are kept, once each", [a["id"] for a in cleaned], ["a" * 20, "f" * 20, "9" * 20])
+    check("each is held to the five fields, tidied",
+          cleaned[0], {"id": "a" * 20, "name": "Rating plate", "type": "image/png", "size": 2048, "addedAt": 5})
+    check("a blank name is filled in, a bad size is nothing", [cleaned[1]["name"], cleaned[1]["size"], cleaned[1]["addedAt"]], ["Document", 0, 0])
+    check("a long name is cut, and nothing extra rides along",
+          [len(cleaned[2]["name"]), cleaned[2]["size"], sorted(cleaned[2])], [120, 0, ["addedAt", "id", "name", "size", "type"]])
+    check("not a list is nothing", [store_mod.clean_attachments("x"), store_mod.clean_attachments({"id": "a" * 20})], [[], []])
+    many = [{"id": f"{i:020x}", "name": str(i), "type": "image/jpeg"} for i in range(60)]
+    check("no more than fifty on one record", len(store_mod.clean_attachments(many)), 50)
+
+    s = new_store()
+    await s.async_load()
+    await s.async_apply([("equipment.put", {"id": "att1", "name": "Water Heater",
+                                             "attachments": [good, {"id": "../x", "type": "image/png"}]})])
+    rec = s.equipment("att1")
+    check("a save keeps the good entry and drops the bad", [a["id"] for a in rec["attachments"]], ["a" * 20])
+    await s.async_apply([("equipment.put", {"id": "att1", "notes": "Anode rod replaced"})])
+    check("an edit that does not mention them leaves them be", len(s.equipment("att1")["attachments"]), 1)
+    await s.async_apply([("equipment.put", {"id": "att1", "attachments": "not a list"})])
+    check("an attachments value that is not a list empties it rather than breaking it",
+          s.equipment("att1")["attachments"], [])
+    loaded = store_mod.normalize({"equipment": [{"id": "n1", "name": "Old", "attachments": [good, {"id": "zz", "type": "image/png"}]}, {"id": "n2", "name": "None"}]})
+    check("a file loaded or imported is held to the same, and a record without any gets an empty list",
+          [[a["id"] for a in e["attachments"]] for e in loaded["equipment"]], [["a" * 20], []])
+
+    # The module that serves them, with the bits of Home Assistant it needs
+    # stood in for.
+    for name in ("aiohttp", "homeassistant.components", "homeassistant.components.http", "homeassistant.helpers.event"):
+        sys.modules.setdefault(name, types.ModuleType(name))
+    web = types.ModuleType("aiohttp.web")
+    web.Request = web.Response = web.StreamResponse = object
+    sys.modules["aiohttp"].web = web
+    sys.modules["aiohttp.web"] = web
+    sys.modules["homeassistant.components.http"].KEY_HASS = "hass"
+    sys.modules["homeassistant.components.http"].HomeAssistantView = object
+    sys.modules["homeassistant.helpers.event"].async_call_later = lambda *a, **k: None
+    import importlib
+    att = importlib.import_module("elmer.attachments")
+
+    check("a file is known by its first bytes", [
+        att.sniff(b"\xff\xd8\xff\xe0" + b"\0" * 28),
+        att.sniff(b"\x89PNG\r\n\x1a\n" + b"\0" * 24),
+        att.sniff(b"RIFF\0\0\0\0WEBPVP8 "),
+        att.sniff(b"\0\0\0\x18ftypheic\0\0\0\0"),
+        att.sniff(b"\0\0\0\x18ftypmif1\0\0\0\0"),
+        att.sniff(b"%PDF-1.7\n"),
+    ], ["image/jpeg", "image/png", "image/webp", "image/heic", "image/heic", "application/pdf"])
+    check("and nothing else gets in, whatever it is called", [
+        att.sniff(b"<html><script>alert(1)</script>"),
+        att.sniff(b"<svg xmlns='http://www.w3.org/2000/svg' onload='x'>"),
+        att.sniff(b"  %PDF-1.4"),
+        att.sniff(b"\0\0\0\x18ftypisom\0\0\0\0"),          # an MP4
+        att.sniff(b"GIF89a"),
+        att.sniff(b""),
+    ], [None] * 6)
+    check("a download name is plain, whatever the attachment is called", [
+        att._filename('Rating "plate"\r\nSet-Cookie: x', "png"),
+        att._filename("../../.storage/auth", "pdf"),
+        att._filename("Café ☕", "jpg"),
+        att._filename("...", "pdf"),
+    ], ["Rating plateSet-Cookie x.png", "storageauth.pdf", "Caf.jpg", "attachment.pdf"])
+    check("ids are Elmer's own shape and nothing else", [
+        bool(att.RECORD_ID.fullmatch("eq1")), bool(att.RECORD_ID.fullmatch("../eq1")), bool(att.RECORD_ID.fullmatch("eq1\n")),
+        bool(att.ATTACHMENT_ID.fullmatch("a" * 20)), bool(att.ATTACHMENT_ID.fullmatch("a" * 19 + "/")),
+    ], [True, False, False, True, False])
+    check("the records say which files to keep",
+          sorted(att.referenced({"equipment": [{"attachments": [good, {"id": "f" * 20, "type": "application/pdf"}, {"id": "../x", "type": "image/png"}]}, {}]})),
+          ["a" * 20 + ".png", "f" * 20 + ".pdf"])
+
+    import tempfile
+    import time as _time
+    with tempfile.TemporaryDirectory() as tmp:
+        names = {
+            "kept": "a" * 20 + ".png",
+            "orphan": "b" * 20 + ".jpg",
+            "fresh": "c" * 20 + ".pdf",
+            "stale_part": "d" * 20 + ".heic.part",
+            "by_hand": "notes.txt",
+            "lookalike": "e" * 20 + ".png.bak",
+            "unaccounted": "f" * 20 + ".png",
+        }
+        old = _time.time() - 3600
+        for key, name in names.items():
+            path = os.path.join(tmp, name)
+            with open(path, "wb") as fh:
+                fh.write(b"x")
+            if key != "fresh":
+                os.utime(path, (old, old))
+        # Elmer has seen records point at these three; the rest it has not.
+        known = {names["kept"], names["orphan"], names["fresh"]}
+        removed = att.sweep(tmp, {names["kept"]}, known)
+        check("the sweep clears files a record pointed at and no longer does, and half-written ones",
+              sorted(removed), sorted([names["orphan"], names["stale_part"]]))
+        check("but not one an upload wrote moments ago, nor anything Elmer did not write",
+              sorted(os.listdir(tmp)), sorted([names["kept"], names["fresh"], names["by_hand"], names["lookalike"], names["unaccounted"]]))
+        check("and never a file Elmer cannot account for — its data lost, say — however old",
+              att.sweep(tmp, set(), set(), now=_time.time() + 86400 * 365), [])
+        check("a fresh one goes once it is old enough", att.sweep(tmp, {names["kept"]}, known, now=_time.time() + 3600), [names["fresh"]])
+        check("with no records left, the files they pointed at go too",
+              sorted(att.sweep(tmp, set(), known)), [names["kept"]])
+    check("a folder that is not there yet is nothing to sweep", att.sweep(os.path.join(HERE, "no-such-folder"), set(), set()), [])
+    check("files are kept in the config folder, never www",
+          att.folder(types.SimpleNamespace(config=types.SimpleNamespace(path=lambda *p: "/config/" + "/".join(p)))),
+          "/config/elmer/attachments")
+
     # --- everything we store survives JSON --------------------------------
     check("every save round-tripped through JSON", len(saved) > 0, True)
 

@@ -31,6 +31,10 @@ const P = {
   chevron: '<path d="m9 6 6 6-6 6"/>',
   back: '<path d="M15 5l-7 7 7 7"/>',
   link: '<path d="M15 3h6v6M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h6"/>',
+  // A photo, for an attachment that cannot be shown; and a page with its
+  // corner turned, for a PDF.
+  image: '<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><circle cx="9" cy="9.5" r="1.6"/><path d="m4 17 5-5 4 4 2.5-2.5L20 17"/>',
+  document: '<path d="M14 3.5H7.5a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2V8L14 3.5z"/><path d="M14 3.5V8h4.5"/><path d="M8.8 12.5h6.4M8.8 15.8h4.4"/>',
   download: '<path d="M12 3v12M7 11l5 5 5-5M4 20h16"/>',
   upload: '<path d="M12 20V8M7 12l5-5 5 5M4 20h16"/>',
   undo: '<path d="M3 12a9 9 0 1 1 3 6.7"/><path d="M3 6v6h6"/>',

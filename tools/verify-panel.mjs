@@ -5126,6 +5126,196 @@ async function main() {
     await x.ctx.close();
   }
 
+  // --- attachments ----------------------------------------------------------
+  // Photos and PDFs on equipment and animals. Home Assistant serves them only
+  // to someone signed in, so every image goes through a link it has signed;
+  // the harness's server keeps the same rules the real one does about what
+  // it will take, so a refusal here is the panel showing the server's reason.
+  {
+    const PNG = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944415478da63f8ffff3f0005fe02fea7d6a4a80000000049454e44ae426082', 'hex');
+    const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 1)]);
+    const PDF = Buffer.from('%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n');
+    const HTML = Buffer.from('<html><script>window.__pwned=["upload"]</script></html>');
+    const a = await open({ viewport: DESKTOP, animals: true });
+    const ap = a.page;
+    const go = (tab, detail) => ap.evaluate(([t, d]) => {
+      const panel = document.querySelector('elmer-panel');
+      panel.tab = t; panel.detail = d; panel.sheet = null; panel._render();
+    }, [tab, detail]);
+    const atts = (id) => ap.evaluate((rid) => (window.__panel.data.equipment.find((e) => e.id === rid) || {}).attachments || [], id);
+    const tiles = () => ap.$$eval('.attgrid .att:not(.att-add)', (ns) => ns.map((n) => n.querySelector('.att-name').textContent.trim()));
+    const toastText = async () => { await ap.waitForSelector('.toast'); return (await ap.textContent('.toast span')).trim(); };
+    const clearToast = () => ap.evaluate(() => { const pnl = window.__panel; pnl.toast = null; pnl._render(); });
+    const addFiles = async (rid, files) => {
+      await ap.setInputFiles(`input[data-act="upload-attachment"][data-record="${rid}"]`, files);
+      await ap.waitForFunction((r) => !window.__panel._uploading[r], rid);
+      await ap.waitForTimeout(80);
+    };
+
+    await go('equipment', { kind: 'equipment', id: 'eq1' });
+    await ap.waitForSelector('.attgrid');
+    check('a piece of equipment lists its attachments, in the order they were added', await tiles(),
+      ['Rating Plate', 'Installation Manual', 'Install Receipt']);
+    ok('and ends with a tile to add one', await ap.$('.attgrid label.att-add input[type="file"][multiple]') !== null);
+    check('the file box asks only for what the server will keep',
+      await ap.$eval('input[data-act="upload-attachment"]', (n) => n.accept),
+      'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif,application/pdf');
+    ok('the add tile has a name a screen reader can say',
+      (await ap.$eval('input[data-act="upload-attachment"]', (n) => n.getAttribute('aria-label'))) === 'Add a photo or PDF');
+    check('each attachment is an icon for its kind with its format, not a thumbnail',
+      await ap.$$eval('.attgrid .att:not(.att-add)', (ns) => ns.map((n) => [n.classList.contains('att-photo') ? 'photo' : 'pdf', n.querySelector('.att-face b').textContent, !!n.querySelector('svg'), !!n.querySelector('img')])),
+      [['photo', 'PNG', true, false], ['pdf', 'PDF', true, false], ['photo', 'PNG', true, false]]);
+    check('so nothing is fetched, or signed, until one is opened',
+      await ap.evaluate(() => window.__sent.filter((m) => m.type === 'auth/sign_path').length), 0);
+    const face = await ap.$eval('.attgrid .att:not(.att-add) .att-face', (n) => { const r = n.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)]; });
+    ok('the tiles are small', face[0] <= 60 && face[0] === face[1], face.join('x'));
+    const rows = await ap.$$eval('.attgrid > *', (ns) => new Set(ns.map((n) => Math.round(n.getBoundingClientRect().top))).size);
+    check('three and the add tile sit on one row on a desktop', rows, 1);
+    await shot(ap, 'attachments-desktop.png');
+
+    // Adding: the file's own name, unless it is a camera's.
+    await addFiles('eq1', [{ name: 'Water Heater Label.png', mimeType: 'image/png', buffer: PNG }]);
+    let list = await atts('eq1');
+    check('a photo is added to the record', list.length, 4);
+    check('named after its file', list[3] && [list[3].name, list[3].type, list[3].size], ['Water Heater Label', 'image/png', PNG.length]);
+    check('the page says so', await toastText(), 'Added. Tap it to give it a name.');
+    check('and shows it', (await tiles()).at(-1), 'Water Heater Label');
+    await clearToast();
+    await addFiles('eq1', [{ name: 'IMG_4821.JPG', mimeType: 'image/jpeg', buffer: JPEG }, { name: 'scan.pdf', mimeType: 'application/pdf', buffer: PDF }]);
+    list = await atts('eq1');
+    check('two at once are both added', list.length, 6);
+    check('a name a camera or scanner made up is not kept', list.slice(4).map((x) => [x.name, x.type]),
+      [['Photo', 'image/jpeg'], ['Document', 'application/pdf']]);
+    check('and the page counts them', await toastText(), 'Added 2.');
+    await clearToast();
+
+    // Refusals: the server's reason, and nothing added.
+    await addFiles('eq1', [{ name: 'cute-dog.png', mimeType: 'image/png', buffer: HTML }]);
+    check('a page dressed up as a photo is refused', (await atts('eq1')).length, 6);
+    check('with the reason', await toastText(), 'Elmer keeps photos (JPEG, PNG, WebP, HEIC) and PDFs.');
+    await clearToast();
+    const uploadsBefore = await ap.evaluate(() => window.__uploads.length);
+    await addFiles('eq1', [{ name: 'Big Manual.pdf', mimeType: 'application/pdf', buffer: Buffer.concat([PDF, Buffer.alloc(20 * 1024 * 1024)]) }]);
+    check('a file over 20 MB is turned away before it is sent', await ap.evaluate(() => window.__uploads.length), uploadsBefore);
+    check('and says why', await toastText(), 'Big Manual.pdf is over 20 MB, so it was not added.');
+    await clearToast();
+    check('nothing sent ever ran', await ap.evaluate(() => window.__pwned || []), []);
+
+    // Opening one: a bigger look, the details, a name to change.
+    await ap.click('.attgrid .att[data-id="a0a0a0a0a0a0a0a0a0a1"]');
+    await ap.waitForSelector('.sheet .attview img.att-big');
+    check('a photo opens in a sheet titled with its name', (await ap.textContent('.sheet h2')).trim(), 'Rating Plate');
+    check('with its kind, size and when it was added', (await ap.textContent('.sheet .attview + .hint')).trim(), 'Photo · 2.3 MB · added 2 Oct 2024');
+    await ap.waitForFunction(() => { const i = document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet img.att-big'); return i && i.complete && i.naturalWidth > 0; });
+    ok('the big picture loads', true);
+    const signs = await ap.evaluate(() => window.__sent.filter((m) => m.type === 'auth/sign_path'));
+    check('opening it signs that one file, for an hour', signs.map((m) => [m.path, m.expires]),
+      [['/api/elmer/attachments/eq1/a0a0a0a0a0a0a0a0a0a1', 3600]]);
+    ok('through a signed link, never the bare path', (await ap.$eval('.sheet img.att-big', (n) => n.getAttribute('src'))).startsWith('blob:'));
+    await shot(ap, 'attachment-sheet-desktop.png');
+    // Open asks for a fresh window first, then points it at the signed link.
+    await ap.evaluate(() => {
+      window.__opened = [];
+      window.open = (...args) => { const w = { location: { href: '' }, args, close() {} }; window.__opened.push(w); return w; };
+    });
+    await ap.click('.sheet [data-act="open-attachment-file"]');
+    await ap.waitForFunction(() => window.__opened.length && window.__opened[0].location.href);
+    const opened = await ap.evaluate(() => window.__opened.map((w) => [w.args[1], w.location.href.slice(0, 5), w.opener === null]));
+    check('Open goes to a new tab, at the signed link, cut off from the panel', opened, [['_blank', 'blob:', true]]);
+    await ap.fill('.sheet input[name="attName"]', '  Furnace   rating plate  ');
+    await ap.click('.sheet [data-act="save-attachment"]');
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+    check('a new name is saved, tidied', (await atts('eq1'))[0].name, 'Furnace rating plate');
+    check('and the rest of it is left alone', (await atts('eq1'))[0].size, 2_412_544);
+    await ap.click('.attgrid .att[data-id="a0a0a0a0a0a0a0a0a0a1"]');
+    await ap.waitForSelector('.sheet input[name="attName"]');
+    await ap.fill('.sheet input[name="attName"]', '   ');
+    await ap.click('.sheet [data-act="save-attachment"]');
+    check('a blank name is not saved', (await atts('eq1'))[0].name, 'Furnace rating plate');
+    check('it asks for one', await toastText(), 'Give it a name.');
+    await clearToast();
+    await ap.keyboard.press('Escape');
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+
+    // A PDF: Download, not Open.
+    await ap.click('.attgrid .att[data-id="a0a0a0a0a0a0a0a0a0a2"]');
+    await ap.waitForSelector('.sheet .attview .att-doc');
+    check('a PDF offers to download', (await ap.textContent('.sheet [data-act="open-attachment-file"]')).trim(), 'Download');
+    await ap.keyboard.press('Escape');
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+
+    // Deleting takes two presses.
+    await ap.click('.attgrid .att[data-id="a0a0a0a0a0a0a0a0a0a3"]');
+    await ap.waitForSelector('.sheet [data-act="delete-attachment"]');
+    await ap.click('.sheet [data-act="delete-attachment"]');
+    check('the first press only asks', [(await ap.textContent('.sheet [data-act="delete-attachment"]')).trim(), (await atts('eq1')).length],
+      ['Delete for good?', 6]);
+    await ap.click('.sheet [data-act="delete-attachment"]');
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+    list = await atts('eq1');
+    check('the second takes it off the record', [list.length, list.some((x) => x.id === 'a0a0a0a0a0a0a0a0a0a3')], [5, false]);
+    check('and says so', await toastText(), 'Deleted.');
+    await clearToast();
+
+    // A record that names a file the folder does not have — a backup from
+    // another install — shows a placeholder, not a broken image.
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [
+      { kind: 'equipment.put', payload: { id: 'eq2', attachments: [{ id: 'c0c0c0c0c0c0c0c0c0c1', name: 'From the old house', type: 'image/heic', size: 1000, addedAt: Date.now() }] } },
+    ] }));
+    await go('equipment', { kind: 'equipment', id: 'eq2' });
+    await ap.click('.attgrid .att[data-id="c0c0c0c0c0c0c0c0c0c1"]');
+    await ap.waitForFunction(() => document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet img.att-img.failed'));
+    check('a photo that cannot be shown falls back to an icon when opened',
+      await ap.$eval('.sheet .attview', (n) => [getComputedStyle(n.querySelector('img')).display, getComputedStyle(n.querySelector('.att-fallback')).display !== 'none']),
+      ['none', true]);
+    await ap.keyboard.press('Escape');
+    await ap.waitForFunction(() => !document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet'));
+
+    // The hint, when there is nothing yet, fits what the page is about.
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [
+      { kind: 'equipment.put', payload: { id: 'eq2', attachments: [] } },
+    ] }));
+    await go('equipment', { kind: 'equipment', id: 'eq2' });
+    await ap.waitForSelector('.att-hint');
+    ok('an empty section says what goes in it, for equipment', (await ap.textContent('.att-hint')).includes('The manual, a receipt'));
+    await go('animals', { kind: 'animal', id: 'a2' });
+    await ap.waitForSelector('.attgrid');
+    ok('and for an animal', (await ap.textContent('.att-hint')).includes('A vaccination record'));
+    await go('animals', { kind: 'animal', id: 'a1' });
+    await ap.waitForSelector('.attgrid .att[data-id="b0b0b0b0b0b0b0b0b0b2"]');
+    check('an animal lists its own', await tiles(), ['Rabies Certificate', 'Biscuit']);
+    ok('with no hint once there are some', await ap.$('.att-hint') === null);
+
+    // A name is text, whatever it says.
+    await ap.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [
+      { kind: 'equipment.put', payload: { id: 'a1', attachments: [{ id: 'b0b0b0b0b0b0b0b0b0b1', name: '<img src=x onerror="window.__pwned=[1]">', type: 'application/pdf', size: 9, addedAt: 1 }] } },
+    ] }));
+    await go('animals', { kind: 'animal', id: 'a1' });
+    await ap.click('.attgrid .att[data-id="b0b0b0b0b0b0b0b0b0b1"]');
+    await ap.waitForSelector('.sheet input[name="attName"]');
+    check('an attachment named like markup stays text', [await ap.evaluate(() => window.__pwned || []), (await tiles())[0]],
+      [[], '<img src=x onerror="window.__pwned=[1]">']);
+    await a.ctx.close();
+
+    // On a phone: the tiles wrap, the add tile is a real target, nothing spills.
+    const m = await open({ viewport: PHONE, narrow: true, animals: true });
+    const mp = m.page;
+    await mp.evaluate(() => { const pnl = window.__panel; pnl.tab = 'equipment'; pnl.detail = { kind: 'equipment', id: 'eq1' }; pnl._render(); });
+    await mp.waitForSelector('.attgrid');
+    await mp.$eval('.attgrid', (n) => n.scrollIntoView());
+    const box = await mp.$eval('.attgrid label.att-add', (n) => { const r = n.getBoundingClientRect(); return [r.width, r.height]; });
+    ok('the add tile is a comfortable target on a phone', box[0] >= 44 && box[1] >= 44, box.join('x'));
+    const spill = await mp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const card = root.querySelector('.attcard').getBoundingClientRect();
+      return [...root.querySelectorAll('.attgrid .att')].filter((n) => { const r = n.getBoundingClientRect(); return r.right > card.right + 0.5 || r.left < card.left - 0.5; }).length;
+    });
+    check('no tile spills out of its card on a phone', spill, 0);
+    check('and the page does not scroll sideways', await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
+    await shot(mp, 'attachments-phone.png');
+    await m.ctx.close();
+  }
+
   await ctx.close();
   await browser.close();
   server.close();

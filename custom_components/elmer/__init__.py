@@ -25,6 +25,7 @@ from .const import (
 )
 from . import schedule
 from .services import async_setup_services, async_unload_services
+from .attachments import async_setup_attachments
 from .store import ElmerStore
 from .websocket import async_register_websocket_api
 
@@ -77,6 +78,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         domain_data["_ws"] = True
 
     entry.async_on_unload(_async_watch_overdue(hass, store))
+    entry.async_on_unload(async_setup_attachments(hass, store))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     await async_setup_services(hass)

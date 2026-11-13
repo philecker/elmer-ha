@@ -1734,6 +1734,84 @@ a.btn { text-decoration: none; }
 }
 .linkfields .linkurl { font-family: var(--mono); font-size: calc(13px * var(--ui-scale)); }
 
+/* Attachments: a small tile per file — an icon for its kind and the format
+   under it — with the name below; the last tile adds one. */
+.attcard { padding: 12px; }
+.attgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, calc(72px * var(--ui-scale)));
+  justify-content: start;
+  gap: 12px 10px;
+}
+.att {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+}
+.att-face {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  width: calc(56px * var(--ui-scale));
+  height: calc(56px * var(--ui-scale));
+  border-radius: var(--r-md);
+  border: 1px solid var(--card-border);
+  background: var(--paper);
+  color: var(--ink-2);
+}
+.att-face b { font-size: calc(9.5px * var(--ui-scale)); font-weight: 600; letter-spacing: .08em; color: var(--ink-3); }
+.att:hover .att-face, .att:focus-visible .att-face { border-color: var(--accent); }
+.att:focus-visible { outline: none; }
+.att-name {
+  width: 100%;
+  font-size: calc(12px * var(--ui-scale));
+  line-height: 1.25;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.att-add .att-face { border-style: dashed; color: var(--accent); }
+.att-add input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.att-add.busy { cursor: progress; opacity: .7; }
+.att-add .att-name { color: var(--ink-2); }
+.att-hint { margin: 10px 2px 0; }
+/* The opened photo: hidden until it is signed, and an icon if it will not draw. */
+.att-img:not([src]) { visibility: hidden; }
+.att-fallback { display: none; }
+.att-img.failed { display: none; }
+.att-img.failed + .att-fallback { display: grid; place-items: center; gap: 6px; text-align: center; }
+.att-doc { display: grid; place-items: center; gap: 2px; color: var(--ink-2); }
+.att-doc b { font-size: calc(11px * var(--ui-scale)); letter-spacing: .08em; }
+.attview {
+  display: grid;
+  place-items: center;
+  min-height: calc(160px * var(--ui-scale));
+  max-height: 55vh;
+  margin-bottom: 10px;
+  border-radius: var(--r-md);
+  background: var(--paper);
+  border: 1px solid var(--card-border);
+  overflow: hidden;
+}
+.attview .att-big { max-width: 100%; max-height: 55vh; object-fit: contain; display: block; }
+.attview .att-big.failed { display: none; }
+.attview .att-fallback.big, .attview .att-doc.big { padding: 28px; color: var(--ink-3); }
+
 /* A supply typed into the routine form, before it exists. The part rows'
    card, holding a small form of its own. */
 .row.newpart {

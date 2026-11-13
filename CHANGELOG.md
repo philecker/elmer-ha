@@ -7,6 +7,21 @@ available is the body of the GitHub release, in the Marketplace as it was in
 HACS. This is here for anyone reading the repository, and the release bodies
 are written from it.
 
+## 1.12.0
+
+### Added
+
+- **Attachments on equipment and animals.** Photos (JPEG, PNG, WebP, HEIC)
+  and PDFs, up to 20 MB each and 50 per record, from an Attachments section at
+  the bottom of each page. Each shows as a small icon tile for its type; tap
+  one to see the photo, rename it, open it full size or delete it. PDFs
+  download.
+- The files are kept in `elmer/attachments` in your config folder, so Home
+  Assistant backups include them, and are served only to signed-in users
+  through links Home Assistant signs for an hour. Files nothing refers to any
+  more are cleared away on their own. The JSON export lists attachments but
+  does not include the files.
+
 ## 1.11.0
 
 ### Added

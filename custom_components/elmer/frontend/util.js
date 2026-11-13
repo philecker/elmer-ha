@@ -38,7 +38,7 @@ export function html(strings, ...values) {
    reduces every record to this shape on save and on load; the panel does it
    again on arrival, so neither half has to trust the other. Kept in step
    with LIST_FIELDS and _clean_record in store.py. */
-const LIST_FIELDS = new Set(['parts', 'medications', 'vaccinations', 'partsUsed', 'usedParts', 'months', 'clocks', 'links']);
+const LIST_FIELDS = new Set(['parts', 'medications', 'vaccinations', 'partsUsed', 'usedParts', 'months', 'clocks', 'links', 'attachments']);
 
 function plain(value) {
   if (value === null || value === undefined) return value;

@@ -248,11 +248,69 @@ def _weight(value: Any, unit: Any) -> tuple[Any, str | None]:
     )
 
 
+# --- attachments: the record side ------------------------------------------
+# The files themselves are attachments.py's. What a record holds about them is
+# here, because it is cleaned on every save and load like everything else.
+MAX_PER_RECORD = 50
+MAX_NAME = 120
+# What Elmer keeps, by the type its bytes show, and the extension it is
+# stored under. Anything else is refused.
+TYPES: dict[str, str] = {
+    "image/jpeg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "image/heic": "heic",
+    "application/pdf": "pdf",
+}
+# Photos open in the browser; a PDF downloads. A PDF can carry script of its
+# own, and opened inside Home Assistant's address it would be the one file
+# here that was not inert.
+INLINE = frozenset({"image/jpeg", "image/png", "image/webp", "image/heic"})
+
+ATTACHMENT_ID = re.compile(r"^[a-f0-9]{20}$")
+
+
+def clean_attachments(value: Any) -> list[dict[str, Any]]:
+    """An attachments list holding only entries Elmer could have written.
+
+    Used on every save and load, so an id that could reach outside the folder
+    or a type Elmer would not serve never gets as far as the file view.
+    """
+    out: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in value if isinstance(value, list) else []:
+        if not isinstance(item, dict):
+            continue
+        att_id = str(item.get("id") or "")
+        kind = item.get("type")
+        if not ATTACHMENT_ID.fullmatch(att_id) or kind not in TYPES or att_id in seen:
+            continue
+        seen.add(att_id)
+        try:
+            size = max(0, int(item.get("size") or 0))
+        except (TypeError, ValueError):
+            size = 0
+        try:
+            added = int(item.get("addedAt") or 0)
+        except (TypeError, ValueError):
+            added = 0
+        out.append(
+            {
+                "id": att_id,
+                "name": " ".join(str(item.get("name") or "").split())[:MAX_NAME] or ("Photo" if kind in INLINE else "Document"),
+                "type": kind,
+                "size": size,
+                "addedAt": added,
+            }
+        )
+    return out[:MAX_PER_RECORD]
+
+
 # The fields of a record that hold a list. Everything else on a record is one
 # plain value: text, a number, true or false, or nothing. "links" is the name
 # an older file gave the replacement-parts list, kept so it can be migrated.
 LIST_FIELDS = frozenset(
-    {"parts", "medications", "vaccinations", "partsUsed", "usedParts", "months", "clocks", "links"}
+    {"parts", "medications", "vaccinations", "partsUsed", "usedParts", "months", "clocks", "links", "attachments"}
 )
 
 
@@ -400,6 +458,7 @@ def normalize(raw: Any) -> dict[str, Any]:
             )
             item["medications"] = _medications(e.get("medications"))
             item["vaccinations"] = _vaccinations(e.get("vaccinations"))
+        item["attachments"] = clean_attachments(e.get("attachments"))
         equipment.append(item)
 
     tasks = []
@@ -730,6 +789,10 @@ class ElmerStore:
         # by one person from running as script in another person's panel.
         if kind in ("equipment.put", "routine.put", "part.put", "log.append"):
             p = _clean_record(p)
+        if kind == "equipment.put" and "attachments" in p:
+            # Only entries Elmer could have written: an id that stays inside
+            # the folder and a type it will serve. See attachments.py.
+            p["attachments"] = clean_attachments(p["attachments"])
         elif kind == "settings.put":
             p = _clean_settings(p)
         d = self.data
