@@ -864,7 +864,7 @@ export const CSS = `
   border-radius: 999px;
   background: var(--surface-3);
   color: var(--ink-2);
-  font-size: calc(10px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 700;
   letter-spacing: 0;
   font-variant-numeric: tabular-nums;
@@ -878,7 +878,7 @@ export const CSS = `
   color: var(--accent);
   min-width: 1.6em;
   height: 1.6em;
-  font-size: calc(10.5px * var(--ui-scale));
+  font-size: calc(11.5px * var(--ui-scale));
 }
 
 /* ---------- filter row ----------
@@ -957,12 +957,12 @@ export const CSS = `
 /* ---------- section label ---------- */
 
 .label {
-  font-size: calc(10px * var(--ui-scale));
+  font-size: calc(12.5px * var(--ui-scale));
   font-weight: 700;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--ink-3);
-  margin: 18px 2px 8px;
+  margin: 22px 2px 10px;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -973,6 +973,10 @@ export const CSS = `
    of the row and the trailing thing would sit against the text. */
 .label::after { content: ""; flex: 1; height: 1px; background: var(--line); order: 1; }
 .label .count, .label .seg { order: 2; }
+/* History's heading carries the range picker. At the larger heading size the
+   two no longer share a phone's width, so there the picker takes a row of its
+   own, full width, under the count. */
+.histlabel { flex-wrap: wrap; row-gap: 12px; white-space: nowrap; }
 .label:first-child { margin-top: 4px; }
 
 /* The month, under the year, sitting at the end of the curve. Deliberately
@@ -985,7 +989,7 @@ export const CSS = `
   gap: 7px;
   margin: 2px 2px 2px var(--indent, 22px);
   min-height: calc(18px * var(--ui-scale));
-  font-size: calc(9.5px * var(--ui-scale));
+  font-size: calc(11px * var(--ui-scale));
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -1734,62 +1738,67 @@ a.btn { text-decoration: none; }
 }
 .linkfields .linkurl { font-family: var(--mono); font-size: calc(13px * var(--ui-scale)); }
 
-/* Attachments: a small tile per file — an icon for its kind and the format
-   under it — with the name below; the last tile adds one. */
-.attcard { padding: 12px; }
-.attgrid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, calc(72px * var(--ui-scale)));
-  justify-content: start;
-  gap: 12px 10px;
-}
-.att {
+/* Attachments: Add is a button in the section heading, so it never moves,
+   and each file is a row — an icon for its kind, its whole name, and its
+   format, size and date. */
+.label .att-add {
+  order: 3;
   position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  min-height: calc(32px * var(--ui-scale));
+  padding: 0 12px 0 10px;
   gap: 5px;
-  min-width: 0;
-  padding: 0;
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
+  background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+  color: var(--accent);
+  font-size: calc(13px * var(--ui-scale));
+  letter-spacing: 0;
+  text-transform: none;
+}
+.label .att-add:hover { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
+.label .att-add:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.att-add input[type="file"] {
+  /* Reaches a little past the button above and below, so the press target
+     is a finger's height while the button stays heading-sized. */
+  position: absolute; inset: -7px 0; width: 100%; height: calc(100% + 14px);
+  opacity: 0; cursor: pointer; font-size: 0;
+}
+.att-add.busy { cursor: progress; opacity: .7; }
+.attcard { padding: 0; overflow: hidden; }
+.attlist { display: flex; flex-direction: column; }
+.att {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: calc(60px * var(--ui-scale));
+  padding: 10px 12px 10px 14px;
   border: 0;
   background: none;
   color: var(--ink);
   font: inherit;
-  text-align: center;
+  text-align: left;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
+.att + .att { border-top: 1px solid var(--line); }
+.att:hover { background: var(--surface-2); }
+.att:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .att-face {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  width: calc(56px * var(--ui-scale));
-  height: calc(56px * var(--ui-scale));
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: calc(40px * var(--ui-scale));
+  height: calc(40px * var(--ui-scale));
   border-radius: var(--r-md);
   border: 1px solid var(--card-border);
   background: var(--paper);
   color: var(--ink-2);
 }
-.att-face b { font-size: calc(9.5px * var(--ui-scale)); font-weight: 600; letter-spacing: .08em; color: var(--ink-3); }
-.att:hover .att-face, .att:focus-visible .att-face { border-color: var(--accent); }
-.att:focus-visible { outline: none; }
-.att-name {
-  width: 100%;
-  font-size: calc(12px * var(--ui-scale));
-  line-height: 1.25;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
-}
-.att-add .att-face { border-style: dashed; color: var(--accent); }
-.att-add input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
-.att-add.busy { cursor: progress; opacity: .7; }
-.att-add .att-name { color: var(--ink-2); }
-.att-hint { margin: 10px 2px 0; }
+.att-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.att-name { font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+.att-meta { font-size: calc(12px * var(--ui-scale)); color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.att-chev { flex: none; color: var(--ink-3); display: grid; }
+.att-hint { margin: 0; padding: 14px; }
 /* The opened photo: hidden until it is signed, and an icon if it will not draw. */
 .att-img:not([src]) { visibility: hidden; }
 .att-fallback { display: none; }
@@ -2137,6 +2146,10 @@ a.btn { text-decoration: none; }
 /* Below the desktop breakpoint everything comes up a notch. The sizes here
    were judged on a monitor at reading distance, where they are right; at the
    distance a phone is actually held they read small. */
+@media (max-width: 759px) {
+  .histlabel .seg { order: 3; flex: 1 1 100%; }
+  .histlabel .seg button { flex: 1 1 0; }
+}
 @media (max-width: 759px) {
   :host { --ui-base: 1.09; }
 

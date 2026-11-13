@@ -121,14 +121,15 @@ relabelling it.
 
 **Attachments.** The manual, the receipt, a photo of the rating plate, the
 rabies certificate: every piece of equipment and every animal has an
-**Attachments** section at the bottom of its page. Press **Add** to pick photos
-or PDFs — several at once, or straight from the camera on a phone — up to
-20 MB each and 50 on one record. Each one is a small tile — a photo or
-document icon with its format (JPG, PNG, PDF…) and its name — so a page with
-a dozen of them stays short, and nothing is downloaded until you open one.
-Tapping a tile opens a sheet with the photo itself, where you can rename it,
-open it full size, or delete it; a PDF downloads. A file keeps its own name unless it is one a camera made up
-(`IMG_4821.jpg`), in which case it is just "Photo" until you name it.
+**Attachments** section at the bottom of its page. Press **Add**, in the
+section's heading, to pick photos or PDFs — several at once, or straight from
+the camera on a phone — up to 20 MB each and 50 on one record. Each one is a
+row with a photo or document icon, its full name, and its format, size and
+date (PDF · 212 KB · 13 Nov 2026); nothing is downloaded until you open one.
+Tapping a row opens a sheet with the photo itself, where you can rename it,
+open it full size, or delete it; a PDF downloads. A file keeps its own name
+unless it is one a camera made up (`IMG_4821.jpg`), in which case it is just
+"Photo" until you name it.
 
 Elmer keeps JPEG, PNG, WebP and HEIC photos and PDFs, and checks the file
 itself rather than its name, so nothing else gets in by being renamed. HEIC is
@@ -137,7 +138,7 @@ but browsers that cannot draw it show a photo icon there instead — Open
 downloads it to view.
 
 <p>
-  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/attachments.png" alt="Attachments on a piece of equipment: an icon tile for each photo and PDF, and an Add tile" width="250">
+  <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/attachments.png" alt="Attachments on a piece of equipment: a row for each photo and PDF, and an Add button in the heading" width="250">
   <img src="https://raw.githubusercontent.com/philecker/elmer-ha/main/images/attachment.png" alt="A photo of a rating plate, opened to rename, open or delete" width="250">
 </p>
 

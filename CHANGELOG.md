@@ -7,6 +7,19 @@ available is the body of the GitHub release, in the Marketplace as it was in
 HACS. This is here for anyone reading the repository, and the release bodies
 are written from it.
 
+## 1.12.2
+
+### Changed
+
+- **Attachments are a list.** Each file is a row with its full name — however
+  long, it wraps rather than being cut off — and its format, size and date
+  underneath. Add is a button in the section's heading, beside a count, so it
+  stays in the same place however many files there are.
+- **Section headings are larger** throughout — Routines, Links, Attachments,
+  Appearance, the years in History and the rest — so they read as headings
+  rather than as small print. On a phone, History's range picker now has a
+  row of its own under the count.
+
 ## 1.12.1
 
 ### Fixed

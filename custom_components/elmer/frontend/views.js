@@ -542,8 +542,8 @@ export function equipmentDetail(state, id) {
 
 /* Photos and PDFs on a piece of equipment or an animal. The files are served
    by Home Assistant only to someone signed in, so an <img> cannot point at
-   one directly: each tile carries the path in data-att, and the panel swaps
-   in a link Home Assistant has signed (see _fillAttachments). */
+   one directly: the opened photo carries the path in data-att, and the panel
+   swaps in a link Home Assistant has signed (see _fillAttachments). */
 export const ATTACH_ACCEPT = 'image/jpeg,image/png,image/webp,image/heic,image/heif,.heic,.heif,application/pdf';
 export const ATTACH_MAX = 20 * 1024 * 1024;
 const ATTACH_IMAGES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/heic']);
@@ -563,33 +563,37 @@ const ATTACH_LABEL = {
   'image/jpeg': 'JPG', 'image/png': 'PNG', 'image/webp': 'WEBP', 'image/heic': 'HEIC', 'application/pdf': 'PDF',
 };
 
-/** One attachment in the section: an icon for its kind, the format, its name.
-    The file itself only loads once it is opened. */
-function attachmentTile(rec, a) {
+/** One attachment in the list: an icon for its kind, its whole name, and
+    what it is. The file itself only loads once it is opened. */
+function attachmentRow(state, rec, a) {
   const isImage = ATTACH_IMAGES.has(a.type);
-  return `<button class="att ${isImage ? 'att-photo' : 'att-pdf'}" data-act="open-attachment" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" type="button" aria-label="${esc(a.name)}">
-    <span class="att-face">${icon(isImage ? 'image' : 'document', 22)}<b>${ATTACH_LABEL[a.type] || ''}</b></span>
-    <span class="att-name">${esc(a.name)}</span>
+  const added = a.addedAt ? formatDay(new Date(a.addedAt).toISOString().slice(0, 10), state.computed.today) : '';
+  const meta = [ATTACH_LABEL[a.type] || '', sizeText(a.size), added].filter(Boolean).join(' · ');
+  return `<button class="att ${isImage ? 'att-photo' : 'att-pdf'}" data-act="open-attachment" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" type="button">
+    <span class="att-face" aria-hidden="true">${icon(isImage ? 'image' : 'document', 20)}</span>
+    <span class="att-text"><span class="att-name">${esc(a.name)}</span><span class="att-meta">${esc(meta)}</span></span>
+    <span class="att-chev" aria-hidden="true">${icon('chevron', 16)}</span>
   </button>`;
 }
 
-/** The section on an equipment or animal page: tiles, then a tile to add one. */
+/** The section on an equipment or animal page. Add sits in the heading, so
+    it stays put however many files there are; each file is a row with its
+    name in full. */
 export function attachmentsSection(state, rec) {
   const list = Array.isArray(rec.attachments) ? rec.attachments : [];
   const busy = state.uploading && state.uploading[rec.id];
-  return `<div class="label">Attachments</div>
+  return `<div class="label attlabel">Attachments${list.length ? `<span class="count">${list.length}</span>` : ''}
+      <label class="btn att-add${busy ? ' busy' : ''}">
+        <input type="file" accept="${ATTACH_ACCEPT}" multiple data-act="upload-attachment" data-record="${esc(rec.id)}" aria-label="Add a photo or PDF"${busy ? ' disabled' : ''}>
+        ${icon(busy ? 'upload' : 'plus', 16)}<span>${busy ? 'Adding…' : 'Add'}</span>
+      </label>
+    </div>
     <div class="card attcard">
-      <div class="attgrid">
-        ${list.map((a) => attachmentTile(rec, a)).join('')}
-        <label class="att att-add${busy ? ' busy' : ''}">
-          <input type="file" accept="${ATTACH_ACCEPT}" multiple data-act="upload-attachment" data-record="${esc(rec.id)}" aria-label="Add a photo or PDF"${busy ? ' disabled' : ''}>
-          <span class="att-face">${icon(busy ? 'upload' : 'plus', 22)}</span>
-          <span class="att-name">${busy ? 'Adding…' : 'Add'}</span>
-        </label>
-      </div>
-      ${list.length ? '' : `<div class="hint att-hint">${isAnimal(rec)
-    ? 'A vaccination record, adoption papers, a photo'
-    : 'The manual, a receipt, a photo of the rating plate'} — photos and PDFs up to 20 MB.</div>`}
+      ${list.length
+    ? `<div class="attlist">${list.map((a) => attachmentRow(state, rec, a)).join('')}</div>`
+    : `<div class="hint att-hint">${isAnimal(rec)
+      ? 'A vaccination record, adoption papers, a photo'
+      : 'The manual, a receipt, a photo of the rating plate'} — photos and PDFs up to 20 MB.</div>`}
     </div>`;
 }
 
@@ -819,7 +823,7 @@ export function historyView(state) {
       aria-pressed="${range[0] === key}">${label}</button>`)}
   </div>`;
 
-  const head = html`<div class="label">
+  const head = html`<div class="label histlabel">
     ${kept.length} ${raw(kept.length === 1 ? 'service' : 'services')} logged${raw(picker)}
   </div>`;
 

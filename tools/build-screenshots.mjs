@@ -202,10 +202,10 @@ async function attachmentScreens(dark) {
   const { ctx, page } = await open({ viewport: PHONE, dark });
   await page.click('.tab[data-value="equipment"]');
   await page.click('.row[data-id="eq1"]');
-  await page.waitForSelector('.attgrid');
+  await page.waitForSelector('.attlist');
   await page.$eval('.attcard', (n) => n.scrollIntoView({ block: 'end' }));
   await shot(page, `attachments${suffix}.png`);
-  await page.click('.attgrid .att[data-id="a0a0a0a0a0a0a0a0a0a1"]');
+  await page.click('.attlist .att[data-id="a0a0a0a0a0a0a0a0a0a1"]');
   await page.waitForFunction(() => { const i = document.querySelector('elmer-panel').shadowRoot.querySelector('.sheet img.att-big'); return i && i.complete && i.naturalWidth > 0; });
   await shot(page, `attachment${suffix}.png`);
   await ctx.close();
