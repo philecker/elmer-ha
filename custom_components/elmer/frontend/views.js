@@ -527,6 +527,8 @@ export function equipmentDetail(state, id) {
       <button class="btn" data-act="add-routine" data-id="${eq.id}">${raw(icon('plus', 16))}Add routine</button>
     </div>
 
+    ${raw(logSection(state, eq))}
+
     ${raw(linkRows.length ? `<div class="label">Links</div><div class="card">${linkRows.join('')}</div>` : '')}
 
     ${raw(attachmentsSection(state, eq))}
@@ -624,6 +626,143 @@ export function attachmentSheet(state, recordId, attId) {
     <div class="btnrow">
       <button class="btn" data-act="close" type="button">Close</button>
       <button class="btn" data-variant="primary" data-act="save-attachment" data-record="${esc(rec.id)}" data-id="${esc(a.id)}" type="button">Save</button>
+    </div>`;
+}
+
+/* --------------------------------------------------- service and care log --
+
+   History somebody writes by hand: a furnace repair, a vet visit, the
+   farrier. It is a history entry like a routine's — same list, same date,
+   cost and notes, shown in History — marked kind: 'entry' and with no
+   routine behind it, so it moves no dates and takes nothing off a shelf.
+   store.py's is_log_entry is the same test, and refuses to edit anything
+   else. One kind of record under two names: equipment keeps a Service Log,
+   an animal a Care Log, and an item in either is an entry. */
+
+/** Whether a history entry is a log entry rather than a routine's. */
+export function isLogEntry(l) {
+  return !!l && l.kind === 'entry' && !l.taskId;
+}
+
+/** What the log is called on this record's page. */
+export function logName(record) {
+  return isAnimal(record) ? 'Care Log' : 'Service Log';
+}
+
+/** The log an entry belongs to, by name — from what it is for while that is
+    still here, and from what it was when it was written once it is not. */
+function logNameOf(state, entry) {
+  const owner = ownerOf(state, entry.equipmentId);
+  if (owner) return logName(owner);
+  return entry.ownerKind === 'animal' ? 'Care Log' : 'Service Log';
+}
+
+/** A record's entries, newest first. */
+export function logEntriesFor(state, recordId) {
+  return state.log
+    .filter((l) => isLogEntry(l) && l.equipmentId === recordId)
+    .slice()
+    .sort((a, b) => String(b.doneOn || '').localeCompare(String(a.doneOn || ''))
+      || (Number(b.recordedAt) || 0) - (Number(a.recordedAt) || 0));
+}
+
+function logRow(state, l, showCost) {
+  const parts = String(l.doneOn || '').split('-');
+  const month = MONTHS[Number(parts[1]) - 1] || '';
+  const sub = [l.by, l.notes].filter(Boolean).join(' · ');
+  const cost = showCost ? costText(l.cost) : '';
+  return `<button class="logrow" type="button" data-act="entry" data-id="${esc(l.id)}">
+    <span class="logwhen"><b>${esc(dayOfMonth(l.doneOn))}</b><span>${esc(month)}${parts[0] ? ` ${esc(parts[0])}` : ''}</span></span>
+    <span class="logbody"><span class="title">${esc(l.taskName || 'Entry')}</span>${sub ? `<span class="sub">${esc(sub)}</span>` : ''}</span>
+    ${cost ? `<span class="cost">${esc(cost)}</span>` : ''}
+  </button>`;
+}
+
+/** The section on an equipment or animal page: Add sits in the heading,
+    the way Attachments' does, and the entries are a list under it. */
+export function logSection(state, rec) {
+  const list = logEntriesFor(state, rec.id);
+  const showCost = state.settings.showHistoryCost !== false;
+  const spend = showCost && list.length > 1 ? monthSpend(list) : '';
+  const name = logName(rec);
+  return `<div class="label loglabel">${esc(name)}${list.length ? `<span class="count">${list.length}</span>` : ''}
+      <button class="btn headbtn" type="button" data-act="add-entry" data-id="${esc(rec.id)}" aria-label="Add an entry to the ${esc(name)}">${icon('plus', 16)}<span>Add entry</span></button>
+    </div>
+    <div class="card logcard">
+      ${list.length
+    ? `${list.map((l) => logRow(state, l, showCost)).join('')}${spend
+      ? `<div class="logtotal"><span>${list.length} entries</span><span>${esc(spend)}</span></div>`
+      : ''}`
+    : `<div class="hint log-hint">${isAnimal(rec)
+      ? 'Vet visits, grooming, the farrier — anything done for them that is not a routine.'
+      : 'Repairs, inspections, a visit from the installer — anything done to it that is not a routine.'}</div>`}
+    </div>`;
+}
+
+/** Who has done this kind of thing before, to pick from as you type. */
+function bySuggestions(state, rec) {
+  const seen = new Set();
+  const out = [];
+  const add = (v) => {
+    const s = String(v || '').trim();
+    if (s && !seen.has(s.toLowerCase())) {
+      seen.add(s.toLowerCase());
+      out.push(s);
+    }
+  };
+  if (rec) {
+    add(isAnimal(rec) ? rec.vet : rec.purchasedFrom);
+    for (const l of logEntriesFor(state, rec.id)) add(l.by);
+  }
+  for (const l of state.log) if (isLogEntry(l)) add(l.by);
+  return out.slice(0, 30);
+}
+
+/**
+ * Add or change one entry. A new one starts on today, done by whoever did
+ * the last one for this record — or, the first time, by an animal's vet.
+ * Equipment's Purchased from is offered but not filled in: it is as often
+ * the shop it came from as anyone who would come and fix it.
+ */
+export function entryForm(state, entry, recordId) {
+  const e = entry || {};
+  const rec = ownerOf(state, e.equipmentId || recordId);
+  const animal = rec ? isAnimal(rec) : e.ownerKind === 'animal';
+  const last = rec ? logEntriesFor(state, rec.id).find((l) => l.by) : null;
+  const by = entry ? e.by || '' : (last ? last.by : (animal && rec && rec.vet) || '');
+  const options = bySuggestions(state, rec);
+  const owner = rec ? rec.name : e.equipmentName || '';
+  return html`${raw(owner ? `<dl class="kv" style="padding:4px 0 6px"><dt>${animal ? 'Animal' : 'Equipment'}</dt><dd>${esc(owner)}</dd></dl>` : '')}
+    <!-- In the order it is told: when, what for, who, what they did, and
+         what it cost. Date and cost are not paired in a row: a phone stacks
+         a pair, which put the cost second, ahead of what the visit was for. -->
+    <div class="field">
+      <label for="f-edate">Date</label>
+      <input id="f-edate" name="doneOn" type="date" value="${e.doneOn || state.computed.today}">
+    </div>
+    <div class="field">
+      <label for="f-etitle">What it was for</label>
+      <input id="f-etitle" name="title" value="${e.taskName || ''}" maxlength="200"
+        placeholder="${animal ? 'Limping, back left leg' : 'No heat, blower running'}" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="f-eby">Done by</label>
+      <input id="f-eby" name="by" value="${by}" maxlength="200" list="f-eby-list"
+        placeholder="${animal ? 'Elm Street Animal Clinic' : 'Midwest Heating & Air'}" autocomplete="off">
+      <datalist id="f-eby-list">${raw(options.map((o) => `<option value="${esc(o)}"></option>`).join(''))}</datalist>
+    </div>
+    <div class="field">
+      <label for="f-enotes">${animal ? 'What they found and did' : 'What was done'}</label>
+      <textarea id="f-enotes" name="notes">${e.notes || ''}</textarea>
+    </div>
+    <div class="field">
+      <label for="f-ecost">Cost</label>
+      <input id="f-ecost" name="cost" value="${e.cost || ''}" placeholder="optional" autocomplete="off">
+    </div>
+    <div class="btnrow">
+      <button class="btn" data-act="close">Cancel</button>
+      ${raw(e.id ? `<button class="btn" data-variant="danger" data-act="delete-entry" data-id="${esc(e.id)}" aria-label="Delete this entry">${icon('trash', 16)}</button>` : '')}
+      <button class="btn" data-variant="primary" data-act="save-entry" data-id="${esc(e.id || '')}" data-record="${esc(rec ? rec.id : e.equipmentId || '')}">Save</button>
     </div>`;
 }
 
@@ -798,7 +937,14 @@ export function partsView(state) {
 export const RANGES = [
   ['3m', '3 months', 92],
   ['12m', '12 months', 366],
-  ['all', 'All time', null],
+  ['all', 'All Time', null],
+];
+
+/** Which history: everything, routines marked done, or log entries. */
+export const HIST_KINDS = [
+  ['all', 'Everything'],
+  ['routines', 'Routines'],
+  ['entries', 'Log Entries'],
 ];
 
 export function historyView(state) {
@@ -806,14 +952,19 @@ export function historyView(state) {
     return html`<div class="scroll"><div class="pad">${raw(emptyState({
       ic: 'history',
       title: 'No history yet',
-      body: 'Every routine you mark done is recorded here, with what it used and what it cost.',
+      body: 'Every routine you mark done is recorded here, with what it used and what it cost — and every Service Log or Care Log entry.',
     }))}</div></div>`;
   }
 
   const range = RANGES.find(([key]) => key === state.range) || RANGES[RANGES.length - 1];
   const within = range[2];
+  // Which kind of history, offered only once there is a log entry to tell
+  // apart: before that, every entry is a routine's and the choice is empty.
+  const hasEntries = state.log.some(isLogEntry);
+  const kind = hasEntries ? (HIST_KINDS.find(([key]) => key === state.histKind) || HIST_KINDS[0]) : HIST_KINDS[0];
   const kept = state.log
     .filter((l) => within === null || daysBetween(l.doneOn, state.computed.today) <= within)
+    .filter((l) => kind[0] === 'all' || (kind[0] === 'entries') === isLogEntry(l))
     .slice()
     .sort((a, b) => String(b.doneOn || '').localeCompare(String(a.doneOn || '')))
     .slice(0, 300);
@@ -822,9 +973,16 @@ export function historyView(state) {
     ${RANGES.map(([key, label]) => html`<button data-act="range" data-value="${key}"
       aria-pressed="${range[0] === key}">${label}</button>`)}
   </div>`;
+  const kindPicker = hasEntries ? html`<div class="seg" role="group" aria-label="Which history">
+    ${HIST_KINDS.map(([key, label]) => html`<button data-act="hist-kind" data-value="${key}"
+      aria-pressed="${kind[0] === key}">${label}</button>`)}
+  </div>` : '';
 
+  const noun = kind[0] === 'entries'
+    ? (kept.length === 1 ? 'log entry' : 'log entries')
+    : (kept.length === 1 ? 'service logged' : 'services logged');
   const head = html`<div class="label histlabel">
-    ${kept.length} ${raw(kept.length === 1 ? 'service' : 'services')} logged${raw(picker)}
+    ${kept.length} ${noun}${raw(picker)}${raw(kindPicker)}
   </div>`;
 
   if (!kept.length) {
@@ -833,7 +991,9 @@ export function historyView(state) {
       ${raw(emptyState({
         ic: 'history',
         title: 'Nothing in that window',
-        body: 'Choose a longer stretch to see older entries.',
+        body: kind[0] === 'all'
+          ? 'Choose a longer stretch to see older entries.'
+          : 'Choose a longer stretch, or show everything.',
       }))}
     </div></div>`;
   }
@@ -875,17 +1035,22 @@ export function historyView(state) {
         // Everything that is not the money, on one line that wraps. It used
         // to be ellipsised on a single line with the cost buried in it, which
         // put the interesting half of every entry behind a tap.
+        const entry = isLogEntry(l);
         const bits = [];
         if (owner) bits.push(owner);
+        if (entry && l.by) bits.push(l.by);
         if (parts.length) bits.push(parts.join(', '));
         if (l.notes) bits.push(l.notes);
+        // Which log, at the head of the line: the title of an entry is
+        // whatever was typed, so without it a repair reads like a routine.
+        const tag = entry ? `<span class="tag logtag">${esc(logNameOf(state, l))}</span>` : '';
 
-        return html`<li class="tl" data-act="log" data-id="${l.id}" role="button" tabindex="0">
+        return html`<li class="tl" data-act="log" data-id="${l.id}" role="button" tabindex="0"${raw(entry ? ' data-entry' : '')}>
           <span class="dot" aria-hidden="true"></span>
           <time class="when" datetime="${l.doneOn || ''}">${dayOfMonth(l.doneOn)}</time>
           <div class="body">
-            <div class="title">${l.taskName}</div>
-            ${raw(bits.length ? `<div class="sub">${esc(bits.join(' · '))}</div>` : '')}
+            <div class="title">${l.taskName || 'Entry'}</div>
+            ${raw(bits.length || tag ? `<div class="sub">${tag}${esc(bits.join(' · '))}</div>` : '')}
           </div>
           ${raw(showCost ? `<span class="cost">${esc(costText(l.cost))}</span>` : '')}
         </li>`;
@@ -2283,6 +2448,8 @@ export function animalDetail(state, id) {
     <div class="btnrow">
       <button class="btn" data-act="add-routine" data-id="${a.id}">${raw(icon('plus', 16))}Add routine</button>
     </div>
+
+    ${raw(logSection(state, a))}
 
     ${raw(attachmentsSection(state, a))}
 

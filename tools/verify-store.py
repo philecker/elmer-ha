@@ -663,6 +663,92 @@ async def main() -> int:
     check("unknown routine returns None", await s.async_complete("nope"), None)
     check("unknown log returns None", await s.async_undo("nope"), None)
 
+    # --- Service Log and Care Log entries ---------------------------------
+    # History written by hand: a visit, a repair, a trip to the vet. The same
+    # list as a routine's history, marked as an entry and with no routine, so
+    # none of the machinery that keeps stock and dates honest applies to it —
+    # and none of it may be pointed at one by mistake.
+    log_before = [dict(l) for l in s.data["log"]]
+    t1_done = s.task("t1")["lastDone"]
+    stock_before = s.supply("s1")["quantity"]
+    visit = {
+        "id": "log_visit1", "kind": "entry", "equipmentId": "e1", "equipmentName": "Furnace",
+        "ownerKind": "equipment", "taskName": "No heat, blower running", "by": "Midwest Heating & Air",
+        "doneOn": "2026-11-09", "notes": "Igniter replaced.", "cost": "214.00",
+        "recordedAt": 1, "usedParts": [],
+    }
+    await s.async_apply([("log.append", visit)])
+    check("a log entry is kept like any history entry", s.data["log"][0]["id"], "log_visit1")
+    check("with every field it was given",
+          {k: s.data["log"][0].get(k) for k in visit}, visit)
+    check("is_log_entry knows one", store_mod.is_log_entry(s.data["log"][0]), True)
+    check("and knows a routine's is not one", store_mod.is_log_entry(e2), False)
+    check("an entry that names a routine is not one, whatever it says",
+          store_mod.is_log_entry({"kind": "entry", "taskId": "t1"}), False)
+    check("nor is one with no kind, however routine-less",
+          store_mod.is_log_entry({"id": "x", "taskName": "Lost"}), False)
+    check("adding one moves no routine", s.task("t1")["lastDone"], t1_done)
+    check("and takes nothing off the shelf", s.supply("s1")["quantity"], stock_before)
+
+    await s.async_apply([("log.put", {**visit, "taskName": "No heat", "cost": "198.00", "notes": "Igniter and flame sensor."})])
+    edited = next(l for l in s.data["log"] if l["id"] == "log_visit1")
+    check("log.put edits an entry in place", (edited["taskName"], edited["cost"], edited["notes"]),
+          ("No heat", "198.00", "Igniter and flame sensor."))
+    check("without adding a second", sum(1 for l in s.data["log"] if l["id"] == "log_visit1"), 1)
+    check("and keeps what the edit did not mention", edited["by"], "Midwest Heating & Air")
+
+    await s.async_apply([("log.put", {**visit, "taskName": ["<img src=x onerror=alert(1)>"]})])
+    edited = next(l for l in s.data["log"] if l["id"] == "log_visit1")
+    check("an edit is cleaned like any record: a list for text becomes text",
+          isinstance(edited["taskName"], str), True)
+
+    routine_entry = next(l for l in s.data["log"] if l["id"] == e2["id"])
+    snapshot = dict(routine_entry)
+    await s.async_apply([("log.put", {"id": e2["id"], "kind": "entry", "doneOn": "1999-01-01", "usedParts": [{"supplyId": "s1", "quantity": 50}]})])
+    check("log.put will not touch a routine's history entry, even told it is one",
+          next(l for l in s.data["log"] if l["id"] == e2["id"]), snapshot)
+    await s.async_apply([("log.put", {"id": "log_new", "taskId": "t1", "kind": "entry", "taskName": "Sneaky"})])
+    check("nor make a new entry that names a routine",
+          any(l["id"] == "log_new" for l in s.data["log"]), False)
+    await s.async_apply([("log.put", {"id": "log_new2", "taskName": "No kind"})])
+    check("nor one that does not say it is an entry",
+          any(l["id"] == "log_new2" for l in s.data["log"]), False)
+    await s.async_apply([("log.put", {"id": "log_new3", "kind": "entry", "equipmentId": "e1", "taskName": "Fresh", "doneOn": "2026-11-10"})])
+    check("log.put of a new entry adds it, newest first", s.data["log"][0]["id"], "log_new3")
+    count = len(s.data["log"])
+    await s.async_apply([("log.put", {"kind": "entry", "taskName": "No id"})])
+    check("nor one with no id, which nothing could ever edit or delete", len(s.data["log"]), count)
+
+    check("undo refuses a log entry: there is nothing to undo",
+          await s.async_undo("log_visit1"), None)
+    check("and the entry is still there", any(l["id"] == "log_visit1" for l in s.data["log"]), True)
+    check("and no routine moved", s.task("t1")["lastDone"], t1_done)
+
+    exported = json.loads(json.dumps(s.export()))
+    round_trip = store_mod.normalize(exported)
+    check("an entry survives export and import unchanged",
+          next(l for l in round_trip["log"] if l["id"] == "log_visit1"),
+          next(l for l in s.data["log"] if l["id"] == "log_visit1"))
+
+    await s.async_apply([("equipment.put", {"id": "e9", "name": "Water Heater"}),
+                         ("log.append", {**visit, "id": "log_wh", "equipmentId": "e9", "equipmentName": None})])
+    await s.async_apply([("equipment.delete", {"id": "e9"})])
+    gone = next(l for l in s.data["log"] if l["id"] == "log_wh")
+    check("deleting what an entry was for keeps the entry", gone["taskName"], "No heat, blower running")
+    check("under the name it had", gone["equipmentName"], "Water Heater")
+
+    await s.async_apply([("log.remove", {"id": "log_visit1"}), ("log.remove", {"id": "log_new3"}), ("log.remove", {"id": "log_wh"})])
+    check("log.remove deletes entries, leaving routine history as it was",
+          s.data["log"], log_before)
+
+    ws_src = open(os.path.join(PKG, "websocket.py")).read()
+    allowed = re.search(r"ALLOWED_OPS\s*=\s*\{(.*?)\}", ws_src, re.S).group(1)
+    check("the panel may send log.put", '"log.put"' in allowed, True)
+    svc_src = open(os.path.join(PKG, "services.py")).read()
+    undo_src = svc_src[svc_src.index("async def undo"):svc_src.index("async def adjust_stock")]
+    check("the undo service passes over log entries to the latest completion",
+          "is_log_entry" in undo_src and "log[0]" not in undo_src, True)
+
     # --- doing the job ends the snooze ------------------------------------
     # The clearest possible signal that "not now" is over. Set to None rather
     # than removed, because normalize guarantees the key is there and a

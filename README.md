@@ -119,6 +119,22 @@ follows Home Assistant's unit system until you choose. Each weight keeps the
 unit it was typed in, so switching converts every animal rather than
 relabelling it.
 
+**Service Log and Care Log.** For what is done that is not a routine: the
+furnace that quit in January, the installer's visit, a limp the vet looked at.
+Every piece of equipment has a **Service Log** on its page and every animal a
+**Care Log** — the same thing under the name that fits — after its routines.
+**Add entry**, in the section's heading, takes the date, what it was for, who
+did it, what they did and what it cost. Who did it starts as whoever did the
+last one for that record, or an animal's vet the first time, and offers
+anyone you have named before. The entries list newest first with a total
+under them; tap one to change or delete it.
+
+An entry is history like a routine's: it is in **History**, tagged with its
+log, and once there is one History can show everything, just routines, or
+just log entries. It moves no routine's date and uses no supplies, and
+`elmer.undo` passes over it to the last routine marked done. Delete the
+equipment or the animal and its entries stay in History under its name.
+
 **Attachments.** The manual, the receipt, a photo of the rating plate, the
 rabies certificate: every piece of equipment and every animal has an
 **Attachments** section at the bottom of its page. Press **Add**, in the

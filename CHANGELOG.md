@@ -7,6 +7,34 @@ available is the body of the GitHub release, in the Marketplace as it was in
 HACS. This is here for anyone reading the repository, and the release bodies
 are written from it.
 
+## 1.13.0
+
+### Added
+
+- **Service Log and Care Log.** A record of what is done that is not a
+  routine — a repair, an inspection, a vet visit, the farrier. Each piece of
+  equipment has a Service Log on its page and each animal a Care Log, after
+  its routines; **Add entry** in the heading takes the date, what it was for,
+  who did it, what they did and the cost. Who did it starts as whoever did the
+  last one, or the animal's vet the first time, and offers anyone named
+  before. Entries list newest first with a total, and open to be changed or
+  deleted.
+- Entries are in **History**, tagged Service Log or Care Log. Once there is
+  one, History can show everything, just routines, or just log entries.
+- An entry is a history entry marked as one, so it is in exports and imports
+  as it is. It moves no routine's date and uses no supplies. Deleting what it
+  was for keeps it in History under that name.
+
+### Changed
+
+- `elmer.undo` with no routine named undoes the latest routine marked done,
+  passing over log entries; Undo never deletes an entry.
+- On a phone, History's pickers are full-height buttons rather than 25px ones.
+- History's range picker says **All Time**, capitalized like the other
+  picker's **Log Entries**.
+- The Add button in the Attachments heading is 2px taller, to match Add entry
+  and clear the tap-target size on a phone.
+
 ## 1.12.2
 
 ### Changed

@@ -186,6 +186,17 @@ def is_animal(record: Any) -> bool:
     return isinstance(record, dict) and record.get("type") == "animal"
 
 
+def is_log_entry(entry: Any) -> bool:
+    """A Service Log or Care Log entry: history written by hand, not by a routine.
+
+    It is a history entry like any other — same list, same date, cost and
+    notes — marked as one and carrying no routine. Marked rather than inferred
+    from the missing routine, so an older entry whose routine id was lost is
+    never mistaken for one and edited out from under its stock.
+    """
+    return isinstance(entry, dict) and entry.get("kind") == "entry" and not entry.get("taskId")
+
+
 def _owner_names(raw: Any) -> dict[str, str]:
     """Each piece of equipment's or animal's name, by id."""
     if not isinstance(raw, dict):
@@ -787,7 +798,7 @@ class ElmerStore:
         # Every record and setting written from outside is reduced to plain
         # values first. See _clean_record: this is what keeps a record saved
         # by one person from running as script in another person's panel.
-        if kind in ("equipment.put", "routine.put", "part.put", "log.append"):
+        if kind in ("equipment.put", "routine.put", "part.put", "log.append", "log.put"):
             p = _clean_record(p)
         if kind == "equipment.put" and "attachments" in p:
             # Only entries Elmer could have written: an id that stays inside
@@ -850,6 +861,24 @@ class ElmerStore:
         elif kind == "log.append":
             if not any(l.get("id") == p.get("id") for l in d["log"]):
                 d["log"].insert(0, dict(p))
+        elif kind == "log.put":
+            # Editing a Service Log or Care Log entry — the history entries
+            # nobody's routine wrote, so nothing else hangs off them. A
+            # routine's entry is left alone: it records what its completion
+            # took off the shelf and what Undo puts back, and changing it after
+            # the fact would leave stock and history disagreeing. Either side
+            # of the patch saying it is a routine's is enough to refuse it.
+            if not is_log_entry(p) or not p.get("id"):
+                _LOGGER.debug("log.put refused for %s: not an entry, or no id", p.get("id"))
+                return
+            existing = next((l for l in d["log"] if l.get("id") == p.get("id")), None)
+            if existing is not None and not is_log_entry(existing):
+                _LOGGER.debug("log.put refused for a routine's history entry %s", p.get("id"))
+                return
+            if existing is None:
+                d["log"].insert(0, dict(p))
+            else:
+                existing.update(p)
         elif kind == "log.remove":
             d["log"] = [l for l in d["log"] if l.get("id") != p.get("id")]
 
@@ -937,6 +966,11 @@ class ElmerStore:
         """Reverse a completion, putting back exactly what it took."""
         entry = next((l for l in self.data["log"] if l.get("id") == log_id), None)
         if not entry:
+            return None
+        # A log entry is not a completion: there is no routine to wind back
+        # and nothing was taken off the shelf. Undo means nothing for one, so
+        # it is refused rather than quietly deleting what somebody typed.
+        if is_log_entry(entry):
             return None
         ops: list[tuple[str, dict]] = [
             ("routine.lastDone", {"id": entry.get("taskId"), "doneOn": entry.get("previousLastDone")})

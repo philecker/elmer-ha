@@ -2053,8 +2053,8 @@ async function main() {
     timeline.tabular);
   check('an entry carries no buttons of its own', timeline.actions, 0);
   check('the range picker offers three windows', timeline.ranges,
-    ['3 months', '12 months', 'All time']);
-  check('and opens on all of it', timeline.pressed, ['All time']);
+    ['3 months', '12 months', 'All Time']);
+  check('and opens on all of it', timeline.pressed, ['All Time']);
 
   // --- a month opens and closes on the same curve ------------------------
   // The turn off the heading and the foot under the last entry are one
@@ -5110,6 +5110,8 @@ async function main() {
       { kind: 'part.put', payload: { id: 'p1', name: [bomb('supply')], partNumber: [bomb('partno')] } },
       { kind: 'routine.put', payload: { id: 't1', name: [bomb('routine')], snoozedUntil: [bomb('snooze')] } },
       { kind: 'log.append', payload: { id: 'lx', taskId: 't1', equipmentId: 'eq1', taskName: [bomb('history')], notes: [bomb('notes')], doneOn: [bomb('doneon')], usedParts: [] } },
+      { kind: 'log.put', payload: { id: 'lent', kind: 'entry', equipmentId: 'eq1', equipmentName: [bomb('entryowner')], taskName: [bomb('entry')], by: [bomb('by')], notes: [bomb('entrynotes')], cost: [bomb('cost')], doneOn: [bomb('entrydate')], usedParts: [] } },
+      { kind: 'log.put', payload: { id: 'lent2', kind: 'entry', equipmentId: 'a1', taskName: bomb('entrytext'), by: bomb('bytext'), notes: bomb('notestext'), cost: '<b>9</b>', doneOn: '2026-01-02', usedParts: [] } },
       { kind: 'settings.put', payload: { cardsWide: [bomb('setting')] } },
     ]);
     const visit = [
@@ -5117,7 +5119,7 @@ async function main() {
       ['equipment', { kind: 'equipment', id: 'eq1' }], ['animals', { kind: 'animal', id: 'a1' }], ['parts', { kind: 'part', id: 'p1' }],
     ];
     for (const [tab, detail] of visit) await go(xp, tab, detail);
-    for (const sheet of [{ kind: 'equipment-form', id: 'eq1' }, { kind: 'animal-form', id: 'a1' }, { kind: 'routine-form', id: 't1' }, { kind: 'part-form', id: 'p1' }, { kind: 'log', id: 'lx' }]) {
+    for (const sheet of [{ kind: 'equipment-form', id: 'eq1' }, { kind: 'animal-form', id: 'a1' }, { kind: 'routine-form', id: 't1' }, { kind: 'part-form', id: 'p1' }, { kind: 'log', id: 'lx' }, { kind: 'entry-form', id: 'lent' }, { kind: 'entry-form', id: 'lent2' }, { kind: 'entry-form', equipmentId: 'eq1' }]) {
       await xp.evaluate((sh) => { const pnl = document.querySelector('elmer-panel'); pnl._openSheet(sh); }, sheet).catch(() => {});
       await xp.waitForTimeout(250);
       await xp.evaluate(() => { const pnl = document.querySelector('elmer-panel'); pnl._closeSheet && pnl._closeSheet(); });
@@ -5344,6 +5346,284 @@ async function main() {
     check('and the page does not scroll sideways', await mp.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true);
     await shot(mp, 'attachments-phone.png');
     await m.ctx.close();
+  }
+
+  // --- the Service Log and the Care Log -------------------------------------
+  // History written by hand: a repair, a vet visit, the farrier. One kind of
+  // record under two names — a Service Log on equipment, a Care Log on an
+  // animal — kept in the history list as an entry with no routine, so it
+  // shows in History and moves no dates and no stock.
+  {
+    const L = await open({ viewport: DESKTOP, animals: true });
+    const lp = L.page;
+    lp.on('dialog', (d) => d.accept());
+    const go = (tab, detail) => lp.evaluate(([t, d]) => {
+      const panel = document.querySelector('elmer-panel');
+      panel.tab = t; panel.detail = d; panel.sheet = null; panel.toast = null; panel._render();
+    }, [tab, detail]);
+    const data = () => lp.evaluate(() => JSON.parse(JSON.stringify(window.__panel.data)));
+    const entries = async (rid) => (await data()).log.filter((l) => l.kind === 'entry' && (!rid || l.equipmentId === rid));
+    const toastText = async () => { await lp.waitForSelector('.toast'); return (await lp.textContent('.toast span')).trim(); };
+    const sheetTitle = async () => { await lp.waitForSelector('.sheet h2'); return (await lp.textContent('.sheet h2')).trim(); };
+    const rows = () => lp.$$eval('.logcard .logrow', (ns) => ns.map((n) => ({
+      title: n.querySelector('.title').textContent.trim(),
+      sub: (n.querySelector('.sub') || { textContent: '' }).textContent.trim(),
+      cost: (n.querySelector('.cost') || { textContent: '' }).textContent.trim(),
+      when: [...n.querySelector('.logwhen').childNodes].map((c) => c.textContent.trim()).filter(Boolean).join(' '),
+    })));
+    const fill = async (values) => {
+      for (const [name, value] of Object.entries(values)) {
+        await lp.fill(`.sheet [name="${name}"]`, value);
+      }
+    };
+    const save = async () => {
+      await lp.click('.sheet [data-act="save-entry"]');
+      await lp.waitForTimeout(120);
+    };
+    const before = await data();
+    const today = before.computed.today;
+    const ago = (n) => { const d = new Date(`${today}T12:00:00`); d.setDate(d.getDate() - n); return d.toISOString().slice(0, 10); };
+
+    // The section, on equipment and on an animal.
+    await go('equipment', { kind: 'equipment', id: 'eq1' });
+    await lp.waitForSelector('.loglabel');
+    check('equipment keeps a Service Log', (await lp.$eval('.loglabel', (n) => n.firstChild.textContent.trim())), 'Service Log');
+    ok('with Add entry in its heading', await lp.$('.loglabel button.headbtn[data-act="add-entry"][data-id="eq1"]') !== null);
+    check('the button says what it does', (await lp.textContent('.loglabel .headbtn')).trim(), 'Add entry');
+    check('and an empty log says what goes in it, with no count',
+      [await lp.$('.loglabel .count') === null, ((await lp.textContent('.logcard .hint')) || '').trim().startsWith('Repairs, inspections')], [true, true]);
+    check('it sits after Routines and before Links and Attachments',
+      await lp.evaluate(() => {
+        const root = document.querySelector('elmer-panel').shadowRoot;
+        return [...root.querySelectorAll('.pad > .label')].map((n) => n.firstChild.textContent.trim().split(/\s/)[0]);
+      }), ['Notes', 'Routines', 'Service', 'Links', 'Attachments']);
+    await go('animals', { kind: 'animal', id: 'a1' });
+    await lp.waitForSelector('.loglabel');
+    check('an animal keeps a Care Log', (await lp.$eval('.loglabel', (n) => n.firstChild.textContent.trim())), 'Care Log');
+    ok('and its empty log says what goes in it', ((await lp.textContent('.logcard .hint')) || '').trim().startsWith('Vet visits'));
+
+    // Adding one to the Service Log.
+    await go('equipment', { kind: 'equipment', id: 'eq1' });
+    await lp.click('.loglabel [data-act="add-entry"]');
+    check('Add entry opens a form named for the log', await sheetTitle(), 'Add to the Service Log');
+    check('it starts on today, with who did it left for you to say',
+      await lp.$eval('.sheet', (s) => [s.querySelector('[name="doneOn"]').value, s.querySelector('[name="by"]').value]), [today, '']);
+    check('offering whoever it was bought from',
+      await lp.$$eval('.sheet datalist option', (ns) => ns.map((n) => n.value)), ['Midwest Heating & Air']);
+    check('every field has a label', await lp.$$eval('.sheet input, .sheet textarea', (ns) => ns.filter((n) => !n.id || !n.getRootNode().querySelector(`label[for="${n.id}"]`)).length), 0);
+    await save();
+    check('saving with nothing said about it is refused, and says why',
+      [await toastText(), await lp.$('.sheet') !== null, (await entries()).length], ['Say what it was for first.', true, 0]);
+    await fill({ doneOn: ago(5), title: 'No heat, blower running', by: 'Midwest Heating & Air', notes: 'Igniter replaced.', cost: '214.00' });
+    await save();
+    check('saved, it says where it went', await toastText(), 'Added to the Service Log');
+    check('and the sheet closes', await lp.$('.sheet'), null);
+    const [first] = await entries('eq1');
+    check('it is a history entry marked as an entry, with no routine and nothing used',
+      [first.kind, 'taskId' in first, first.equipmentId, first.ownerKind, first.usedParts, first.taskName, first.by, first.doneOn, first.cost, first.notes],
+      ['entry', false, 'eq1', 'equipment', [], 'No heat, blower running', 'Midwest Heating & Air', ago(5), '214.00', 'Igniter replaced.']);
+    const after = await data();
+    check('no routine moved', after.tasks.map((t) => [t.id, t.lastDone]), before.tasks.map((t) => [t.id, t.lastDone]));
+    check('and nothing came off a shelf', after.supplies.map((s) => [s.id, s.quantity]), before.supplies.map((s) => [s.id, s.quantity]));
+    await lp.waitForSelector('.logcard .logrow');
+    const shown = await rows();
+    check('the page lists it: what it was for, who and what, and the cost',
+      shown.map(({ title, sub, cost }) => [title, sub, cost]), [['No heat, blower running', 'Midwest Heating & Air · Igniter replaced.', '214.00']]);
+    const [y, m, d] = ago(5).split('-');
+    check('under its date', shown[0].when, `${Number(d)} ${['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][Number(m) - 1]} ${y}`);
+    check('and the heading counts it', (await lp.textContent('.loglabel .count')).trim(), '1');
+
+    // A second, older one.
+    await lp.click('.loglabel [data-act="add-entry"]');
+    check('the next one starts with whoever did the last', await lp.$eval('.sheet [name="by"]', (n) => n.value), 'Midwest Heating & Air');
+    await fill({ doneOn: ago(400), title: 'AC Not Cooling', cost: '$189.00', notes: '' });
+    await save();
+    check('entries list newest first', (await rows()).map((r) => r.title), ['No heat, blower running', 'AC Not Cooling']);
+    check('what was typed is kept as typed', (await entries('eq1')).map((l) => l.taskName).sort(), ['AC Not Cooling', 'No heat, blower running']);
+    check('with a total under them once there are two', await lp.$eval('.logtotal', (n) => [...n.children].map((c) => c.textContent.trim()).join(' ')), '2 entries $403.00');
+    check('which costs the history switch hides',
+      await (async () => {
+        await lp.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [{ kind: 'settings.put', payload: { showHistoryCost: false } }] }));
+        await lp.waitForTimeout(80);
+        const hidden = [await lp.$('.logcard .cost'), await lp.$('.logtotal')];
+        await lp.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [{ kind: 'settings.put', payload: { showHistoryCost: true } }] }));
+        await lp.waitForTimeout(80);
+        return hidden;
+      })(), [null, null]);
+    await shot(lp, 'service-log-desktop.png');
+
+    // Changing one.
+    await lp.click('.logcard .logrow:first-child');
+    check('an entry opens where it can be changed', await sheetTitle(), 'Edit Service Log entry');
+    check('with what it holds',
+      await lp.$eval('.sheet', (s) => ['doneOn', 'title', 'by', 'notes', 'cost'].map((k) => s.querySelector(`[name="${k}"]`).value)),
+      [ago(5), 'No heat, blower running', 'Midwest Heating & Air', 'Igniter replaced.', '214.00']);
+    ok('and a way to delete it, named for a screen reader', await lp.$('.sheet [data-act="delete-entry"][aria-label="Delete this entry"]') !== null);
+    const id1 = first.id;
+    await fill({ title: 'No heat', cost: '198.00', notes: 'Igniter and flame sensor.' });
+    await save();
+    check('saving an edit says so', await toastText(), 'Entry saved');
+    const edited = (await entries('eq1')).find((l) => l.id === id1);
+    check('and changes it in place', [edited.taskName, edited.cost, edited.notes, edited.recordedAt === first.recordedAt, (await entries('eq1')).length],
+      ['No heat', '198.00', 'Igniter and flame sensor.', true, 2]);
+
+    // In History.
+    await go('history', null);
+    await lp.waitForSelector('.timeline .tl[data-entry]');
+    const hist = await lp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const segs = [...root.querySelectorAll('.histlabel .seg')];
+      return {
+        kinds: segs[1] ? [...segs[1].querySelectorAll('button')].map((b) => [b.textContent.trim(), b.getAttribute('aria-pressed')]) : null,
+        tagged: [...root.querySelectorAll('.tl[data-entry]')].map((n) => [n.querySelector('.title').textContent.trim(), n.querySelector('.logtag').textContent.trim()]),
+        routineTags: root.querySelectorAll('.tl:not([data-entry]) .logtag').length,
+        total: root.querySelectorAll('.tl').length,
+      };
+    });
+    check('History offers everything, routines or log entries, once there is an entry',
+      hist.kinds, [['Everything', 'true'], ['Routines', 'false'], ['Log Entries', 'false']]);
+    check('each entry is tagged with its log', hist.tagged.sort(), [['AC Not Cooling', 'Service Log'], ['No heat', 'Service Log']]);
+    check('and a routine\'s history is not', hist.routineTags, 0);
+    await lp.click('.histlabel [data-act="hist-kind"][data-value="entries"]');
+    await lp.waitForTimeout(80);
+    check('Log entries shows only those',
+      await lp.$$eval('.tl', (ns) => ns.map((n) => n.hasAttribute('data-entry'))), [true, true]);
+    check('counted as log entries', (await lp.$eval('.histlabel', (n) => n.firstChild.textContent.trim())), '2 log entries');
+    await lp.click('.histlabel [data-act="hist-kind"][data-value="routines"]');
+    await lp.waitForTimeout(80);
+    check('Routines shows only theirs', await lp.$$eval('.tl', (ns) => ns.filter((n) => n.hasAttribute('data-entry')).length), 0);
+    check('every one of them', await lp.$$eval('.tl', (ns) => ns.length), hist.total - 2);
+    await lp.click('.histlabel [data-act="hist-kind"][data-value="all"]');
+    await lp.waitForTimeout(80);
+    await lp.click('.tl[data-entry] .title');
+    check('an entry opened from History opens its form, not a routine\'s Undo',
+      [await sheetTitle(), await lp.$('.sheet [data-act="undo"]')], ['Edit Service Log entry', null]);
+    await lp.click('.sheet [data-act="close"]');
+    await lp.click('.tl:not([data-entry]) .title');
+    check('a routine\'s still opens its history entry, with Undo',
+      [await sheetTitle(), await lp.$('.sheet [data-act="undo"]') !== null], ['History entry', true]);
+    await lp.click('.sheet [data-act="close"]');
+    const undone = await lp.evaluate((lid) => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/undo', logId: lid }).then(() => 'undone', (e) => e.code), id1);
+    check('Undo will not take a log entry', [undone, (await entries('eq1')).length], ['not_found', 2]);
+    await shot(lp, 'history-log-desktop.png');
+
+    // The Care Log: the vet is who it starts with.
+    await go('animals', { kind: 'animal', id: 'a1' });
+    await lp.click('.loglabel [data-act="add-entry"]');
+    check('a Care Log entry is added under that name', await sheetTitle(), 'Add to the Care Log');
+    check('starting with the vet', await lp.$eval('.sheet [name="by"]', (n) => n.value), 'Elm Street Animal Clinic');
+    check('and asking what they found', (await lp.textContent('.sheet label[for="f-enotes"]')).trim(), 'What they found and did');
+    await fill({ title: 'Limping, back left leg', by: 'Dr. Patel, Elm Street', notes: 'Soft tissue. Rest a week.', cost: '96' });
+    await save();
+    check('saved to the Care Log', await toastText(), 'Added to the Care Log');
+    check('marked as an animal\'s', (await entries('a1'))[0].ownerKind, 'animal');
+    await lp.click('.loglabel [data-act="add-entry"]');
+    check('the next starts with who saw them last, not the clinic', await lp.$eval('.sheet [name="by"]', (n) => n.value), 'Dr. Patel, Elm Street');
+    await lp.click('.sheet [data-act="close"]');
+
+    // An entry outlives what it was for, under the name it had.
+    await lp.evaluate(() => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [{ kind: 'equipment.delete', payload: { id: 'a1' } }] }));
+    await go('history', null);
+    await lp.waitForSelector('.tl[data-entry]');
+    check('deleting the animal keeps its Care Log in History, under its name',
+      await lp.$$eval('.tl[data-entry]', (ns) => ns.filter((n) => n.querySelector('.title').textContent.includes('Limping'))
+        .map((n) => [n.querySelector('.logtag').textContent.trim(), n.querySelector('.sub').textContent.includes('Biscuit')])), [['Care Log', true]]);
+    await lp.click('.tl[data-entry] .title >> text=Limping, back left leg');
+    check('and it can still be opened and changed', await sheetTitle(), 'Edit Care Log entry');
+    await lp.click('.sheet [data-act="close"]');
+
+    // Deleting.
+    await go('equipment', { kind: 'equipment', id: 'eq1' });
+    await lp.click('.logcard .logrow:first-child');
+    await lp.click('.sheet [data-act="delete-entry"]');
+    await lp.waitForTimeout(120);
+    check('deleting asks, then says so', await toastText(), 'Entry deleted');
+    check('and the entry is gone', (await entries('eq1')).map((l) => l.taskName), ['AC Not Cooling']);
+    check('and the total with it, one entry being its own total', await lp.$('.logtotal'), null);
+    for (const l of await entries()) {
+      await lp.evaluate((lid) => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops: [{ kind: 'log.remove', payload: { id: lid } }] }), l.id);
+    }
+    await go('history', null);
+    await lp.waitForSelector('.histlabel');
+    check('with no entries left, History stops offering to tell them apart',
+      await lp.$$eval('.histlabel .seg', (ns) => ns.length), 1);
+    await L.ctx.close();
+
+    // On a phone: the targets, the width, and how it reads.
+    const P = await open({ narrow: true, viewport: PHONE, animals: true });
+    const pp = P.page;
+    await pp.evaluate((ops) => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops }), [
+      { kind: 'log.put', payload: { id: 'log_p1', kind: 'entry', equipmentId: 'eq1', equipmentName: 'Furnace / Air Conditioner', ownerKind: 'equipment', taskName: 'No heat, blower running', by: 'Midwest Heating & Air', doneOn: ago(5), notes: 'Igniter replaced, flame sensor cleaned. Said the inducer motor is getting loud and to watch it over the winter.', cost: '214.00', usedParts: [] } },
+      { kind: 'log.put', payload: { id: 'log_p2', kind: 'entry', equipmentId: 'eq1', equipmentName: 'Furnace / Air Conditioner', ownerKind: 'equipment', taskName: 'AC not cooling', by: 'Midwest Heating & Air', doneOn: ago(400), notes: 'Refrigerant topped up, no leak found.', cost: '189.00', usedParts: [] } },
+      { kind: 'log.put', payload: { id: 'log_p3', kind: 'entry', equipmentId: 'a1', equipmentName: 'Biscuit', ownerKind: 'animal', taskName: 'Ear infection', by: 'Elm Street Animal Clinic', doneOn: ago(8), notes: 'Drops twice a day for ten days.', cost: '96.00', usedParts: [] } },
+    ]);
+    const pgo = (tab, detail) => pp.evaluate(([t, d]) => {
+      const panel = document.querySelector('elmer-panel');
+      panel.tab = t; panel.detail = d; panel.sheet = null; panel._render();
+    }, [tab, detail]);
+    const smallOnes = () => pp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const out = [];
+      for (const b of root.querySelectorAll('.loglabel button, .logrow, .sheet button, .histlabel button')) {
+        const r = b.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        if (r.height < 36 || r.width < 30) out.push(`${b.className || b.tagName} ${Math.round(r.width)}x${Math.round(r.height)}`);
+      }
+      return out;
+    });
+    const sideways = () => pp.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const app = root.querySelector('.app');
+      const card = root.querySelector('.logcard');
+      const spill = card ? [...card.querySelectorAll('.logrow, .logtotal')].filter((n) => n.getBoundingClientRect().right > card.getBoundingClientRect().right + 0.5).length : 0;
+      return app.scrollWidth - app.clientWidth + spill;
+    });
+    await pgo('equipment', { kind: 'equipment', id: 'eq1' });
+    await pp.waitForSelector('.logcard .logrow');
+    await pp.$eval('.logcard', (n) => n.scrollIntoView({ block: 'center' }));
+    check('no undersized tap targets in the log on a phone', await smallOnes(), []);
+    check('nothing in it runs off the side', await sideways(), 0);
+    const wraps = await pp.$eval('.logrow .sub', (n) => n.getBoundingClientRect().height > parseFloat(getComputedStyle(n).lineHeight) * 1.5);
+    ok('a long note wraps rather than being cut off', wraps);
+    check('the month and year sit on one line under the day, on every row',
+      await pp.$$eval('.logwhen > span', (ns) => ns.every((n) => n.getBoundingClientRect().height < parseFloat(getComputedStyle(n).fontSize) * 2)), true);
+    await shot(pp, 'service-log-phone.png');
+    await pp.click('.logcard .logrow:first-child');
+    await pp.waitForSelector('.sheet [name="title"]');
+    check('no undersized tap targets in its form', await smallOnes(), []);
+    await shot(pp, 'entry-sheet-phone.png');
+    await pp.click('.sheet [data-act="close"]');
+    await pgo('history', null);
+    await pp.waitForSelector('.tl[data-entry]');
+    check('no undersized tap targets in History\'s pickers', await smallOnes(), []);
+    await pp.$eval('.scroll', (n) => { n.scrollTop = 0; });
+    check('and History does not run off the side with both of them', await sideways(), 0);
+    await shot(pp, 'history-log-phone.png');
+    await pgo('animals', { kind: 'animal', id: 'a1' });
+    await pp.waitForSelector('.logcard .logrow');
+    await pp.$eval('.logcard', (n) => n.scrollIntoView({ block: 'center' }));
+    await shot(pp, 'care-log-phone.png');
+    await P.ctx.close();
+
+    const D = await open({ narrow: true, viewport: PHONE, dark: true, animals: true });
+    await D.page.evaluate((ops) => window.__panel._hass.connection.sendMessagePromise({ type: 'elmer/apply', ops }), [
+      { kind: 'log.put', payload: { id: 'log_d1', kind: 'entry', equipmentId: 'eq1', ownerKind: 'equipment', taskName: 'No heat, blower running', by: 'Midwest Heating & Air', doneOn: ago(5), notes: 'Igniter replaced.', cost: '214.00', usedParts: [] } },
+    ]);
+    await D.page.evaluate(() => { const p = window.__panel; p.tab = 'equipment'; p.detail = { kind: 'equipment', id: 'eq1' }; p._render(); });
+    await D.page.waitForSelector('.logcard .logrow');
+    await D.page.$eval('.logcard', (n) => n.scrollIntoView({ block: 'center' }));
+    const contrast = await D.page.evaluate(() => {
+      const root = document.querySelector('elmer-panel').shadowRoot;
+      const pick = (sel) => { const n = root.querySelector(sel); return getComputedStyle(n).color; };
+      const bg = getComputedStyle(root.querySelector('.logcard')).backgroundColor;
+      return { sub: pick('.logrow .sub'), when: pick('.logwhen'), bg };
+    });
+    for (const [what, color] of [['the line under an entry', contrast.sub], ['its month and year', contrast.when]]) {
+      const ratio = contrastRatio(color, contrast.bg);
+      ok(`${what} is legible on a dark theme`, ratio >= 4.5, `${ratio.toFixed(2)}:1`);
+    }
+    await shot(D.page, 'service-log-phone-dark.png');
+    await D.ctx.close();
   }
 
   await ctx.close();

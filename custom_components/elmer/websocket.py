@@ -45,6 +45,7 @@ ALLOWED_OPS = {
     "part.delete",
     "part.adjust",
     "log.append",
+    "log.put",
     "log.remove",
     "settings.put",
 }

@@ -1741,10 +1741,13 @@ a.btn { text-decoration: none; }
 /* Attachments: Add is a button in the section heading, so it never moves,
    and each file is a row — an icon for its kind, its whole name, and its
    format, size and date. */
-.label .att-add {
+.label .att-add,
+.label .headbtn {
   order: 3;
   position: relative;
-  min-height: calc(32px * var(--ui-scale));
+  /* 34, which a phone's larger scale takes past the 36px a tap target needs
+     — the heading's button is a button, and is measured as one. */
+  min-height: calc(34px * var(--ui-scale));
   padding: 0 12px 0 10px;
   gap: 5px;
   border-color: color-mix(in srgb, var(--accent) 55%, var(--line-strong));
@@ -1754,8 +1757,13 @@ a.btn { text-decoration: none; }
   letter-spacing: 0;
   text-transform: none;
 }
-.label .att-add:hover { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
-.label .att-add:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.label .att-add:hover,
+.label .headbtn:hover { background: color-mix(in srgb, var(--accent) 20%, var(--surface)); }
+.label .att-add:focus-within,
+.label .headbtn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The same finger-height press target the file field gives Add a photo:
+   a sliver of the button above and below, without making it taller. */
+.label .headbtn::before { content: ""; position: absolute; inset: -7px 0; }
 .att-add input[type="file"] {
   /* Reaches a little past the button above and below, so the press target
      is a finger's height while the button stays heading-sized. */
@@ -1798,7 +1806,7 @@ a.btn { text-decoration: none; }
 .att-name { font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .att-meta { font-size: calc(12px * var(--ui-scale)); color: var(--ink-3); font-variant-numeric: tabular-nums; }
 .att-chev { flex: none; color: var(--ink-3); display: grid; }
-.att-hint { margin: 0; padding: 14px; }
+.att-hint, .log-hint { margin: 0; padding: 14px; }
 /* The opened photo: hidden until it is signed, and an icon if it will not draw. */
 .att-img:not([src]) { visibility: hidden; }
 .att-fallback { display: none; }
@@ -1820,6 +1828,79 @@ a.btn { text-decoration: none; }
 .attview .att-big { max-width: 100%; max-height: 55vh; object-fit: contain; display: block; }
 .attview .att-big.failed { display: none; }
 .attview .att-fallback.big, .attview .att-doc.big { padding: 28px; color: var(--ink-3); }
+
+/* The Service Log and Care Log: the attachment list's rows, with the date
+   where the icon sits — the day large, the month and year under it, since an
+   entry is found by when it happened — and the cost in a column of its own,
+   the way History sets it. */
+.logcard { padding: 0; overflow: hidden; }
+.logrow {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  min-height: calc(56px * var(--ui-scale));
+  padding: 10px 14px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.logrow + .logrow { border-top: 1px solid var(--line); }
+.logrow:hover { background: var(--surface-2); }
+.logrow:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* The month and year stay on one line under the day, however wide "Nov"
+   is next to "Oct" — wrapping one and not the other made the rows ragged. */
+.logwhen {
+  flex: none;
+  width: calc(62px * var(--ui-scale));
+  white-space: nowrap;
+  display: flex;
+  flex-direction: column;
+  font-size: calc(11.5px * var(--ui-scale));
+  line-height: 1.25;
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.logwhen b {
+  font-size: calc(17px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--ink);
+}
+.logbody { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-top: 2px; }
+.logbody .title { font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
+/* Who did it and what they did, which is the whole point of the entry, so it
+   wraps rather than being cut off. */
+.logbody .sub {
+  font-size: calc(12.5px * var(--ui-scale));
+  line-height: 1.45;
+  color: var(--ink-3);
+  overflow-wrap: anywhere;
+}
+.logrow .cost {
+  flex: none;
+  padding-top: 3px;
+  font-size: calc(13px * var(--ui-scale));
+  font-weight: 600;
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+}
+.logtotal {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  font-size: calc(12.5px * var(--ui-scale));
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.logtotal span:last-child { font-weight: 700; color: var(--ink); }
+/* Which log an entry in History came from, ahead of who it was for. */
+.tl .logtag { margin-right: 6px; vertical-align: 1px; padding: 1px 6px; }
 
 /* A supply typed into the routine form, before it exists. The part rows'
    card, holding a small form of its own. */
@@ -2148,7 +2229,9 @@ a.btn { text-decoration: none; }
    distance a phone is actually held they read small. */
 @media (max-width: 759px) {
   .histlabel .seg { order: 3; flex: 1 1 100%; }
-  .histlabel .seg button { flex: 1 1 0; }
+  /* Full-width rows of their own here, so they can be a finger's height:
+     at the desktop's size they were 25px, too small to hit reliably. */
+  .histlabel .seg button { flex: 1 1 0; min-height: 36px; }
 }
 @media (max-width: 759px) {
   :host { --ui-base: 1.09; }

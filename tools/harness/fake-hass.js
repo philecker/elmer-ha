@@ -435,6 +435,14 @@ function applyOp(kind, p) {
     if (s) s.quantity = Math.max(0, (Number(s.quantity) || 0) + Number(p.delta));
   } else if (kind === 'log.append') {
     if (!data.log.some((l) => l.id === p.id)) data.log.unshift(p);
+  } else if (kind === 'log.put') {
+    // Mirrors the store: only a Service Log or Care Log entry can be edited,
+    // never a routine's history, on either side of the patch.
+    const isEntry = (l) => l && l.kind === 'entry' && !l.taskId;
+    const existing = data.log.find((l) => l.id === p.id);
+    if (!isEntry(p) || (existing && !isEntry(existing))) return;
+    if (existing) Object.assign(existing, p);
+    else data.log.unshift({ ...p });
   } else if (kind === 'log.remove') data.log = data.log.filter((l) => l.id !== p.id);
   else if (kind === 'settings.put') Object.assign(data.settings, p);
 }
@@ -660,7 +668,9 @@ const connection = {
     }
     if (msg.type === 'elmer/undo') {
       const entry = data.log.find((l) => l.id === msg.logId);
-      if (!entry) throw { code: 'not_found', message: 'No such history entry' };
+      // Mirrors the store: a log entry is not a completion, so there is
+      // nothing to undo.
+      if (!entry || (entry.kind === 'entry' && !entry.taskId)) throw { code: 'not_found', message: 'No such history entry' };
       applyOp('routine.lastDone', { id: entry.taskId, doneOn: entry.previousLastDone });
       for (const u of entry.usedParts || []) applyOp('part.adjust', { id: u.supplyId, delta: u.quantity });
       applyOp('log.remove', { id: msg.logId });
@@ -723,7 +733,7 @@ panel.hass = {
   user: { is_admin: true, name: 'Phil' },
 };
 panel.narrow = params.get('narrow') === '1';
-panel.panel = { config: { version: '1.12.2' } };
+panel.panel = { config: { version: '1.13.0' } };
 document.body.appendChild(panel);
 
 // Handles the panel's request to open Home Assistant's sidebar, which proves

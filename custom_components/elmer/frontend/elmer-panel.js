@@ -24,6 +24,7 @@ import {
   LISTS, SPECIES, builtInFor, animalIcon, weightUnitOf, weightField, parseWeight,
   partRow, partOptions, newPartCard, linkRow, pairRow, groupForm, routineActions,
   attachmentSheet, attachmentPath, ATTACH_MAX,
+  entryForm, isLogEntry, logName,
 } from './views.js';
 
 const TABS = [
@@ -279,6 +280,7 @@ class ElmerPanel extends HTMLElement {
     this.filter = 'all';
     this.queries = {};    // the search text, one per tab
     this.range = 'all';   // how far back the history list reaches
+    this.histKind = 'all'; // which history: everything, routines, or log entries
     this.detail = null;     // { kind, id } — equipment detail replaces the list
     this.sheet = null;      // { kind, id, title } — the modal
     this.busy = {};         // routine ids with a completion in flight
@@ -588,6 +590,7 @@ class ElmerPanel extends HTMLElement {
       filter: this.filter,
       query: this.query,
       range: this.range,
+      histKind: this.histKind,
       // Which routine is showing its snooze durations. Panel state, not
       // stored: nothing has been decided until a duration is picked.
       snoozing: this.snoozing || null,
@@ -893,6 +896,17 @@ class ElmerPanel extends HTMLElement {
       }
       case 'log':
         return { title: 'History entry', body: logDetail(state, s.id) };
+      case 'entry-form': {
+        // An entry to change, or a new one for the record it was added from.
+        const entry = s.id ? state.log.find((l) => l.id === s.id && isLogEntry(l)) : null;
+        const owner = (entry && entry.equipmentId) || s.equipmentId;
+        const rec = this.data.equipment.find((e) => e.id === owner);
+        const name = rec ? logName(rec) : (entry && entry.ownerKind === 'animal' ? 'Care Log' : 'Service Log');
+        return {
+          title: entry ? `Edit ${name} entry` : `Add to the ${name}`,
+          body: entryForm(state, entry, s.equipmentId),
+        };
+      }
       case 'attachment': {
         const rec = this.data.equipment.find((e) => e.id === s.equipmentId);
         const att = rec && (rec.attachments || []).find((x) => x.id === s.id);
@@ -1240,8 +1254,28 @@ class ElmerPanel extends HTMLElement {
       case 'edit-part':
         this._openSheet({ kind: 'part-form', id });
         return;
-      case 'log':
-        this._openSheet({ kind: 'log', id });
+      case 'log': {
+        // A log entry in History opens where it can be changed; a routine's
+        // opens its history entry, with Undo.
+        const l = this.data.log.find((x) => x.id === id);
+        this._openSheet(isLogEntry(l) ? { kind: 'entry-form', id } : { kind: 'log', id });
+        return;
+      }
+      case 'entry':
+        this._openSheet({ kind: 'entry-form', id });
+        return;
+      case 'add-entry':
+        this._openSheet({ kind: 'entry-form', equipmentId: id });
+        return;
+      case 'save-entry':
+        this._saveEntry(id, el.dataset.record);
+        return;
+      case 'delete-entry':
+        this._confirmDelete('log.remove', id, 'Entry deleted');
+        return;
+      case 'hist-kind':
+        this.histKind = el.dataset.value;
+        this._render();
         return;
       case 'open-attachment':
         this._openSheet({ kind: 'attachment', id, equipmentId: el.dataset.record });
@@ -2044,6 +2078,41 @@ class ElmerPanel extends HTMLElement {
       cost: f.cost || '',
       used,
     });
+  }
+
+  /**
+   * Save a Service Log or Care Log entry. A history entry like any other, so
+   * History shows it, but marked as one and with no routine: store.py will
+   * edit only entries marked so, which keeps a routine's history — and the
+   * stock its Undo puts back — out of reach of this form.
+   */
+  async _saveEntry(id, recordId) {
+    const f = this._fields();
+    const title = (f.title || '').trim();
+    if (!title) return this._flash('Say what it was for first.', 'error');
+    const existing = id ? this.data.log.find((l) => l.id === id && isLogEntry(l)) : null;
+    const owner = (existing && existing.equipmentId) || recordId;
+    const rec = this.data.equipment.find((e) => e.id === owner);
+    if (!existing && !rec) return this._flash('That is gone.', 'error');
+    const record = {
+      ...(existing || {}),
+      id: existing ? existing.id : uid('log'),
+      kind: 'entry',
+      equipmentId: owner,
+      equipmentName: rec ? rec.name || null : (existing && existing.equipmentName) || null,
+      ownerKind: rec ? (isAnimal(rec) ? 'animal' : 'equipment') : (existing && existing.ownerKind) || 'equipment',
+      taskName: title,
+      by: (f.by || '').trim(),
+      doneOn: f.doneOn || todayIso(),
+      notes: (f.notes || '').trim(),
+      cost: (f.cost || '').trim(),
+      recordedAt: existing ? existing.recordedAt || Date.now() : Date.now(),
+      usedParts: [],
+    };
+    delete record.taskId;
+    if (!(await this._apply([{ kind: 'log.put', payload: record }]))) return;
+    this._closeSheet();
+    this._flash(existing ? 'Entry saved' : `Added to the ${rec ? logName(rec) : 'log'}`);
   }
 
   async _deleteEquipment(id) {

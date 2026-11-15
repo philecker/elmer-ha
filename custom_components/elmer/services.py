@@ -29,7 +29,7 @@ from .const import (
     SERVICE_IMPORT,
     SERVICE_UNDO,
 )
-from .store import ElmerStore
+from .store import ElmerStore, is_log_entry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -152,9 +152,12 @@ async def async_setup_services(hass: HomeAssistant) -> None:
                     f"{task.get('name')!r} has nothing recorded to undo"
                 )
         else:
-            if not log:
+            # The latest completion, which is not always the latest entry: a
+            # Service Log or Care Log entry is history somebody typed, not a
+            # routine marked done, and undoing one would just delete it.
+            entry = next((l for l in log if not is_log_entry(l)), None)
+            if not entry:
                 raise ServiceValidationError("There is no history to undo")
-            entry = log[0]
         await store.async_undo(entry["id"])
 
     async def adjust_stock(call: ServiceCall) -> None:
